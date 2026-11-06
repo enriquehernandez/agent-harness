@@ -1,0 +1,60 @@
+[project]
+name = "agent-harness"
+version = "0.1.0"
+description = "Agent Harness agnóstico: MCP, Tool Calling, Permisos y TUI."
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+    # Núcleo del agente y utilidades
+    "python-dotenv",
+    "pydantic-settings",
+    "httpx",
+    # LLM Abstracto (usamos OpenAI SDK como base compatible con OpenRouter/Groq, etc.)
+    "openai",
+    "langchain-openai", # Si decides usar LangChain para los LLMs, aunque el harness sea propio
+    # MCP (Model Context Protocol) - Cliente
+    "mcp",
+    # TUI (Interfaz de Usuario en Terminal)
+    "prompt_toolkit",
+    "rich",
+    # Herramientas locales (ej. para read_file/write_file)
+    "pathlib", # Es parte de la stdlib, pero lo listamos por claridad conceptual
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "tomlscript",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+# Mantenemos tu configuración de cobertura y reporte
+addopts = "--cov=app --cov-report=term-missing --cov-report=html --cov-report=xml --junitxml=junit.xml -o junit_family=legacy"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.tomlscript]
+# Scripts de desarrollo
+dev = "uv run python -m app.main" # Asumiendo que main.py lanza la TUI
+test = "uv run pytest tests/ --cov=app --cov-report=term-missing"
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    '^\s*\.\.\.\s*$',
+    '@abstractmethod',
+    '^\s*return self\._max_tokens$',
+    '^\s*return len\(text\) // 4$'
+]

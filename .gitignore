@@ -1,0 +1,61 @@
+# ==========================================
+# Entornos y Python
+# ==========================================
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+uv.lock
+
+# ==========================================
+# Variables de Entorno (¡CRÍTICO!)
+# ==========================================
+.env
+.env.*
+!.env.example
+
+# ==========================================
+# Testing y Cobertura (Pytest / Coverage)
+# ==========================================
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+junit.xml
+.tox/
+.nox/
+
+# ==========================================
+# Herramientas de desarrollo (uv, ruff, etc)
+# ==========================================
+.uv/
+# uv.lock SÍ se debe subir para asegurar que todos usen las mismas versiones
+
+# ==========================================
+# IDEs y Editores
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ==========================================
+# Base de datos local y otros archivos temporales
+# ==========================================
+chroma_db/
+*.sqlite3
+*.log

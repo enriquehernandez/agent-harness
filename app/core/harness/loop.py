@@ -35,6 +35,7 @@ class AgentLoop:
         self,
         user_input: str,
         context: ContextManager | None = None,
+        verbose: bool = False,
     ) -> LoopResult:
         ctx = context or ContextManager()
         ctx.add_user(user_input)
@@ -44,7 +45,7 @@ class AgentLoop:
 
         for step in range(1, self.max_iterations + 1):
             # 🔥 NUEVO: Verificar y compactar contexto antes de llamar al LLM
-            await ctx.maybe_compact(self.llm)
+            await ctx.maybe_compact(self.llm, verbose=verbose)
 
             response: LLMResponse = await self.llm.chat(
                 messages=ctx.get_messages(),

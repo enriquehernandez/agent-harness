@@ -1,15 +1,14 @@
 import asyncio
 import json
 from pathlib import Path
-import pyperclip
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal, Center, VerticalScroll
-from textual.widgets import Input, Static, LoadingIndicator, Markdown
+from textual.widgets import Input, Static, LoadingIndicator, Markdown, Button, ListView, ListItem, Label
 from textual.widgets._markdown import MarkdownFence
-from textual.widgets import Button
 from textual import work
 from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList
+from rich.syntax import Syntax
 
 from app.core.llm import get_llm
 from app.core.harness import AgentLoop, ToolRegistry, ContextManager
@@ -19,51 +18,19 @@ from app.tools import register_core_tools
 from app.tui.commands import handle_command
 from app.mcp.client import MCPClient
 from app.core.config import settings
-from app.core.logger import logger
+from app.core.logger import logger, get_debug_events
 from app.tools.memory import SUMMARY_FILE
+# 🔥 Importamos el modal de detalle
+from app.tui.debug_screen import DebugDetailScreen
 
 # ==========================================
-# MARKDOWN PERSONALIZADO CON BOTÓN DE COPIAR
+# MARKDOWN PERSONALIZADO
 # ==========================================
-
-
-class CopyableMarkdownFence(MarkdownFence):
-    """Bloque de código con botón de copiar."""
-
-    def compose(self) -> ComposeResult:
-        yield from super().compose()
-        # El botón se añadirá dinámicamente en on_mount
-
-    async def on_mount(self) -> None:
-        # Añadimos el botón como un hijo del bloque
-        btn = Button("📋", id=f"copy-{id(self)}",
-                     classes="copy-btn", variant="default")
-        await self.mount(btn)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id and event.button.id.startswith("copy-"):
-            try:
-                # En algunas versiones de Textual el código está en self.code
-                pyperclip.copy(self.code)
-                event.button.label = "✅"
-                self.set_timer(1.5, lambda: setattr(
-                    event.button, "label", "📋"))
-            except Exception as e:
-                event.button.label = "❌"
 
 
 class CopiableMarkdown(Markdown):
-    """Markdown que usa bloques de código con botón de copiar."""
-
     def get_fence(self, code: str, language: str | None = None) -> MarkdownFence:
-        return CopyableMarkdownFence(code, language)
-
-
-class CopiableMarkdown(Markdown):
-    """Un widget Markdown que usa bloques de código con botón de copiar."""
-
-    def get_fence(self, code: str, language: str | None = None) -> MarkdownFence:
-        return CopyableMarkdownFence(code, language)
+        return MarkdownFence(code, language)
 
 # ==========================================
 # MODAL DE PERMISOS
@@ -154,6 +121,7 @@ class AgentHarnessApp(App):
         ("ctrl+q", "quit", "Salir"),
         ("ctrl+l", "clear_chat", "Limpiar Chat"),
         ("ctrl+u", "clear_input", "Limpiar Input"),
+        ("f1", "toggle_debug", "Toggle Debug Panel"),  # 🔥 F1 para mostrar/ocultar
     ]
 
     CSS = """
@@ -161,7 +129,6 @@ class AgentHarnessApp(App):
         background: #0d1117;
     }
     
-    /* TÍTULO */
     #header-container {
         height: 4;
         align: center middle; 
@@ -178,9 +145,14 @@ class AgentHarnessApp(App):
         text-align: center;
     }
 
-    /* CHAT */
-    #chat-container {
+    /* CONTENEDOR PRINCIPAL DIVIDIDO */
+    #main-content {
         height: 1fr;
+    }
+
+    /* CHAT (IZQUIERDA) */
+    #chat-container {
+        width: 1fr;
         padding: 1 2;
     }
     #chat-scroll {
@@ -216,27 +188,38 @@ class AgentHarnessApp(App):
         color: #58a6ff;
         padding: 0 1;
     }
-    
-    /* BOTÓN DE COPIAR EN BLOQUES DE CÓDIGO */
-    .copy-btn {
-        dock: right;
-        width: 5;
-        height: 1;
-        margin-top: 1;
-        margin-right: 1;
-        background: #21262d;
-        border: round #30363d;
-        color: #8b949e;
-        padding: 0;
-        min-width: 5;
+
+    /* PANEL DEBUG (DERECHA) */
+    #debug-panel {
+        width: 50%;
+        border-left: solid #30363d;
+        background: #161b22;
+        display: none; /* Oculto por defecto */
+        padding: 1;
     }
     
-    .copy-btn:hover {
+    #debug-header {
+        height: 3;
+        content-align: center middle;
+        text-style: bold;
         color: #58a6ff;
-        background: #30363d;
+        border-bottom: solid #30363d;
+        margin-bottom: 1;
     }
 
-    /* INPUT */
+    #debug-list {
+        height: 1fr;
+        background: transparent;
+    }
+
+    .debug-item {
+        padding: 0 1;
+    }
+    .debug-item:hover {
+        background: #21262d;
+    }
+
+    /* INPUT (ABAJO) */
     #input-container {
         dock: bottom; 
         height: 5; 
@@ -267,15 +250,23 @@ class AgentHarnessApp(App):
         self.mcp_clients = []
         self.loop_agent = None
         self.attached_files = []
+        self.debug_mode = False
+        self.verbose_mode = False
 
     def compose(self) -> ComposeResult:
         with Center(id="header-container"):
             yield Static("📊 Iniciando...", id="dashboard")
 
-        with Vertical(id="chat-container"):
-            with VerticalScroll(id="chat-scroll"):
-                pass
-            yield LoadingIndicator(id="loading-indicator")
+        with Horizontal(id="main-content"):
+            with Vertical(id="chat-container"):
+                with VerticalScroll(id="chat-scroll"):
+                    pass
+                yield LoadingIndicator(id="loading-indicator")
+
+            # 🔥 PANEL DE DEBUG OCULTO POR DEFECTO
+            with Vertical(id="debug-panel"):
+                yield Label("🪲 Panel de Debug", id="debug-header")
+                yield ListView(id="debug-list")
 
         with Vertical(id="input-container"):
             yield Input(placeholder="Escribe tu mensaje... (Ctrl+U para limpiar)", id="input-box")
@@ -285,8 +276,20 @@ class AgentHarnessApp(App):
         await self.escribir_en_chat("🤖 Agent Harness iniciado. Escribe /help para ver comandos.", tipo="system")
 
         comandos_disponibles = [
-            "/help", "/shortcuts", "/model", "/tokens",
-            "/compact", "/clear", "/debug", "/permissions", "/quit"
+            "/help",
+            "/shortcuts",
+            "/model",
+            "/provider",
+            "/tools",
+            "/subagents",
+            "/tokens",
+            "/compact",
+            "/verbose",
+            "/clear",
+            "/debug",
+            "/permissions",
+            "/quit",
+            "/exit"
         ]
 
         input_box = self.query_one("#input-box", Input)
@@ -361,18 +364,57 @@ class AgentHarnessApp(App):
         )
 
     async def escribir_en_chat(self, texto: str, tipo: str = "agent"):
-        scroll = self.query_one("#chat-scroll", VerticalScroll)
+        try:
+            scroll = self.query_one("#chat-scroll", VerticalScroll)
+            if tipo == "user":
+                widget = Static(f"👤 **Tú:**\n{texto}",
+                                classes="message-user", markup=True)
+            elif tipo == "system":
+                widget = Static(texto, classes="message-system", markup=True)
+            else:
+                widget = CopiableMarkdown(texto, classes="message-agent")
 
-        if tipo == "user":
-            widget = Static(f"👤 **Tú:**\n{texto}",
-                            classes="message-user", markup=True)
-        elif tipo == "system":
-            widget = Static(texto, classes="message-system", markup=True)
+            await scroll.mount(widget)
+            scroll.scroll_end(animate=False)
+        except Exception:
+            pass
+
+    # 🔥 ACCIÓN PARA ABRIR/CERRAR EL PANEL DE DEBUG
+    async def action_toggle_debug(self) -> None:
+        self.debug_mode = not self.debug_mode
+        panel = self.query_one("#debug-panel")
+
+        if self.debug_mode:
+            panel.display = True
+            await self._refrescar_lista_debug()
+            self.query_one("#debug-list", ListView).focus()
         else:
-            widget = CopiableMarkdown(texto, classes="message-agent")
+            panel.display = False
+            self.query_one("#input-box", Input).focus()
 
-        await scroll.mount(widget)
-        scroll.scroll_end(animate=False)
+    async def _refrescar_lista_debug(self):
+        list_view = self.query_one("#debug-list", ListView)
+        await list_view.clear()
+
+        events = get_debug_events()
+        if not events:
+            list_view.append(ListItem(Label("No hay eventos aún.")))
+            return
+
+        for idx, log in enumerate(events):
+            summary = f"#{idx+1} {log['timestamp']} • {log['type']} • {log['summary'][:50]}..."
+            list_view.append(ListItem(Label(summary), id=f"log-{idx}"))
+
+    # 🔥 AL SELECCIONAR UN EVENTO, ABRIMOS EL MODAL DE DETALLE
+    async def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if not event.item.id or not event.item.id.startswith("log-"):
+            return
+
+        idx = int(event.item.id.split("-")[1])
+        events = get_debug_events()
+        if idx < len(events):
+            log = events[idx]
+            await self.push_screen(DebugDetailScreen(title=log['summary'], payload=log['payload']))
 
     async def pedir_permiso_textual(self, tool_name: str, signature: str, args: dict, diff_text: str | None = None) -> str:
         args_str = ""
@@ -395,6 +437,13 @@ class AgentHarnessApp(App):
         except asyncio.TimeoutError:
             result = "n"
 
+        if result == "y":
+            await self.escribir_en_chat(f"✅ Permiso **concedido** para ejecutar: `{signature}`", tipo="system")
+        elif result == "a":
+            await self.escribir_en_chat(f"✅ Permiso **concedido permanentemente** para ejecutar: `{signature}`", tipo="system")
+        else:
+            await self.escribir_en_chat(f"❌ Permiso **denegado** para ejecutar: `{signature}`", tipo="system")
+
         self.query_one("#input-box", Input).focus()
         return result
 
@@ -411,16 +460,15 @@ class AgentHarnessApp(App):
             return
 
         self.actualizar_dashboard("Pensando...")
-
         texto_mostrar = user_input if len(
             user_input) < 300 else user_input[:300] + "..."
         await self.escribir_en_chat(texto_mostrar, tipo="user")
-
         loading.display = True
 
         try:
             result = await asyncio.wait_for(
-                self.loop_agent.run(user_input, context=self.ctx),
+                self.loop_agent.run(user_input, context=self.ctx, verbose=getattr(
+                    self, 'verbose_mode', False)),
                 timeout=120.0
             )
 
@@ -441,15 +489,15 @@ class AgentHarnessApp(App):
         finally:
             loading.display = False
             self.query_one("#input-box", Input).focus()
+            # 🔥 Si el panel está abierto, lo refrescamos
+            if self.debug_mode:
+                await self._refrescar_lista_debug()
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         user_text = event.value.strip()
-
         if not user_text and not self.attached_files:
             return
-
         event.input.value = ""
-
         mensaje_final = user_text
         if self.attached_files:
             archivos_str = ", ".join([f"`{f}`" for f in self.attached_files])
@@ -457,9 +505,7 @@ class AgentHarnessApp(App):
                 mensaje_final = f"{user_text}\n\n[Archivos adjuntos para revisar: {archivos_str}]"
             else:
                 mensaje_final = f"[Por favor, revisa estos archivos: {archivos_str}]"
-
             self.attached_files = []
-
         self.procesar_entrada(mensaje_final)
 
     async def on_paste(self, event) -> None:
@@ -500,6 +546,24 @@ class AgentHarnessApp(App):
         input_box = self.query_one("#input-box", Input)
         input_box.value = ""
         input_box.focus()
+
+    async def toggle_debug_panel(self, show: bool) -> None:
+        """Abre o cierra el panel de debug."""
+        panel = self.query_one("#debug-panel")
+        if show:
+            panel.display = True
+            await self._refrescar_lista_debug()
+        else:
+            panel.display = False
+            self.query_one("#input-box", Input).focus()
+
+    def clear_debug_events(self) -> None:
+        """Limpia los eventos del logger y refresca la lista."""
+        from app.core.logger import debug_collector
+        debug_collector.events.clear()
+        # Refrescamos la lista si el panel está abierto
+        if self.debug_mode:
+            asyncio.create_task(self._refrescar_lista_debug())
 
     async def on_unmount(self) -> None:
         for client in reversed(self.mcp_clients):

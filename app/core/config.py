@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # Seguridad
     LOG_LEVEL: str = "INFO"
 
+    # 🔥 Prompt Caching
+    ENABLE_PROMPT_CACHING: bool = True
+
     # Configuración de Pydantic para leer el archivo .env
     model_config = SettingsConfigDict(
         env_file=".env",

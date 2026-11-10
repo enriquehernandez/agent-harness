@@ -36,21 +36,14 @@ class SummarizationStrategy(CompactionStrategy):
         system_msg = messages[0] if messages[0]["role"] == "system" else None
         start_idx = 1 if system_msg else 0
 
-        # 🔥 Usamos el índice seguro en lugar de un corte ciego
-        safe_split = self._find_safe_split_index(messages)
-
-        # Si el punto seguro es antes del system prompt, no podemos compactar
-        if safe_split <= start_idx:
-            return messages
-
-        recent_msgs = messages[safe_split:]
-        old_msgs = messages[start_idx:safe_split]
+        recent_msgs = messages[-self.keep_last_n:]
+        old_msgs = messages[start_idx:-self.keep_last_n]
 
         if not old_msgs:
             return messages
 
         summary_prompt = [
-            {"role": "system", "content": "Eres un asistente que resume conversaciones. Sé conciso y mantén los hechos clave, decisiones y herramientas usadas."},
+            {"role": "system", "content": "Eres un asistente que resume conversaciones. Sé conciso."},
             {"role": "user", "content": f"Resume la siguiente conversación:\n\n{old_msgs}"}
         ]
 
@@ -71,3 +64,32 @@ class SummarizationStrategy(CompactionStrategy):
 
         new_messages.extend(recent_msgs)
         return new_messages
+
+# 🔥 NUEVA ESTRATEGIA: Sliding Window (Descartar los más viejos)
+
+
+class SlidingWindowStrategy(CompactionStrategy):
+    def __init__(self, keep_last_n: int = 6):
+        self.keep_last_n = keep_last_n
+
+    async def compact(self, messages: list[dict[str, Any]], llm: BaseLLM) -> list[dict[str, Any]]:
+        if len(messages) <= self.keep_last_n + 1:
+            return messages
+
+        # Mantenemos el system prompt original y los últimos N mensajes
+        system_msg = messages[0] if messages[0]["role"] == "system" else None
+        recent_msgs = messages[-self.keep_last_n:]
+
+        new_messages = []
+        if system_msg:
+            new_messages.append(system_msg)
+        new_messages.extend(recent_msgs)
+
+        return new_messages
+
+# 🔥 NUEVA ESTRATEGIA: None (No hacer nada)
+
+
+class NoneStrategy(CompactionStrategy):
+    async def compact(self, messages: list[dict[str, Any]], llm: BaseLLM) -> list[dict[str, Any]]:
+        return messages

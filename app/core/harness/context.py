@@ -1,7 +1,7 @@
 import json
 from typing import Any
 from ..llm.base import BaseLLM
-from .compaction import CompactionStrategy, SummarizationStrategy
+from .compaction import CompactionStrategy, NoneStrategy, SlidingWindowStrategy, SummarizationStrategy
 
 
 class ContextManager:
@@ -61,8 +61,21 @@ class ContextManager:
         system = self.messages[0] if self.messages and self.messages[0]["role"] == "system" else None
         self.messages = [system] if system else []
 
-    async def maybe_compact(self, llm: BaseLLM) -> bool:
-        """Si se supera el 80% del contexto, compacta. Devuelve True si compactó."""
+    def set_strategy(self, strategy_name: str) -> str:
+        """Cambia la estrategia de compactación y devuelve su nombre."""
+        name = strategy_name.lower()
+        if name == "sliding":
+            self.strategy = SlidingWindowStrategy()
+            return "Sliding Window"
+        elif name == "none":
+            self.strategy = NoneStrategy()
+            return "None"
+        else:
+            self.strategy = SummarizationStrategy()
+            return "Summarization"
+
+    async def maybe_compact(self, llm: BaseLLM, verbose: bool = False) -> bool:
+        """Si se supera el 80% del contexto, compacta."""
         estimated = self.estimate_tokens()
         limit = llm.max_context_window
 
@@ -71,6 +84,13 @@ class ContextManager:
             return True
         return False
 
-    async def force_compact(self, llm: BaseLLM) -> None:
-        """Fuerza la compactación (usado por el comando /compact)."""
+    async def force_compact(self, llm: BaseLLM, verbose: bool = False) -> str | None:
+        """Fuerza la compactación y devuelve el resumen si verbose está activo."""
         self.messages = await self.strategy.compact(self.messages, llm)
+
+        # 🔥 Si verbose está activo, extraemos el último mensaje de sistema (que es el resumen)
+        if verbose:
+            for msg in reversed(self.messages):
+                if msg["role"] == "system" and "Resumen de la conversación" in msg.get("content", ""):
+                    return msg["content"]
+        return None

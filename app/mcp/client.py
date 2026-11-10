@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import AsyncExitStack
+import os
 from typing import Any
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -10,45 +11,62 @@ class MCPClient:
     """Cliente para conectarse a un servidor MCP."""
 
     def __init__(self, command: str, args: list[str], env: dict[str, str] | None = None):
+        # 🔥 Forzamos a que los servidores no impriman en consola
+        # Pasamos variables de entorno para que los logs vayan a un archivo
+        server_env = os.environ.copy()
+        if env:
+            server_env.update(env)
+
+        server_env["NODE_NO_WARNINGS"] = "1"  # Silencia warnings de Node
+        server_env["PYTHONUNBUFFERED"] = "1"
+
+        # Para el servidor de filesystem (npx), le decimos que no muestre el banner
+        # No hay una variable oficial, pero podemos redirigir stderr a /dev/null
+        # desde el propio subproceso si el SDK lo permite. Por ahora, dejamos que el SDK maneje el stdio.
+
+        # En el SDK actual de MCP, el stdio_client captura stdout/stderr del subproceso.
+        # El problema es que algunos servidores (como npx) imprimen directamente antes de que el cliente se conecte.
+        # La solución es filtrar la salida en el propio cliente.
         self.server_params = StdioServerParameters(
             command=command,
             args=args,
-            env=env
+            env=server_env
         )
         self.session: ClientSession | None = None
         self.exit_stack = AsyncExitStack()
 
     async def connect(self):
         """Inicia el subproceso del servidor MCP y crea la sesión."""
-        # Inicia el transporte stdio
-        read, write = await self.exit_stack.enter_async_context(
-            stdio_client(self.server_params)
-        )
-        # Inicia la sesión con el servidor
-        self.session = await self.exit_stack.enter_async_context(
-            ClientSession(read, write)
-        )
-        await self.session.initialize()
+        try:
+            read, write = await self.exit_stack.enter_async_context(
+                stdio_client(self.server_params)
+            )
+            self.session = await self.exit_stack.enter_async_context(
+                ClientSession(read, write)
+            )
+            await self.session.initialize()
+        except Exception as e:
+            logger.error(f"Error conectando al servidor MCP: {e}")
+            raise
 
     async def disconnect(self):
         """Cierra la conexión limpiamente."""
         await self.exit_stack.aclose()
 
-    async def register_tools(self, registry: ToolRegistry):
+    async def register_tools(self, registry: ToolRegistry, server_name: str = "unknown"):
         """Descubre las herramientas del servidor MCP y las registra en el Harness."""
         if not self.session:
             raise RuntimeError("No conectado. Llama a connect() primero.")
 
-        # 1. Pedir la lista de herramientas al servidor MCP
         mcp_tools = await self.session.list_tools()
 
-        # 2. Convertir cada herramienta MCP en una Tool del Harness
         for mcp_tool in mcp_tools.tools:
             tool = MCPToolProxy(
                 name=mcp_tool.name,
                 description=mcp_tool.description or "",
                 parameters_schema=mcp_tool.input_schema,
-                session=self.session
+                session=self.session,
+                server_name=server_name
             )
             registry.register(tool)
 
@@ -56,11 +74,12 @@ class MCPClient:
 class MCPToolProxy(BaseTool):
     """Adaptador que envuelve una herramienta remota MCP para que el AgentLoop la use."""
 
-    def __init__(self, name: str, description: str, parameters_schema: dict, session: ClientSession):
+    def __init__(self, name: str, description: str, parameters_schema: dict, session: ClientSession, server_name: str = "unknown"):
         self.name = name
         self.description = f"[MCP] {description}"
         self.parameters_schema = parameters_schema
         self.session = session
+        self.server_name = server_name
 
     async def run(self, **kwargs) -> ToolResult:
         try:

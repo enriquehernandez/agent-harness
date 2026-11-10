@@ -13,13 +13,11 @@ def test_register_core_tools():
     assert "read_file" in registry.names()
 
 
-@patch("app.main.main")
-def test_main_entry(mock_main):
+@patch("app.main.asyncio.run")
+def test_main_entry(mock_asyncio_run):
     """Cubre el punto de entrada."""
-    # Para no arrancar la TUI real en los tests
-    from app.main import main
     main()
-    mock_main.assert_called_once()
+    mock_asyncio_run.assert_called_once()
 
 
 @patch("app.main.asyncio.run")

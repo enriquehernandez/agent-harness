@@ -59,3 +59,13 @@ junit.xml
 chroma_db/
 *.sqlite3
 *.log
+
+# ==========================================
+# Permisos Locales del Harness
+# ==========================================
+.harness_permissions.json
+
+# ==========================================
+# Memoria a largo plazo
+# ==========================================
+.harness_memory/

@@ -1,15 +1,15 @@
-import os
 from .registry import register_provider, get_llm, list_providers
 from .base import BaseLLM, LLMResponse
 from .providers.openai_provider import OpenAICompatibleProvider
 from .providers.fake import FakeLLM
+from app.core.config import settings
 
 # Registrar OpenAI directo
 register_provider(
     "openai",
     lambda **kw: OpenAICompatibleProvider(
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        model=kw.pop("model", os.getenv("OPENAI_MODEL", "gpt-4o")),
+        api_key=settings.OPENAI_API_KEY,
+        model=kw.pop("model", settings.OPENAI_MODEL),
         **kw,
     ),
 )
@@ -18,8 +18,8 @@ register_provider(
 register_provider(
     "openrouter",
     lambda **kw: OpenAICompatibleProvider(
-        api_key=os.getenv("OPENROUTER_API_KEY", ""),
-        model=kw.pop("model", os.getenv("OPENROUTER_MODEL", "openai/gpt-4o")),
+        api_key=settings.OPENROUTER_API_KEY,
+        model=kw.pop("model", settings.OPENROUTER_MODEL),
         base_url="https://openrouter.ai/api/v1",
         **kw,
     ),
@@ -29,9 +29,8 @@ register_provider(
 register_provider(
     "groq",
     lambda **kw: OpenAICompatibleProvider(
-        api_key=os.getenv("GROQ_API_KEY", ""),
-        model=kw.pop("model", os.getenv(
-            "GROQ_MODEL", "llama-3.3-70b-versatile")),
+        api_key=settings.GROQ_API_KEY,
+        model=kw.pop("model", settings.GROQ_MODEL),
         base_url="https://api.groq.com/openai/v1",
         **kw,
     ),

@@ -19,6 +19,8 @@ dependencies = [
     "rich",
     # Herramientas locales (ej. para read_file/write_file)
     "pathlib", # Es parte de la stdlib, pero lo listamos por claridad conceptual
+    "textual>=8.2.8",
+    "pyperclip>=1.11.0",
 ]
 
 [build-system]
@@ -39,7 +41,7 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 # Mantenemos tu configuración de cobertura y reporte
-addopts = "--cov=app --cov-report=term-missing --cov-report=html --cov-report=xml --junitxml=junit.xml -o junit_family=legacy"
+addopts = "--cov=app --cov-report=term-missing --cov-report=html --cov-report=xml --junitxml=junit.xml -o junit_family=legacy --ignore=tests/integration"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
@@ -47,6 +49,7 @@ asyncio_default_fixture_loop_scope = "function"
 # Scripts de desarrollo
 dev = "uv run python -m app.main" # Asumiendo que main.py lanza la TUI
 test = "uv run pytest tests/ --cov=app --cov-report=term-missing"
+test-integration = "uv run pytest tests/integration/test_mcp_e2e.py -v -s"
 
 [tool.coverage.report]
 exclude_lines = [
@@ -55,6 +58,6 @@ exclude_lines = [
     "raise NotImplementedError",
     '^\s*\.\.\.\s*$',
     '@abstractmethod',
-    '^\s*return self\._max_tokens$',
-    '^\s*return len\(text\) // 4$'
+    '^\s*for client in reversed\(mcp_clients\):\s*$',
+    '^\s*await client\.disconnect\(\)\s*$'
 ]

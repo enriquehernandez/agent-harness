@@ -1,5 +1,18 @@
+from pathlib import Path
+
 import pytest
 from app.core.harness.permissions import PermissionGate, Decision
+
+
+@pytest.fixture(autouse=True)
+def clean_permissions_file():
+    """Elimina el archivo de permisos antes de cada test para evitar contaminación."""
+    path = Path(".harness_permissions.json")
+    if path.exists():
+        path.unlink()
+    yield
+    if path.exists():
+        path.unlink()
 
 
 @pytest.mark.asyncio
@@ -33,7 +46,7 @@ async def test_permission_gate_ask_deny_no_ui():
 @pytest.mark.asyncio
 async def test_permission_gate_ask_user_yes():
     """Simula que el usuario responde 'y'."""
-    async def mock_ask_user(tool, title, args):
+    async def mock_ask_user(tool, signature, args, diff_text):
         return "y"
 
     gate = PermissionGate(ask_user=mock_ask_user)
@@ -46,7 +59,7 @@ async def test_permission_gate_ask_user_yes():
 @pytest.mark.asyncio
 async def test_permission_gate_ask_user_always():
     """Simula que el usuario responde 'a' (always)."""
-    async def mock_ask_user(tool, title, args):
+    async def mock_ask_user(tool, signature, args, diff_text):
         return "a"
 
     gate = PermissionGate(ask_user=mock_ask_user)
@@ -65,7 +78,7 @@ async def test_permission_gate_ask_user_always():
 @pytest.mark.asyncio
 async def test_permission_gate_ask_user_no():
     """Simula que el usuario responde 'n'."""
-    async def mock_ask_user(tool, title, args):
+    async def mock_ask_user(tool, signature, args, diff_text):
         return "n"
 
     gate = PermissionGate(ask_user=mock_ask_user)

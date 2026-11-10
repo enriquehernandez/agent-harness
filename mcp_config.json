@@ -1,8 +1,27 @@
 {
   "mcpServers": {
-    "dummy": {
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "/Users/enriquehernandezleiva/Proyectos/ehl/llm-github/agent-harness"
+      ]
+    },
+    "filesystem": {
+      "command": "bash",
+      "args": [
+        "scripts/filesystem_mcp_wrapper.sh",
+        "/Users/enriquehernandezleiva/Proyectos/ehl/llm-github/agent-harness"
+      ]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "local_dev": {
       "command": "uv",
-      "args": ["run", "python", "scripts/dummy_mcp_server.py"]
+      "args": ["run", "python", "scripts/local_mcp_server.py"]
     }
   }
 }

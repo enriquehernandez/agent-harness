@@ -1,70 +1,105 @@
-from rich.console import Console
+import json
+import logging
+from pathlib import Path
+
+from app.core.logger import logger
 from app.core.harness.context import ContextManager
 from app.core.llm.registry import list_providers
 from app.core.llm.base import BaseLLM
-
-console = Console()
-
-# 🔥 NUEVO: Firma ahora es async y recibe el llm
+from app.core.llm import get_llm
 
 
-async def handle_command(command: str, ctx: ContextManager, state: dict, llm: BaseLLM) -> bool:
-    """
-    Procesa comandos con '/'. 
-    Devuelve True si el comando fue manejado (no debe ir al LLM), False si debe ir al LLM.
-    """
+async def handle_command(command: str, ctx: ContextManager, state: dict, llm: BaseLLM, app) -> bool:
     parts = command.strip().split()
     cmd = parts[0].lower()
 
     if cmd == "/quit" or cmd == "/exit":
-        console.print("[bold red]Saliendo del Harness...[/bold red]")
-        raise SystemExit(0)
+        await app.escribir_en_chat("👋 Saliendo del Harness...", tipo="system")
+        app.exit()
+        return True
 
     elif cmd == "/help":
-        console.print("[bold cyan]Comandos disponibles:[/bold cyan]")
-        console.print(
-            "  [bold green]/help[/bold green]      Muestra esta ayuda")
-        console.print(
-            "  [bold green]/model[/bold green]     Muestra o cambia el LLM actual (ej. /model fake)")
-        console.print(
-            "  [bold green]/tokens[/bold green]    Muestra el uso estimado de tokens de la sesión")
-        console.print(
-            "  [bold green]/compact[/bold green]   Fuerza la compactación del contexto (resumen)")
-        console.print(
-            "  [bold green]/clear[/bold green]     Limpia el historial de conversación")
-        console.print(
-            "  [bold green]/quit[/bold green]      Sale del programa")
+        ayuda = (
+            "### 🛠️ Comandos Disponibles\n\n"
+            "| Comando | Descripción |\n"
+            "| :--- | :--- |\n"
+            "| `/help` | Muestra esta ayuda |\n"
+            "| `/shortcuts` | Muestra los atajos de teclado |\n"
+            "| `/model [nombre]` | Muestra o cambia el LLM actual |\n"
+            "| `/tokens` | Muestra el uso estimado de tokens |\n"
+            "| `/compact` | Fuerza la compactación del contexto |\n"
+            "| `/clear` | Limpia el historial de conversación |\n"
+            "| `/debug` | Activa/desactiva los logs detallados |\n"
+            "| `/permissions` | Gestiona permisos guardados |\n"
+            "| `/quit` | Sale del programa |\n"
+        )
+        await app.escribir_en_chat(ayuda, tipo="agent")
+        return True
+
+    elif cmd == "/shortcuts" or cmd == "/hotkeys":
+        atajos = (
+            "### ⌨️ Atajos de Teclado\n\n"
+            "| Atajo | Acción |\n"
+            "| :--- | :--- |\n"
+            "| `Ctrl + U` | Limpiar la caja de texto actual |\n"
+            "| `Ctrl + L` | Limpiar todo el historial del chat |\n"
+            "| `Ctrl + Q` | Salir de la aplicación |\n"
+            "| `Enter` | Enviar el mensaje o comando |\n"
+        )
+        await app.escribir_en_chat(atajos, tipo="agent")
         return True
 
     elif cmd == "/tokens":
         tokens = ctx.estimate_tokens()
         limit = llm.max_context_window
-        console.print(
-            f"[bold yellow]Tokens estimados:[/bold yellow] {tokens} / {limit} ({(tokens/limit)*100:.1f}%)")
+        porcentaje = (tokens/limit)*100
+        await app.escribir_en_chat(
+            f"**Uso de Tokens:**\n"
+            f"- Actuales: `{tokens}`\n"
+            f"- Límite: `{limit}`\n"
+            f"- Porcentaje: `{porcentaje:.1f}%`",
+            tipo="agent"
+        )
         return True
 
     elif cmd == "/clear":
         ctx.clear()
-        console.print(
-            "[bold yellow]Historial de conversación limpiado.[/bold yellow]")
+        # Limpiamos el contenedor de mensajes
+        scroll = app.query_one("#chat-scroll")
+        await scroll.remove_children()
+        await app.escribir_en_chat("🧹 Historial de conversación limpiado.", tipo="system")
         return True
 
     elif cmd == "/model":
         if len(parts) > 1:
-            new_model = parts[1]
-            state["provider"] = new_model
-            console.print(
-                f"[bold green]Proveedor cambiado a:[/bold green] {new_model}")
+            new_provider = parts[1]
+            try:
+                new_llm = get_llm(new_provider)
+                state["provider"] = new_provider
+                if app.loop_agent:
+                    app.loop_agent.llm = new_llm
+                app.actualizar_dashboard("Listo")
+                await app.escribir_en_chat(f"✅ Proveedor cambiado a: **{new_provider}**", tipo="system")
+            except Exception as e:
+                await app.escribir_en_chat(f"❌ Error al cambiar de modelo: {e}", tipo="system")
         else:
-            available = ", ".join(list_providers())
             current = state.get("provider", "desconocido")
-            console.print(
-                f"[bold yellow]Proveedor actual:[/bold yellow] {current}")
-            console.print(f"[dim]Disponibles: {available}[/dim]")
+            available = ", ".join(list_providers())
+            model_name = getattr(llm, 'model_name', getattr(
+                llm, 'model', 'Desconocido'))
+
+            info = (
+                f"### ⚙️ Configuración Actual\n\n"
+                f"**Proveedor:** `{current.upper()}`\n\n"
+                f"**Modelo:** `{model_name}`\n\n"
+                f"**Proveedores disponibles:**\n"
+                f"`{available}`"
+            )
+            await app.escribir_en_chat(info, tipo="agent")
         return True
 
     elif cmd == "/compact":
-        console.print("[bold yellow]Compactando contexto...[/bold yellow]")
+        await app.escribir_en_chat("🗜️ Compactando contexto...", tipo="system")
         old_len = len(ctx.messages)
         old_tokens = ctx.estimate_tokens()
 
@@ -72,13 +107,46 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
 
         new_len = len(ctx.messages)
         new_tokens = ctx.estimate_tokens()
-        console.print(
-            f"[bold green]Contexto compactado.[/bold green] Mensajes: {old_len} -> {new_len} | Tokens: {old_tokens} -> {new_tokens}")
+
+        resumen = (
+            f"✅ **Contexto compactado**\n\n"
+            f"- Mensajes: `{old_len}` ➡️ `{new_len}`\n"
+            f"- Tokens: `{old_tokens}` ➡️ `{new_tokens}`"
+        )
+        await app.escribir_en_chat(resumen, tipo="agent")
+        return True
+
+    elif cmd == "/debug":
+        current_level = logger.level
+        if current_level == logging.DEBUG:
+            logger.setLevel(logging.INFO)
+            await app.escribir_en_chat("🔕 **Debug DESACTIVADO.**", tipo="system")
+        else:
+            logger.setLevel(logging.DEBUG)
+            await app.escribir_en_chat("🔔 **Debug ACTIVADO.** Verás los logs detallados.", tipo="system")
+        return True
+
+    elif cmd == "/permissions":
+        perm_file = Path(".harness_permissions.json")
+        if not perm_file.exists():
+            await app.escribir_en_chat("No hay permisos guardados en `.harness_permissions.json`.", tipo="system")
+            return True
+
+        data = json.loads(perm_file.read_text())
+        allowed = list(data.get("session_allowed", {}).keys())
+
+        if not allowed:
+            await app.escribir_en_chat("No hay herramientas con 'Permitir siempre'.", tipo="system")
+            return True
+
+        txt = "### 🔐 Permisos Permanentes\n\n"
+        for tool in allowed:
+            txt += f"- `{tool}`\n"
+        txt += "\n*Para borrarlos, elimina el archivo `.harness_permissions.json`.*"
+
+        await app.escribir_en_chat(txt, tipo="agent")
         return True
 
     else:
-        console.print(
-            f"[bold red]Comando desconocido: {cmd}[/bold red]. Usa /help.")
+        await app.escribir_en_chat(f"❌ **Comando desconocido:** `{cmd}`\nUsa `/help` para ver la lista.", tipo="agent")
         return True
-
-    return False

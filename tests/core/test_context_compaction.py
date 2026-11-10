@@ -35,7 +35,7 @@ async def test_compaction_llm_error(fake_llm):
 
     await ctx.maybe_compact(fake_llm)
     # Debe inyectar el mensaje de error en el resumen
-    assert "[Error al resumir la conversación antigua: API Error]" in ctx.messages[1]["content"]
+    assert "[Error al resumir: API Error]" in ctx.messages[1]["content"]
 
 
 @pytest.mark.asyncio
@@ -80,3 +80,39 @@ def test_context_clear():
     ctx.clear()
     assert len(ctx.messages) == 1
     assert ctx.messages[0]["role"] == "system"
+
+
+@pytest.mark.asyncio
+async def test_compaction_safe_split_point(fake_llm):
+    """Verifica que no se corten tool_calls huérfanas."""
+    from app.core.harness.compaction import SummarizationStrategy
+    from app.core.llm.base import LLMResponse
+
+    fake_llm._responses = [LLMResponse(content="[Resumen seguro]")]
+
+    # Creamos un historial falso: system, user, assistant(tool_call), tool(result), user, assistant...
+    # Si cortamos ciegamente en los últimos 4, el corte caería justo entre assistant y tool.
+    messages = [
+        {"role": "system", "content": "System"},
+        {"role": "user", "content": "Haz algo"},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "1", "type": "function", "function": {"name": "test", "arguments": "{}"}}]},
+        # 🔥 Si corta aquí, la tool_call queda huérfana
+        {"role": "tool", "tool_call_id": "1", "content": "Resultado de la tool"},
+        {"role": "user", "content": "Otra pregunta"},
+        {"role": "assistant", "content": "Otra respuesta"},
+        {"role": "user", "content": "Pregunta final"},
+    ]
+
+    strategy = SummarizationStrategy(keep_last_n=4)
+    compacted = await strategy.compact(messages, fake_llm)
+
+    # El historial compactado NO debe empezar con un mensaje 'tool'
+    # (debe haber retrocedido para incluir el 'assistant' que lo llamó)
+    roles = [m["role"] for m in compacted]
+    # Aseguramos que el tool no esté justo después del resumen
+    assert "tool" not in roles[:2]
+
+    # Verificamos que el historial tiene el system, el resumen y los mensajes recientes
+    assert compacted[0]["role"] == "system"
+    assert "Resumen de la conversación anterior" in compacted[1]["content"]

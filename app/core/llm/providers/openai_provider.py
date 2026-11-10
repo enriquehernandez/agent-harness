@@ -2,6 +2,7 @@ import json
 from typing import Any, AsyncIterator, Optional
 from openai import AsyncOpenAI
 from ..base import BaseLLM, LLMResponse
+from app.core.logger import logger
 
 
 class OpenAICompatibleProvider(BaseLLM):
@@ -29,12 +30,16 @@ class OpenAICompatibleProvider(BaseLLM):
         tools: Optional[list[dict[str, Any]]] = None,
         **kwargs: Any,
     ) -> LLMResponse:
+        logger.debug(
+            f"Enviando petición a {self.model} con {len(messages)} mensajes...")
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             tools=tools,
             **kwargs,
         )
+        logger.debug(
+            f"Respuesta recibida. Tokens usados: {response.usage.total_tokens if response.usage else 'N/A'}")
         choice = response.choices[0]
         msg = choice.message
 

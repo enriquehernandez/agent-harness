@@ -1,31 +1,40 @@
-# 🤖 Agent Harness: Multi-Tool, MCP & Permissions
+# 🤖 Agent Harness: Multi-Tool, MCP, Subagents & TUI
 
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org) [![MCP](https://img.shields.io/badge/MCP-Supported-blue?style=for-the-badge)](https://modelcontextprotocol.io) [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![codecov](https://codecov.io/github/enriquehernandez/agent-harness/graph/badge.svg?token=TU_TOKEN_AQUI)](https://codecov.io/github/enriquehernandez/agent-harness)
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white) 
+![Textual](https://img.shields.io/badge/Textual-TUI-FF4B4B?style=for-the-badge&logo=textual&logoColor=white) 
+![OpenRouter](https://img.shields.io/badge/OpenRouter-Provider--Agnostic-6467F2?style=for-the-badge) 
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=for-the-badge)
 
-Un **Agent Harness** de nivel producción construido desde cero. Este proyecto no es solo un "chatbot con herramientas"; es un motor de ejecución (Harness) que gestiona el ciclo de vida completo de un agente autónomo: razonamiento, ejecución de herramientas locales y remotas (**MCP**), control de permisos en tiempo real y gestión de memoria a largo plazo.
+Un **Agent Harness** de nivel producción construido desde cero. Este proyecto no es solo un "chatbot con herramientas"; es un motor de ejecución que gestiona el ciclo de vida completo de un agente autónomo: razonamiento, ejecución de herramientas locales y remotas (**MCP**), delegación a **subagentes**, multimodalidad (**imágenes**), gestión de permisos con **diff-first**, streaming en tiempo real y una interfaz de terminal (**TUI**) moderna construida con Textual.
 
-Diseñado para ser **100% agnóstico al proveedor de IA** y altamente extensible mediante patrones de diseño como *Registry*, *Strategy* y *Factory*.
+Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible y con **cobertura de tests del 100%**.
 
 ## ✨ Características Principales
 
-- **🧠 LLM Agnóstico (Registry Pattern):** Conecta OpenAI, OpenRouter, Groq o modelos locales con una sola línea de configuración. Sin código duplicado.
-- **🛠️ Tool Calling Local & Remoto (MCP):** Herramientas locales (`bash`, `read_file`, `write_file`) e integración nativa con el **Model Context Protocol (MCP)** para descubrir herramientas externas dinámicamente.
-- **🛡️ Permission Gate Interactivo:** El agente no puede ejecutar comandos destructivos sin tu aprobación. Interfaz en consola para aprobar (`y`), denegar (`n`) o recordar (`a`) permisos durante la sesión.
-- **🔄 Context Compaction (Auto-Resumen):** Cuando el historial de la conversación supera el 80% de la ventana de contexto, el Harness resume los mensajes antiguos automáticamente, manteniendo la sesión viva sin errores de tokens.
-- **💻 TUI (Terminal User Interface):** Una interfaz de línea de comandos moderna construida con `prompt_toolkit` y `rich`. Incluye historial de comandos, autocompletado y *Slash Commands* (`/help`, `/model`, `/compact`, `/tokens`).
-- **🧪 100% Testeable (FakeLLM):** Incluye un `FakeLLM` para simular conversaciones y cadenas de herramientas sin gastar tokens ni depender de la red.
+- **🧠 LLM Agnóstico (Registry Pattern):** Conecta OpenAI, OpenRouter o Groq modificando una sola variable de entorno.
+- **🛠️ Tool Calling Local & Remoto (MCP):** Herramientas locales (`bash`, `read_file`) e integración nativa con el **Model Context Protocol**.
+- **🤖 Subagentes Delegados:** El agente principal puede delegar tareas complejas a subagentes aislados con sus propias herramientas.
+- **🛡️ Permission Gate con Diff-First:** Interfaz visual que muestra un *diff* de los cambios propuestos antes de aprobar.
+- **🔄 Context Compaction (Estrategias):** Tres estrategias (`summarize`, `sliding`, `none`) para mantener la conversación viva sin exceder el límite de tokens.
+- **💾 Memoria Persistente:** El agente puede guardar y recuperar hechos importantes del proyecto (`summary.md`).
+- **🚀 Streaming en Tiempo Real:** Las respuestas del agente se renderizan token por token en la TUI.
+- **🖼️ Multimodalidad:** Soporte para arrastrar y pegar imágenes (codificadas en Base64) que el LLM puede analizar.
+- **💻 TUI con Textual:** Una interfaz moderna con temas oscuros, autocompletado, *modales* interactivos, panel de debug (F1) y barra de adjuntos.
+- **🧪 100% de Cobertura:** Suite de tests robusta con `pytest` y `textual.pilot`.
 
 ## 🏗️ Arquitectura
 
-El Harness sigue una arquitectura hexagonal (puertos y adaptadores) donde el núcleo (`AgentLoop`) está completamente desacoplado de los proveedores de IA y de las herramientas.
+El Harness sigue una arquitectura hexagonal donde el núcleo (`AgentLoop`) está completamente desacoplado de los proveedores de IA y de las herramientas.
 
 ```mermaid
 graph TD
-    User([Usuario]) -->|Texto / Slash Commands| TUI[TUI Prompt_Toolkit]
+    User([Usuario]) -->|Texto / Imágenes| TUI[Textual TUI]
     TUI -->|Input| Loop[AgentLoop]
     
     subgraph Core ["Core del Harness"]
-        Loop -->|1. Razonamiento| LLM[BaseLLM]
+        Loop -->|1. Streaming| LLM[BaseLLM]
         Loop -->|2. Permisos| Gate[PermissionGate]
         Loop -->|3. Ejecución| Tools[ToolRegistry]
         Loop <-->|4. Memoria| Context[ContextManager]
@@ -33,9 +42,10 @@ graph TD
     end
     
     subgraph Adaptadores
-        LLM -.->|Registry| OpenAI[OpenAI / OpenRouter / Groq]
-        Tools -.->|Local| Bash[BashTool, FileTools]
+        LLM -.->|Registry| Providers[OpenAI / OpenRouter / Groq]
+        Tools -.->|Local| LocalTools[Bash, File, Memory]
         Tools -.->|MCP Client| MCP[Servidores MCP Externos]
+        Tools -.->|Delegate| Subagent[Subagente Reviewer]
     end
 ```
 
@@ -47,8 +57,9 @@ graph TD
 - **Gestión de paquetes**: `uv` (ultrarrápido y reproducible)
 - **Integración IA**: `openai` SDK (compatible con OpenRouter/Groq)
 - **Protocolo de Herramientas**: `mcp` (Model Context Protocol)
-- **Interfaz de Terminal**: `prompt_toolkit`, `rich`
-- **Testing**: `pytest`, `pytest-asyncio`
+- **Interfaz de Terminal**: `textual`, `rich`
+- **Testing**: `pytest`, `pytest-asyncio`, `pytest-cov`
+- **Contenedores**: Docker, Docker Compose
 
 ## 🚀 Quick Start
 
@@ -85,36 +96,54 @@ uv run tom dev
 uv run python -m app.main
 ```
 
+## 🐳 Docker
+Si prefieres no instalar dependencias locales, puedes usar Docker:
+
+```bash
+docker compose build
+docker compose run --rm agent-harness
+```
+
 ## 💻 Uso de la TUI
 
 Una vez dentro del Harness, puedes interactuar con el agente o usar los comandos del sistema:
 
 ```text
 🤖 Agent Harness iniciado.
-Escribe /help para ver los comandos disponibles.
+Escribe /help para ver los comandos.
 
 🐚 > /help
 Comandos disponibles:
-  /help      Muestra esta ayuda
-  /model     Muestra o cambia el LLM actual (ej. /model fake)
-  /tokens    Muestra el uso estimado de tokens de la sesión
-  /compact   Fuerza la compactación del contexto (resumen)
-  /clear     Limpia el historial de conversación
-  /quit      Sale del programa
+  /help          Muestra esta ayuda
+  /model         Muestra o cambia el LLM actual
+  /tools         Lista las herramientas disponibles
+  /subagents     Lista los subagentes registrados
+  /compact       Fuerza la compactación (sliding/summarize/none)
+  /debug         Controla el panel de debug (on/off/clear)
+  /permissions   Gestiona permisos guardados
+  /export        Exporta la conversación (markdown/json)
+  /quit          Sale del programa
 
-🐚 > ¿Qué archivos hay en este proyecto?
-🤖 Agente: He encontrado los siguientes archivos...
-[dim]Pasos: 2 | Tools: ['bash'] | Tokens API: 145[/dim]
+🐚 > ¿Qué ves en esta imagen?
+[Arrastra una imagen a la terminal]
+🖼️ Imagen adjunta: rejected_invoice.png
+🤖 Agente: Veo una factura comercial con un sello de "RECHAZADO"...
 ```
 
 ## 🛡️ El Guardián de Seguridad (Permission Gate)
 
-Si el agente intenta ejecutar una herramienta sensible (como `bash`), el Harness pausará la ejecución y te pedirá permiso:
+Si el agente intenta ejecutar una herramienta sensible, el Harness pausará la ejecución y te mostrará un panel interactivo con los argumentos y, si aplica, un **diff de los cambios**:
 
 ```text
-🛠️  El agente quiere usar: bash
+🛠️  El agente quiere usar: edit_file
 ╭───────────────────────────────────────────────╮
-│ command: ls -la                               │
+│ path: app/core/config.py                      │
+│                                               │
+│ Propuesta de cambios:                         │
+│ --- a/app/core/config.py                      │
+│ +++ b/app/core/config.py                      │
+│ -  LOG_LEVEL: str = "INFO"                    │
+│ +  LOG_LEVEL: str = "DEBUG"                   │
 ╰───────────────────────────────────────────────╯
 ¿Permitir ejecución? [y/n/a] (n): 
 ```
@@ -130,9 +159,9 @@ El Harness puede conectarse a cualquier servidor MCP. El archivo `mcp_config.jso
 ```json
 {
   "mcpServers": {
-    "dummy": {
-      "command": "uv",
-      "args": ["run", "python", "scripts/dummy_mcp_server.py"]
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/ruta/al/proyecto"]
     }
   }
 }
@@ -147,6 +176,9 @@ El proyecto cuenta con una suite de pruebas robusta. Para evitar el consumo de t
 ```bash
 # Ejecutar todos los tests con cobertura
 uv run pytest tests/ --cov=app --cov-report=term-missing
+
+# Ejecutar todos los tests con cobertura
+uv run tom test
 ```
 
 🧑‍💻 Autor

@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # Configuración del LLM
+    # LLM configuration
     LLM_PROVIDER: str = "fake"
 
     # OpenAI
@@ -17,19 +17,19 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
-    # Seguridad
+    # Security
     LOG_LEVEL: str = "INFO"
 
     # 🔥 Prompt Caching
     ENABLE_PROMPT_CACHING: bool = True
 
-    # Configuración de Pydantic para leer el archivo .env
+    # Pydantic configuration to read the .env file
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="ignore"  # Ignora variables extra que no estén definidas aquí
+        extra="ignore"  # Ignore extra variables not defined here
     )
 
 
-# Instancia global que usaremos en toda la app
+# Global instance used throughout the app
 settings = Settings()

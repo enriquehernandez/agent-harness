@@ -19,7 +19,7 @@ class FakeLLM(BaseLLM):
             resp = self._responses[self._call_count]
             self._call_count += 1
             return resp
-        return LLMResponse(content="Respuesta simulada por FakeLLM.")
+        return LLMResponse(content="Simulated response by FakeLLM.")
 
     async def stream_chat(self, messages, tools=None, **kwargs) -> AsyncIterator[str]:
         resp = await self.chat(messages, tools, **kwargs)

@@ -2,7 +2,7 @@ import json
 import logging
 from pathlib import Path
 
-from app.core.logger import logger
+from app.core.logger import logger, get_debug_events
 from app.core.harness.context import ContextManager
 from app.core.llm.registry import list_providers
 from app.core.llm.base import BaseLLM
@@ -14,12 +14,12 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
     cmd = parts[0].lower()
 
     if cmd in ("/quit", "/exit"):
-        await app.escribir_en_chat("👋 Saliendo del Harness...", tipo="system")
+        await app.write_to_chat("👋 Saliendo del Harness...", type="system")
         app.exit()
         return True
 
     elif cmd == "/help":
-        ayuda = (
+        help_text = (
             "### 🛠️ Comandos Disponibles\n\n"
             "| Comando | Descripción |\n"
             "| :--- | :--- |\n"
@@ -30,18 +30,18 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `/tools` | Lista las herramientas disponibles en el Registry |\n"
             "| `/subagents` | Lista los subagentes registrados |\n"
             "| `/tokens` | Muestra el uso estimado de tokens |\n"
-            "| `/compact [sliding/summarize/none]` | Fuerza la compactación opcionalmente con una estrategia |\n"
+            "| `/compact [estrategia]` | Fuerza la compactación (sliding/summarize/none) |\n"
             "| `/verbose [on/off]` | Muestra/oculta los detalles de la compactación |\n"
             "| `/clear` | Limpia el historial de conversación |\n"
             "| `/debug [on/off/clear]` | Controla el panel de debug |\n"
             "| `/permissions` | Gestiona permisos guardados |\n"
             "| `/quit` | Sale del programa |\n"
         )
-        await app.escribir_en_chat(ayuda, tipo="agent")
+        await app.write_to_chat(help_text, type="agent")
         return True
 
     elif cmd == "/shortcuts" or cmd == "/hotkeys":
-        atajos = (
+        shortcuts = (
             "### ⌨️ Atajos de Teclado\n\n"
             "| Atajo | Acción |\n"
             "| :--- | :--- |\n"
@@ -52,17 +52,17 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `Tab` | Navegar por los eventos (si el debug está abierto) |\n"
             "| `Enter` | Enviar el mensaje o comando |\n"
         )
-        await app.escribir_en_chat(atajos, tipo="agent")
+        await app.write_to_chat(shortcuts, type="agent")
         return True
 
     elif cmd == "/tools":
         if not app.registry:
-            await app.escribir_en_chat("❌ El Registry no está inicializado.", tipo="system")
+            await app.write_to_chat("❌ El Registry no está inicializado.", type="system")
             return True
 
         tools = app.registry.names()
         if not tools:
-            await app.escribir_en_chat("No hay herramientas registradas.", tipo="system")
+            await app.write_to_chat("No hay herramientas registradas.", type="system")
             return True
 
         txt = "### 🧰 Herramientas Disponibles\n\n"
@@ -70,24 +70,22 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
         txt += "| :--- | :--- |\n"
         for name in tools:
             tool = app.registry.get(name)
-            # Detectamos si es MCP por la descripción
-            origen = "MCP" if "[MCP]" in tool.description else "Local"
-            txt += f"| `{name}` | {origen} |\n"
+            origin = "MCP" if "[MCP]" in tool.description else "Local"
+            txt += f"| `{name}` | {origin} |\n"
 
-        await app.escribir_en_chat(txt, tipo="agent")
+        await app.write_to_chat(txt, type="agent")
         return True
 
     elif cmd == "/subagents":
         if not app.registry:
-            await app.escribir_en_chat("❌ El Registry no está inicializado.", tipo="system")
+            await app.write_to_chat("❌ El Registry no está inicializado.", type="system")
             return True
 
-        # Buscamos los subagentes (aquellos cuyo nombre empiece por delegate_)
         subagents = [name for name in app.registry.names()
                      if name.startswith("delegate_")]
 
         if not subagents:
-            await app.escribir_en_chat("No hay subagentes registrados.", tipo="system")
+            await app.write_to_chat("No hay subagentes registrados.", type="system")
             return True
 
         txt = "### 🤖 Subagentes Registrados\n\n"
@@ -97,19 +95,19 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             tool = app.registry.get(name)
             txt += f"| `{name}` | {tool.description[:80]}... |\n"
 
-        await app.escribir_en_chat(txt, tipo="agent")
+        await app.write_to_chat(txt, type="agent")
         return True
 
     elif cmd == "/tokens":
         tokens = ctx.estimate_tokens()
         limit = llm.max_context_window
-        porcentaje = (tokens/limit)*100
-        await app.escribir_en_chat(
+        percentage = (tokens / limit) * 100
+        await app.write_to_chat(
             f"**Uso de Tokens:**\n"
             f"- Actuales: `{tokens}`\n"
             f"- Límite: `{limit}`\n"
-            f"- Porcentaje: `{porcentaje:.1f}%`",
-            tipo="agent"
+            f"- Porcentaje: `{percentage:.1f}%`",
+            type="agent"
         )
         return True
 
@@ -117,27 +115,26 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
         ctx.clear()
         scroll = app.query_one("#chat-scroll")
         await scroll.remove_children()
-        await app.escribir_en_chat("🧹 Historial de conversación limpiado.", tipo="system")
+        await app.write_to_chat("🧹 Historial de conversación limpiado.", type="system")
         return True
 
-    elif cmd == "/model":
+    elif cmd in ("/model", "/provider"):
         if len(parts) > 1:
             new_provider = parts[1]
             try:
                 new_llm = get_llm(new_provider)
                 state["provider"] = new_provider
-                if app.loop_agent:
-                    app.loop_agent.llm = new_llm
-                app.actualizar_dashboard("Listo")
-                await app.escribir_en_chat(f"✅ Proveedor cambiado a: **{new_provider}**", tipo="system")
+                if app.agent_loop:
+                    app.agent_loop.llm = new_llm
+                app.update_dashboard("Listo")
+                await app.write_to_chat(f"✅ Proveedor cambiado a: **{new_provider}**", type="system")
             except Exception as e:
-                await app.escribir_en_chat(f"❌ Error al cambiar de modelo: {e}", tipo="system")
+                await app.write_to_chat(f"❌ Error al cambiar de proveedor: {e}", type="system")
         else:
             current = state.get("provider", "desconocido")
             available = ", ".join(list_providers())
             model_name = getattr(llm, 'model_name', getattr(
                 llm, 'model', 'Desconocido'))
-
             info = (
                 f"### ⚙️ Configuración Actual\n\n"
                 f"**Proveedor:** `{current.upper()}`\n\n"
@@ -145,81 +142,59 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
                 f"**Proveedores disponibles:**\n"
                 f"`{available}`"
             )
-            await app.escribir_en_chat(info, tipo="agent")
-        return True
-
-    elif cmd == "/provider":
-        if len(parts) > 1:
-            new_provider = parts[1]
-            try:
-                new_llm = get_llm(new_provider)
-                state["provider"] = new_provider
-                if app.loop_agent:
-                    app.loop_agent.llm = new_llm
-                app.actualizar_dashboard("Listo")
-                await app.escribir_en_chat(f"✅ Proveedor cambiado a: **{new_provider}**", tipo="system")
-            except Exception as e:
-                await app.escribir_en_chat(f"❌ Error al cambiar de proveedor: {e}", tipo="system")
-        else:
-            current = state.get("provider", "desconocido")
-            available = ", ".join(list_providers())
-            await app.escribir_en_chat(
-                f"**Proveedor actual:** `{current.upper()}`\n\n"
-                f"**Disponibles:** `{available}`",
-                tipo="agent"
-            )
+            await app.write_to_chat(info, type="agent")
         return True
 
     elif cmd == "/compact":
         strategy_arg = parts[1].lower() if len(parts) > 1 else "summarize"
         if strategy_arg not in ("summarize", "sliding", "none"):
-            await app.escribir_en_chat("❌ Estrategias válidas: `summarize`, `sliding`, `none`.", tipo="system")
+            await app.write_to_chat("❌ Estrategias válidas: `summarize`, `sliding`, `none`.", type="system")
             return True
 
         strategy_name = ctx.set_strategy(strategy_arg)
-        await app.escribir_en_chat(f"🗜️ **Compactando contexto** (Estrategia: `{strategy_name}`)...", tipo="system")
+        await app.write_to_chat(f"🗜️ **Compactando contexto** (Estrategia: `{strategy_name}`)...", type="system")
 
         old_len = len(ctx.messages)
         old_tokens = ctx.estimate_tokens()
 
-        # 🔥 Obtenemos el resumen si verbose está activo
         verbose = getattr(app, 'verbose_mode', False)
         summary_text = await ctx.force_compact(llm, verbose=verbose)
 
         new_len = len(ctx.messages)
         new_tokens = ctx.estimate_tokens()
 
-        resumen = (
+        summary = (
             f"✅ **Contexto compactado**\n\n"
             f"- Mensajes: `{old_len}` ➡️ `{new_len}`\n"
             f"- Tokens: `{old_tokens}` ➡️ `{new_tokens}`"
         )
-        await app.escribir_en_chat(resumen, tipo="agent")
+        await app.write_to_chat(summary, type="agent")
 
-        # 🔥 Si verbose está activo y hay resumen, lo mostramos en el chat
         if verbose and summary_text:
-            await app.escribir_en_chat(f"🔊 **Resumen generado:**\n\n```markdown\n{summary_text}\n```", tipo="system")
+            clean_summary = summary_text.replace("--- Summary of previous conversation ---", "").replace(
+                "----------------------------------------", "").strip()
+            await app.write_to_chat(
+                f"🔊 **Resumen de compactación:**\n\n{clean_summary}",
+                type="system"
+            )
 
         return True
 
-    # 🔥 ACTUALIZAR /verbose
     elif cmd == "/verbose":
         if len(parts) > 1:
             subcmd = parts[1].lower()
             if subcmd == "on":
                 app.verbose_mode = True
-                # Opcional: Aquí podrías cambiar la estrategia a SummarizationStrategy
-                # si quieres que el verbose muestre el resumen de la compactación.
-                await app.escribir_en_chat("🔊 **Modo verbose ACTIVADO.**", tipo="system")
+                await app.write_to_chat("🔊 **Modo verbose ACTIVADO.**", type="system")
             elif subcmd == "off":
                 app.verbose_mode = False
-                await app.escribir_en_chat("🔇 **Modo verbose DESACTIVADO.**", tipo="system")
+                await app.write_to_chat("🔇 **Modo verbose DESACTIVADO.**", type="system")
             else:
-                await app.escribir_en_chat("❌ Usa `/verbose on` o `/verbose off`.", tipo="system")
+                await app.write_to_chat("❌ Usa `/verbose on` o `/verbose off`.", type="system")
         else:
-            estado = "ACTIVADO" if getattr(
+            status = "ACTIVADO" if getattr(
                 app, 'verbose_mode', False) else "DESACTIVADO"
-            await app.escribir_en_chat(f"🔊 **Verbose:** `{estado}`", tipo="system")
+            await app.write_to_chat(f"🔊 **Verbose:** `{status}`", type="system")
         return True
 
     elif cmd == "/debug":
@@ -229,33 +204,33 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
                 logger.setLevel(logging.DEBUG)
                 app.debug_mode = True
                 await app.toggle_debug_panel(True)
-                await app.escribir_en_chat("🔔 **Debug ACTIVADO.** Panel abierto.", tipo="system")
+                await app.write_to_chat("🔔 **Debug ACTIVADO.** Panel abierto.", type="system")
             elif subcmd == "off":
                 logger.setLevel(logging.INFO)
                 app.debug_mode = False
                 await app.toggle_debug_panel(False)
-                await app.escribir_en_chat("🔕 **Debug DESACTIVADO.** Panel cerrado.", tipo="system")
+                await app.write_to_chat("🔕 **Debug DESACTIVADO.** Panel cerrado.", type="system")
             elif subcmd == "clear":
                 app.clear_debug_events()
-                await app.escribir_en_chat("🧹 **Panel de debug limpiado.**", tipo="system")
+                await app.write_to_chat("🧹 **Panel de debug limpiado.**", type="system")
             else:
-                await app.escribir_en_chat(f"❌ Subcomando desconocido: `{subcmd}`. Usa `on`, `off` o `clear`.", tipo="system")
+                await app.write_to_chat(f"❌ Subcomando desconocido: `{subcmd}`. Usa `on`, `off` o `clear`.", type="system")
         else:
-            estado = "ACTIVADO" if logger.level == logging.DEBUG else "DESACTIVADO"
-            await app.escribir_en_chat(f"🪲 **Debug:** `{estado}`\nUsa `/debug on`, `/debug off` o `/debug clear`.", tipo="system")
+            status = "ACTIVADO" if logger.level == logging.DEBUG else "DESACTIVADO"
+            await app.write_to_chat(f"🪲 **Debug:** `{status}`\nUsa `/debug on`, `/debug off` o `/debug clear`.", type="system")
         return True
 
     elif cmd == "/permissions":
         perm_file = Path(".harness_permissions.json")
         if not perm_file.exists():
-            await app.escribir_en_chat("No hay permisos guardados en `.harness_permissions.json`.", tipo="system")
+            await app.write_to_chat("No hay permisos guardados en `.harness_permissions.json`.", type="system")
             return True
 
         data = json.loads(perm_file.read_text())
         allowed = list(data.get("session_allowed", {}).keys())
 
         if not allowed:
-            await app.escribir_en_chat("No hay herramientas con 'Permitir siempre'.", tipo="system")
+            await app.write_to_chat("No hay herramientas con 'Permitir siempre'.", type="system")
             return True
 
         txt = "### 🔐 Permisos Permanentes\n\n"
@@ -263,9 +238,23 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             txt += f"- `{tool}`\n"
         txt += "\n*Para borrarlos, elimina el archivo `.harness_permissions.json`.*"
 
-        await app.escribir_en_chat(txt, tipo="agent")
+        await app.write_to_chat(txt, type="agent")
+        return True
+
+    elif cmd == "/export":
+        fmt = parts[1].lower() if len(parts) > 1 else "markdown"
+        file_path = parts[2] if len(parts) > 2 else None
+
+        from app.core.harness.transcript import render_transcript
+        text = render_transcript(ctx.messages, fmt)
+
+        if file_path:
+            Path(file_path).write_text(text, encoding="utf-8")
+            await app.write_to_chat(f"✅ Exportado a `{file_path}` en formato `{fmt}`.", type="system")
+        else:
+            await app.write_to_chat(f"```\n{text}\n```", type="agent")
         return True
 
     else:
-        await app.escribir_en_chat(f"❌ **Comando desconocido:** `{cmd}`\nUsa `/help` para ver la lista.", tipo="agent")
+        await app.write_to_chat(f"❌ **Comando desconocido:** `{cmd}`\nUsa `/help` para ver la lista.", type="agent")
         return True

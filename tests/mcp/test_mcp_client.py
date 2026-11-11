@@ -40,7 +40,7 @@ async def test_mcp_client_full_flow(mock_session_class, mock_stdio_client):
     # 3. Verificaciones
     mock_session.initialize.assert_called_once()
     assert "test_tool" in registry.names()
-    assert registry.get("test_tool").description == "[MCP] Una tool"
+    assert registry.get("test_tool").description == "[MCP:unknown] Una tool"
 
 
 @pytest.mark.asyncio
@@ -51,7 +51,7 @@ async def test_mcp_client_connect_error(mock_session_class, mock_stdio_client):
     client = MCPClient(command="test", args=[])
     registry = ToolRegistry()
 
-    with pytest.raises(RuntimeError, match="No conectado"):
+    with pytest.raises(RuntimeError, match="Not connected"):
         await client.register_tools(registry)
 
 
@@ -130,3 +130,29 @@ async def test_mcp_tool_proxy_non_text_content():
                          parameters_schema={}, session=mock_session)
     res = await proxy.run()
     assert "[image data]" in res.content  # Cubre línea 76
+
+
+@pytest.mark.asyncio
+async def test_mcp_disconnect_exception():
+    from app.mcp.client import MCPClient
+    from unittest.mock import AsyncMock, patch
+    client = MCPClient(command="test", args=[])
+    client.exit_stack.aclose = AsyncMock(
+        side_effect=Exception("Disconnect error"))
+    with pytest.raises(Exception, match="Disconnect error"):
+        await client.disconnect()
+
+
+@pytest.mark.asyncio
+@patch("app.mcp.client.stdio_client")
+@patch("app.mcp.client.ClientSession")
+async def test_mcp_client_connection_error_and_env(mock_session_class, mock_stdio_client):
+    """Cubre el env custom (línea 17) y el except de connect (línea 37-39)."""
+    mock_stdio_client.return_value.__aenter__ = AsyncMock(
+        side_effect=Exception("Connection failed"))
+
+    client = MCPClient(command="test", args=[], env={"CUSTOM_ENV": "value"})
+    assert client.server_params.env["CUSTOM_ENV"] == "value"
+
+    with pytest.raises(Exception, match="Connection failed"):
+        await client.connect()

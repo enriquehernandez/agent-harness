@@ -6,33 +6,31 @@ from app.tools.shell import BashTool
 
 @pytest.mark.asyncio
 async def test_write_and_read_file(tmp_path):
-    # tmp_path es una fixture de pytest que crea un directorio temporal
     tool_write = WriteFileTool(base_dir=str(tmp_path))
     tool_read = ReadFileTool(base_dir=str(tmp_path))
 
-    result_write = await tool_write.run(path="test.txt", content="Hola Mundo")
+    result_write = await tool_write.run(path="test.txt", content="Hello World")
     assert result_write.success is True
 
     result_read = await tool_read.run(path="test.txt")
     assert result_read.success is True
-    assert result_read.content == "Hola Mundo"
+    assert result_read.content == "Hello World"
 
 
 @pytest.mark.asyncio
 async def test_read_file_traversal_protection(tmp_path):
     tool_read = ReadFileTool(base_dir=str(tmp_path))
-    # Intento de salir del directorio base
     result = await tool_read.run(path="../../../etc/passwd")
     assert result.success is False
-    assert "Acceso denegado" in result.error
+    assert "Access denied" in result.error
 
 
 @pytest.mark.asyncio
 async def test_bash_tool_success():
     tool = BashTool()
-    result = await tool.run(command="echo 'Hola'")
+    result = await tool.run(command="echo 'Hello'")
     assert result.success is True
-    assert "Hola" in result.content
+    assert "Hello" in result.content
 
 
 @pytest.mark.asyncio
@@ -45,7 +43,7 @@ async def test_bash_tool_timeout():
 
 @pytest.mark.asyncio
 async def test_function_tool_async():
-    """Cubre la rama donde la función inyectada es asíncrona."""
+    """Covers the branch where the injected function is asynchronous."""
     async def async_func(x: int) -> int:
         return x * 2
 
@@ -62,64 +60,37 @@ async def test_function_tool_async():
 
 @pytest.mark.asyncio
 async def test_filesystem_errors(tmp_path):
-    from app.tools.filesystem import ReadFileTool, WriteFileTool
-    from unittest.mock import patch
-
-    # 1. Creamos un archivo real para que exista
-    test_file = tmp_path / "archivo.txt"
-    test_file.write_text("Hola")
+    test_file = tmp_path / "file.txt"
+    test_file.write_text("Hello")
 
     tool_read = ReadFileTool(base_dir=str(tmp_path))
 
-    # 2. Ahora parcheamos el read_text para que lance PermissionError
+    from unittest.mock import patch
     with patch("pathlib.Path.read_text", side_effect=PermissionError("Denied")):
-        res = await tool_read.run(path="archivo.txt")
+        res = await tool_read.run(path="file.txt")
         assert res.success is False
         assert "Denied" in res.error
 
     tool_write = WriteFileTool(base_dir=str(tmp_path))
-    # Simulamos un error al escribir
     with patch("pathlib.Path.write_text", side_effect=PermissionError("Denied")):
-        res = await tool_write.run(path="archivo.txt", content="Hola")
+        res = await tool_write.run(path="file.txt", content="Hello")
         assert res.success is False
         assert "Denied" in res.error
 
 
 @pytest.mark.asyncio
 async def test_bash_tool_error():
-    from app.tools.shell import BashTool
     tool = BashTool()
-    # Comando que falla
-    result = await tool.run(command="comando_que_no_existe_123")
+    result = await tool.run(command="command_that_does_not_exist_123")
     assert result.success is False
     assert "not found" in result.error or "Exit code" in result.error
 
 
 @pytest.mark.asyncio
-async def test_filesystem_permission_errors(tmp_path):
-    from app.tools.filesystem import ReadFileTool, WriteFileTool
-
-    # 1. ReadFile con ruta fuera de base
-    tool_read = ReadFileTool(base_dir=str(tmp_path))
-    res1 = await tool_read.run(path="/etc/passwd")
-    assert res1.success is False
-    assert "Acceso denegado" in res1.error
-
-    # 2. WriteFile con ruta fuera de base
-    tool_write = WriteFileTool(base_dir=str(tmp_path))
-    res2 = await tool_write.run(path="/etc/passwd", content="hack")
-    assert res2.success is False
-    assert "Acceso denegado" in res2.error
-
-
-@pytest.mark.asyncio
 async def test_bash_tool_general_exception():
-    from app.tools.shell import BashTool
     from unittest.mock import patch
-
     tool = BashTool()
 
-    # Cubre el except general del BashTool
     with patch("asyncio.create_subprocess_shell", side_effect=Exception("Boom")):
         res = await tool.run(command="ls")
         assert res.success is False
@@ -127,34 +98,7 @@ async def test_bash_tool_general_exception():
 
 
 @pytest.mark.asyncio
-async def test_filesystem_errors(tmp_path):
-    from app.tools.filesystem import ReadFileTool, WriteFileTool
-    from unittest.mock import patch
-
-    # 🔥 Crear el archivo para que pase el is_file()
-    test_file = tmp_path / "archivo.txt"
-    test_file.write_text("Hola")
-
-    tool_read = ReadFileTool(base_dir=str(tmp_path))
-
-    # Simulamos un error de permisos al leer
-    with patch("pathlib.Path.read_text", side_effect=PermissionError("Denied")):
-        res = await tool_read.run(path="archivo.txt")
-        assert res.success is False
-        assert "Denied" in res.error
-
-    tool_write = WriteFileTool(base_dir=str(tmp_path))
-    # Simulamos un error al escribir
-    with patch("pathlib.Path.write_text", side_effect=PermissionError("Denied")):
-        res = await tool_write.run(path="archivo.txt", content="Hola")
-        assert res.success is False
-        assert "Denied" in res.error
-
-
-@pytest.mark.asyncio
 async def test_function_tool_exception():
-    from app.core.harness.tool import FunctionTool
-
     def crash():
         raise ValueError("Crash")
     tool = FunctionTool(name="crash", description="",
@@ -165,24 +109,64 @@ async def test_function_tool_exception():
 
 
 def test_registry_contains(basic_registry):
-    # Cubre el __contains__ de ToolRegistry (línea 80)
     assert "add" in basic_registry
-    assert "no_existe" not in basic_registry
+    assert "not_exists" not in basic_registry
 
 
 @pytest.mark.asyncio
-async def test_filesystem_read_not_found_and_truncate(tmp_path):
+async def test_filesystem_write_error(tmp_path):
+    """Cubre el except de WriteFileTool."""
+    from app.tools.filesystem import WriteFileTool
+    from unittest.mock import patch
+    tool = WriteFileTool(base_dir=str(tmp_path))
+    with patch("pathlib.Path.write_text", side_effect=Exception("Write error")):
+        res = await tool.run(path="test.txt", content="Hello")
+        assert res.success is False
+        assert "Write error" in res.error
+
+
+@pytest.mark.asyncio
+async def test_filesystem_read_error_and_write_error(tmp_path):
+    """Cubre el except de ReadFileTool y WriteFileTool (línea 29, 33, 58)."""
+    from app.tools.filesystem import ReadFileTool, WriteFileTool
+    from unittest.mock import patch
+
+    # 1. Read error (línea 29)
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("Hello")
+    tool_read = ReadFileTool(base_dir=str(tmp_path))
+    with patch("pathlib.Path.read_text", side_effect=Exception("Read error")):
+        res = await tool_read.run(path="test.txt")
+        assert res.success is False
+        assert "Read error" in res.error
+
+    # 2. Write error (línea 58)
+    tool_write = WriteFileTool(base_dir=str(tmp_path))
+    with patch("pathlib.Path.write_text", side_effect=Exception("Write error")):
+        res = await tool_write.run(path="test.txt", content="Hello")
+        assert res.success is False
+        assert "Write error" in res.error
+
+
+@pytest.mark.asyncio
+async def test_filesystem_read_missing_truncate_and_write_denied(tmp_path):
+    """Cubre las líneas 29, 33 y 58 de filesystem.py."""
     from app.tools.filesystem import ReadFileTool, WriteFileTool
 
     tool_read = ReadFileTool(base_dir=str(tmp_path))
     tool_write = WriteFileTool(base_dir=str(tmp_path))
 
-    # 1. Cubre línea 30 (archivo no existe)
-    res = await tool_read.run(path="fantasma.txt")
-    assert "no existe" in res.error
+    # 1. Read missing (línea 29)
+    res = await tool_read.run(path="ghost.txt")
+    assert "does not exist" in res.error
 
-    # 2. Cubre línea 35 (truncado)
-    huge_text = "A" * 11000
-    await tool_write.run(path="huge.txt", content=huge_text)
-    res_huge = await tool_read.run(path="huge.txt")
-    assert "[TRUNCADO]" in res_huge.content
+    # 2. Truncate (línea 33)
+    huge_content = "A" * 11000
+    huge_file = tmp_path / "huge.txt"
+    huge_file.write_text(huge_content)
+    res = await tool_read.run(path="huge.txt")
+    assert "[TRUNCATED]" in res.content
+
+    # 3. Write denied (línea 58)
+    res = await tool_write.run(path="../outside.txt", content="Hack")
+    assert "Access denied" in res.error

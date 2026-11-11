@@ -6,7 +6,7 @@ console = Console()
 
 
 async def ask_user_permission(tool_name: str, signature: str, args: dict, diff_text: str | None = None) -> str:
-    """Pregunta interactiva usando rich."""
+    """Interactive prompt using rich."""
 
     args_str = ""
     for k, v in args.items():
@@ -36,10 +36,8 @@ async def ask_user_permission(tool_name: str, signature: str, args: dict, diff_t
         border_style="yellow",
     )
 
-    # Imprimimos el panel
     console.print(panel)
 
-    # Pedimos el input
     response = Prompt.ask(
         "[bold yellow]¿Permitir ejecución?[/bold yellow]",
         choices=["y", "n", "a"],

@@ -18,8 +18,8 @@ def test_get_fake_llm():
 
 
 def test_get_unknown_provider():
-    with pytest.raises(ValueError, match="Proveedor 'inventado' no registrado"):
-        get_llm("inventado")
+    with pytest.raises(ValueError, match="Provider 'made-up' not registered"):
+        get_llm("made-up")
 
 
 @pytest.mark.asyncio
@@ -27,21 +27,19 @@ async def test_fake_llm_stream_and_count():
     from app.core.llm.providers.fake import FakeLLM
     from app.core.llm.base import LLMResponse
 
-    fake = FakeLLM(responses=[LLMResponse(content="Hola")])
+    fake = FakeLLM(responses=[LLMResponse(content="Hello")])
 
-    # Cubrir count_tokens
     assert fake.count_tokens("12345678") == 2
 
-    # Cubrir stream_chat
     chunks = []
     async for chunk in fake.stream_chat([]):
         chunks.append(chunk)
-    assert chunks == ["Hola"]
+    assert chunks == ["Hello"]
 
 
 @pytest.mark.asyncio
 async def test_fake_llm_default_response():
     from app.core.llm.providers.fake import FakeLLM
     fake = FakeLLM(responses=[])
-    resp = await fake.chat([])  # Se queda sin respuestas
-    assert resp.content == "Respuesta simulada por FakeLLM."
+    resp = await fake.chat([])
+    assert resp.content == "Simulated response by FakeLLM."

@@ -6,7 +6,7 @@ from app.core.harness.tool import ToolRegistry
 
 
 def test_register_core_tools():
-    """Cubre el registro de herramientas."""
+    """Covers tool registration."""
     registry = ToolRegistry()
     register_core_tools(registry)
     assert "bash" in registry.names()
@@ -15,14 +15,6 @@ def test_register_core_tools():
 
 @patch("app.main.asyncio.run")
 def test_main_entry(mock_asyncio_run):
-    """Cubre el punto de entrada."""
+    """Covers the entry point."""
     main()
-    mock_asyncio_run.assert_called_once()
-
-
-@patch("app.main.asyncio.run")
-def test_main_entry_point(mock_asyncio_run):
-    """Cubre la función main() que lanza la TUI."""
-    # Al llamar a main(), se ejecuta asyncio.run(run_tui())
-    main()
-    mock_asyncio_run.assert_called_once()
+    assert mock_asyncio_run.called

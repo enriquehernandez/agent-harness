@@ -6,24 +6,30 @@ El Harness está diseñado con un enfoque de **puertos y adaptadores** (Arquitec
 
 ```mermaid
 graph TD
-    User([Usuario]) -->|Texto / Slash Commands| TUI[TUI Prompt_Toolkit]
+    User([Usuario]) -->|Texto / Drag & Drop| TUI[Textual TUI]
     TUI -->|Input| Loop[AgentLoop]
     
     subgraph Core ["Core del Harness"]
-        Loop -->|1. Pide razonamiento| LLM[BaseLLM]
-        Loop -->|2. ¿Permiso?| Gate[PermissionGate]
-        Gate -->|Permitir/Denegar| Loop
-        Loop -->|3. Ejecuta| Tools[ToolRegistry]
-        Loop <-->|4. Historial| Context[ContextManager]
+        Loop -->|1. Razonamiento Streaming| LLM[BaseLLM]
+        Loop -->|2. Permisos| Gate[PermissionGate]
+        Loop -->|3. Ejecución| Tools[ToolRegistry]
+        Loop <-->|4. Memoria| Context[ContextManager]
         Context <-->|Compactación| Compactor[SummarizationStrategy]
+        Context <-->|Persistencia| MemoryFile[(summary.md)]
     end
     
     subgraph Adaptadores
-        LLM -->|Registry Pattern| OpenAI[OpenAI]
-        LLM -->|Registry Pattern| OpenRouter[OpenRouter]
-        Tools -->|Local| Bash[BashTool]
-        Tools -->|Local| File[ReadFileTool]
-        Tools -->|MCP Client| MCP[Servidor MCP]
+        LLM -.->|Registry| Providers[OpenAI / OpenRouter / Groq]
+        Tools -.->|Local| LocalTools[Bash, File, Memory]
+        Tools -.->|MCP Client| MCP[Servidores MCP Externos]
+        Tools -.->|Delegate| Subagent[Subagente Reviewer]
+        Subagent -.->|Nuevo Loop| Loop
+    end
+    
+    subgraph UI ["UI Components"]
+        TUI --> DebugPanel[Debug Panel]
+        TUI --> PermissionModal[Permission Modal]
+        TUI --> Chat[Chat con Streaming]
     end
 ```
 
@@ -32,19 +38,19 @@ graph TD
 ```mermaid
 sequenceDiagram
     participant U as Usuario
-    participant H as Harness (Loop)
-    participant L as LLM
-    participant G as PermissionGate
-    participant T as Tool (Local/MCP)
+    participant T as Textual TUI
+    participant L as AgentLoop
+    participant LLM as BaseLLM
 
-    U->>H: "¿Qué OS tengo?"
-    H->>L: Enviar historial + Tools disponibles
-    L-->>H: Tool Call: `get_system_info`
-    H->>G: Verificar permiso para `get_system_info`
-    G-->>H: ALLOW
-    H->>T: Ejecutar tool
-    T-->>H: "OS: macOS 14.0"
-    H->>L: Inyectar resultado
-    L-->>H: "Usas macOS 14.0"
-    H-->>U: Respuesta final
+    U->>T: "Escribe un poema"
+    T->>L: stream("Escribe un poema")
+    L->>LLM: stream_chat(messages)
+    
+    loop Por cada token
+        LLM-->>L: chunk
+        L-->>T: yield chunk
+        T->>T: Actualiza widget Markdown
+    end
+    
+    T-->>U: Muestra texto completo
 ```

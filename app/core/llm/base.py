@@ -5,16 +5,15 @@ from typing import Any, AsyncIterator, Optional
 
 @dataclass
 class LLMResponse:
-    """Respuesta normalizada, independiente del proveedor."""
+    """Normalized response, provider-independent."""
     content: Optional[str] = None
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
-    # Formato: {"id": str, "name": str, "arguments": dict}
     usage: dict[str, int] = field(default_factory=dict)
-    raw: Any = None  # Respuesta original por si se necesita debuggear
+    raw: Any = None
 
 
 class BaseLLM(ABC):
-    """Interfaz abstracta para cualquier proveedor de LLM."""
+    """Abstract interface for any LLM provider."""
 
     @abstractmethod
     async def chat(
@@ -23,7 +22,7 @@ class BaseLLM(ABC):
         tools: Optional[list[dict[str, Any]]] = None,
         **kwargs: Any,
     ) -> LLMResponse:
-        """Enviar mensajes y obtener respuesta normalizada."""
+        """Send messages and get normalized response."""
         ...
 
     @abstractmethod
@@ -33,23 +32,22 @@ class BaseLLM(ABC):
         tools: Optional[list[dict[str, Any]]] = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        """Versión streaming (solo texto, por simplicidad)."""
+        """Streaming version (text only, for simplicity)."""
         ...
 
     @abstractmethod
     def count_tokens(self, text: str) -> int:
-        """Estimación de tokens (para compaction)."""
+        """Token estimation (for compaction)."""
         ...
 
     @property
     @abstractmethod
     def supports_tool_calling(self) -> bool:
-        """Indica si el modelo soporta tools nativamente."""
+        """Indicates if the model natively supports tools."""
         ...
 
-    # 🔥 NUEVO: Límite de contexto del modelo
     @property
     @abstractmethod
     def max_context_window(self) -> int:
-        """Límite de tokens del modelo (ej. 128000 para GPT-4o)."""
+        """Model token limit (e.g., 128000 for GPT-4o)."""
         ...

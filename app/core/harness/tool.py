@@ -5,14 +5,14 @@ from typing import Any, Callable
 
 @dataclass
 class ToolResult:
-    """Resultado normalizado de una herramienta."""
+    """Normalized result from a tool execution."""
     success: bool
-    content: str           # Lo que se inyecta al LLM como resultado
+    content: str
     error: str | None = None
 
 
 class BaseTool(ABC):
-    """Interfaz de una herramienta local."""
+    """Interface for a local tool."""
     name: str
     description: str
     parameters_schema: dict[str, Any]
@@ -22,7 +22,7 @@ class BaseTool(ABC):
         ...
 
     def to_openai_schema(self) -> dict[str, Any]:
-        """Formato que entiende OpenAI/OpenRouter/Groq para tool calling."""
+        """Format expected by OpenAI/OpenRouter/Groq for tool calling."""
         return {
             "type": "function",
             "function": {
@@ -34,7 +34,7 @@ class BaseTool(ABC):
 
 
 class FunctionTool(BaseTool):
-    """Tool creada a partir de una función simple (útil para tests)."""
+    """Tool created from a simple function (useful for tests)."""
 
     def __init__(
         self,
@@ -51,7 +51,7 @@ class FunctionTool(BaseTool):
     async def run(self, **kwargs) -> ToolResult:
         try:
             result = self._func(**kwargs)
-            if hasattr(result, "__await__"):  # es async
+            if hasattr(result, "__await__"):  # is async
                 result = await result
             return ToolResult(success=True, content=str(result))
         except Exception as e:
@@ -59,7 +59,7 @@ class FunctionTool(BaseTool):
 
 
 class ToolRegistry:
-    """Registro de herramientas disponibles."""
+    """Registry of available tools."""
 
     def __init__(self):
         self._tools: dict[str, BaseTool] = {}

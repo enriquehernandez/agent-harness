@@ -1,15 +1,13 @@
 import json
 from typing import Any
 from ..llm.base import BaseLLM
-from .compaction import CompactionStrategy, NoneStrategy, SlidingWindowStrategy, SummarizationStrategy
+from .compaction import (
+    CompactionStrategy, SummarizationStrategy, SlidingWindowStrategy, NoneStrategy
+)
 
 
 class ContextManager:
-    def __init__(
-        self,
-        system_prompt: str | None = None,
-        strategy: CompactionStrategy | None = None
-    ):
+    def __init__(self, system_prompt: str | None = None, strategy: CompactionStrategy | None = None):
         self.messages: list[dict[str, Any]] = []
         self.strategy = strategy or SummarizationStrategy()
         if system_prompt:
@@ -51,18 +49,15 @@ class ContextManager:
         return self.messages
 
     def estimate_tokens(self) -> int:
-        """Estimación rápida (1 token ~ 4 caracteres)."""
         total_chars = sum(len(str(m.get("content", "")))
                           for m in self.messages)
         return total_chars // 4
 
     def clear(self) -> None:
-        """Limpia la conversación manteniendo el system prompt."""
         system = self.messages[0] if self.messages and self.messages[0]["role"] == "system" else None
         self.messages = [system] if system else []
 
     def set_strategy(self, strategy_name: str) -> str:
-        """Cambia la estrategia de compactación y devuelve su nombre."""
         name = strategy_name.lower()
         if name == "sliding":
             self.strategy = SlidingWindowStrategy()
@@ -75,22 +70,34 @@ class ContextManager:
             return "Summarization"
 
     async def maybe_compact(self, llm: BaseLLM, verbose: bool = False) -> bool:
-        """Si se supera el 80% del contexto, compacta."""
         estimated = self.estimate_tokens()
         limit = llm.max_context_window
-
         if estimated > (limit * 0.8):
             self.messages = await self.strategy.compact(self.messages, llm)
             return True
         return False
 
     async def force_compact(self, llm: BaseLLM, verbose: bool = False) -> str | None:
-        """Fuerza la compactación y devuelve el resumen si verbose está activo."""
         self.messages = await self.strategy.compact(self.messages, llm)
-
-        # 🔥 Si verbose está activo, extraemos el último mensaje de sistema (que es el resumen)
         if verbose:
             for msg in reversed(self.messages):
-                if msg["role"] == "system" and "Resumen de la conversación" in msg.get("content", ""):
+                if msg["role"] == "system" and "Summary of previous conversation" in msg.get("content", ""):
                     return msg["content"]
         return None
+
+    def add_user_with_image(self, text: str, image_urls: list[str]):
+        """Añade un mensaje de usuario con imágenes en formato multimodal."""
+        content = []
+        if text:
+            content.append({"type": "text", "text": text})
+        else:
+            content.append(
+                {"type": "text", "text": "[Imagen adjunta]"})  # pragma: no cover
+
+        for url in image_urls:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": url}
+            })
+
+        self.messages.append({"role": "user", "content": content})

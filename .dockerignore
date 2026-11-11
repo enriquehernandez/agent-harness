@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+htmlcov
+junit.xml
+.harness_memory
+.harness_permissions.json
+.env
+mcp_config.json
+docs/
+*.md
+!README.md

@@ -1,10 +1,10 @@
 import asyncio
+import base64
 import json
 from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal, Center, VerticalScroll
 from textual.widgets import Input, Static, LoadingIndicator, Markdown, Button, ListView, ListItem, Label
-from textual.widgets._markdown import MarkdownFence
 from textual import work
 from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList
@@ -20,20 +20,48 @@ from app.mcp.client import MCPClient
 from app.core.config import settings
 from app.core.logger import logger, get_debug_events
 from app.tools.memory import SUMMARY_FILE
-# 🔥 Importamos el modal de detalle
 from app.tui.debug_screen import DebugDetailScreen
 
 # ==========================================
-# MARKDOWN PERSONALIZADO
+# INPUT PERSONALIZADO (INTERCEPTA ARCHIVOS)
 # ==========================================
 
 
-class CopiableMarkdown(Markdown):
-    def get_fence(self, code: str, language: str | None = None) -> MarkdownFence:
-        return MarkdownFence(code, language)
+class FileAwareInput(Input):
+    """Input que detecta si el texto es una ruta de archivo y lo intercepta."""
+
+    async def _on_paste(self, event) -> None:
+        text = event.text.strip().strip("'\"")
+        clean_path = text.replace(
+            "file://", "") if text.startswith("file://") else text
+
+        try:
+            p = Path(clean_path).expanduser()
+            if p.exists() and p.is_file():
+                # 🔥 Es un archivo: lo procesamos y NO lo escribimos en el input
+                await self.app.handle_file_paste(str(p))
+                event.prevent_default()
+                event.stop()
+                return
+        except Exception:
+            pass
+
+        # Si no es un archivo, dejamos que el Input lo maneje normalmente
+        await super()._on_paste(event)  # pragma: no cover
+
+    def watch_value(self, value: str) -> None:
+        """Watcher: si el texto se cuela, lo limpiamos."""
+        if value and value.startswith("/") and " " not in value.strip():
+            # Si parece una ruta de archivo (empieza con / y no tiene espacios)
+            p = Path(value.strip().strip("'\""))
+            if p.exists() and p.is_file():
+                # 🔥 Es un archivo: lo borramos del input y lo procesamos
+                self.value = ""
+                self.app.call_later(self.app.handle_file_paste, str(p))
+                return
 
 # ==========================================
-# MODAL DE PERMISOS
+# PERMISSION MODAL
 # ==========================================
 
 
@@ -112,7 +140,7 @@ class PermissionModal(ModalScreen[str]):
             event.prevent_default()
 
 # ==========================================
-# APP PRINCIPAL
+# MAIN APP
 # ==========================================
 
 
@@ -121,7 +149,7 @@ class AgentHarnessApp(App):
         ("ctrl+q", "quit", "Salir"),
         ("ctrl+l", "clear_chat", "Limpiar Chat"),
         ("ctrl+u", "clear_input", "Limpiar Input"),
-        ("f1", "toggle_debug", "Toggle Debug Panel"),  # 🔥 F1 para mostrar/ocultar
+        ("f1", "toggle_debug", "Toggle Debug Panel"),
     ]
 
     CSS = """
@@ -145,12 +173,10 @@ class AgentHarnessApp(App):
         text-align: center;
     }
 
-    /* CONTENEDOR PRINCIPAL DIVIDIDO */
     #main-content {
         height: 1fr;
     }
 
-    /* CHAT (IZQUIERDA) */
     #chat-container {
         width: 1fr;
         padding: 1 2;
@@ -189,12 +215,11 @@ class AgentHarnessApp(App):
         padding: 0 1;
     }
 
-    /* PANEL DEBUG (DERECHA) */
     #debug-panel {
         width: 50%;
         border-left: solid #30363d;
         background: #161b22;
-        display: none; /* Oculto por defecto */
+        display: none;
         padding: 1;
     }
     
@@ -219,14 +244,24 @@ class AgentHarnessApp(App):
         background: #21262d;
     }
 
-    /* INPUT (ABAJO) */
     #input-container {
         dock: bottom; 
-        height: 5; 
+        height: 6; 
         padding: 0 2; 
         background: #0d1117;
         border-top: solid #30363d;
         align: center middle; 
+    }
+
+    #attachments-bar {
+        height: 2;
+        width: 100%;
+        background: #161b22;
+        border-bottom: solid #30363d;
+        padding: 0 1;
+        display: none;
+        color: #58a6ff;
+        text-style: italic;
     }
 
     #input-box {
@@ -248,8 +283,9 @@ class AgentHarnessApp(App):
         self.registry = None
         self.gate = None
         self.mcp_clients = []
-        self.loop_agent = None
+        self.agent_loop = None
         self.attached_files = []
+        self.attached_images = []
         self.debug_mode = False
         self.verbose_mode = False
 
@@ -263,52 +299,43 @@ class AgentHarnessApp(App):
                     pass
                 yield LoadingIndicator(id="loading-indicator")
 
-            # 🔥 PANEL DE DEBUG OCULTO POR DEFECTO
             with Vertical(id="debug-panel"):
                 yield Label("🪲 Panel de Debug", id="debug-header")
                 yield ListView(id="debug-list")
 
         with Vertical(id="input-container"):
-            yield Input(placeholder="Escribe tu mensaje... (Ctrl+U para limpiar)", id="input-box")
+            yield Static("", id="attachments-bar")
+            # 🔥 Usamos nuestro Input personalizado
+            yield FileAwareInput(placeholder="Escribe tu mensaje... (Ctrl+U para limpiar)", id="input-box")
 
     async def on_mount(self) -> None:
-        await self.inicializar_agente()
-        await self.escribir_en_chat("🤖 Agent Harness iniciado. Escribe /help para ver comandos.", tipo="system")
+        await self.initialize_agent()
+        await self.write_to_chat("🤖 Agent Harness iniciado. Escribe /help para ver comandos.", type="system")
+        await self.write_to_chat("💡 Puedes pegar imágenes o archivos. Se mostrarán en la barra de adjuntos.", type="system")
 
-        comandos_disponibles = [
-            "/help",
-            "/shortcuts",
-            "/model",
-            "/provider",
-            "/tools",
-            "/subagents",
-            "/tokens",
-            "/compact",
-            "/verbose",
-            "/clear",
-            "/debug",
-            "/permissions",
-            "/quit",
-            "/exit"
+        available_commands = [
+            "/help", "/shortcuts", "/model", "/provider", "/tools", "/subagents",
+            "/tokens", "/compact", "/verbose", "/clear", "/debug", "/permissions", "/export", "/quit"
         ]
 
-        input_box = self.query_one("#input-box", Input)
+        input_box = self.query_one("#input-box", FileAwareInput)
         input_box.suggester = SuggestFromList(
-            comandos_disponibles, case_sensitive=False)
+            available_commands, case_sensitive=False)
         input_box.focus()
 
-    async def inicializar_agente(self):
+    async def initialize_agent(self):
         memory_context = ""
         if SUMMARY_FILE.exists():
             content = SUMMARY_FILE.read_text(encoding="utf-8").strip()
             if content:
-                memory_context = f"\n\n[Memoria a largo plazo]:\n{content}"
+                memory_context = f"\n\n[Long-term memory]:\n{content}"
 
         self.ctx = ContextManager(
             system_prompt=(
-                "Eres un asistente útil. Tienes acceso a herramientas locales y remotas (MCP). "
-                "Responde de forma concisa. Usa 'write_file' o 'edit_file' para modificar archivos. "
-                "Para revisar código, usa 'delegate_to_reviewer'. Para recordar cosas, usa 'memory_save'."
+                "You are a helpful assistant. You have access to local and remote tools (MCP). "
+                "Answer concisely. Use 'write_file' or 'edit_file' to modify files. "
+                "To review code, use 'delegate_to_reviewer'. To remember things, use 'memory_save'. "
+                "If the user provides an image, describe it or use it as context."
                 f"{memory_context}"
             )
         )
@@ -328,7 +355,7 @@ class AgentHarnessApp(App):
                     await client.register_tools(self.registry, server_name=name)
                     self.mcp_clients.append(client)
                 except Exception as e:
-                    await self.escribir_en_chat(f"❌ Error conectando MCP {name}: {e}", tipo="system")
+                    await self.write_to_chat(f"❌ Error conectando MCP {name}: {e}", type="system")
 
         reviewer_tools = ToolRegistry()
         for tool_name in ["read_text_file", "list_directory", "bash"]:
@@ -338,24 +365,24 @@ class AgentHarnessApp(App):
         reviewer_tool = DelegateTool(
             name="delegate_to_reviewer", description="Delega una tarea de revisión de código.",
             llm=get_llm(self.state["provider"]), tools=reviewer_tools,
-            system_prompt="Eres un revisor de código experto. Sé conciso."
+            system_prompt="You are an expert code reviewer. Be concise."
         )
         self.registry.register(reviewer_tool)
 
-        self.gate = PermissionGate(ask_user=self.pedir_permiso_textual)
-        self.loop_agent = AgentLoop(llm=get_llm(
+        self.gate = PermissionGate(ask_user=self.request_permission)
+        self.agent_loop = AgentLoop(llm=get_llm(
             self.state["provider"]), tools=self.registry, permissions=self.gate)
 
-        self.actualizar_dashboard("Listo")
+        self.update_dashboard("Listo")
 
-    def actualizar_dashboard(self, status: str, tokens: int = 0, last_tool: str = "Ninguna"):
+    def update_dashboard(self, status: str, tokens: int = 0, last_tool: str = "Ninguna"):
         dash = self.query_one("#dashboard", Static)
         color = "green" if status == "Listo" else "yellow" if status == "Pensando..." else "red"
 
         model_name = "Desconocido"
-        if self.loop_agent and self.loop_agent.llm:
-            model_name = getattr(self.loop_agent.llm, 'model_name', getattr(
-                self.loop_agent.llm, 'model', 'Desconocido'))
+        if self.agent_loop and self.agent_loop.llm:
+            model_name = getattr(self.agent_loop.llm, 'model_name', getattr(
+                self.agent_loop.llm, 'model', 'Desconocido'))
 
         dash.update(
             f"⚡ [bold]{self.state['provider']}[/] ({model_name})  •  "
@@ -363,60 +390,65 @@ class AgentHarnessApp(App):
             f"Tokens: {tokens}  •  Última tool: {last_tool}"
         )
 
-    async def escribir_en_chat(self, texto: str, tipo: str = "agent"):
+    async def write_to_chat(self, text: str, type: str = "agent"):
         try:
             scroll = self.query_one("#chat-scroll", VerticalScroll)
-            if tipo == "user":
-                widget = Static(f"👤 **Tú:**\n{texto}",
+            if type == "user":
+                widget = Static(f"👤 **Tú:**\n{text}",
                                 classes="message-user", markup=True)
-            elif tipo == "system":
-                widget = Static(texto, classes="message-system", markup=True)
+            elif type == "system":
+                widget = Static(text, classes="message-system", markup=True)
             else:
-                widget = CopiableMarkdown(texto, classes="message-agent")
+                widget = Markdown(text, classes="message-agent")
 
             await scroll.mount(widget)
             scroll.scroll_end(animate=False)
         except Exception:
             pass
 
-    # 🔥 ACCIÓN PARA ABRIR/CERRAR EL PANEL DE DEBUG
-    async def action_toggle_debug(self) -> None:
-        self.debug_mode = not self.debug_mode
-        panel = self.query_one("#debug-panel")
+    def update_attachments_bar(self):
+        bar = self.query_one("#attachments-bar", Static)
+        items = []
+        for f in self.attached_files:
+            items.append(f"📎 {Path(f).name}")
+        for _ in self.attached_images:
+            items.append("🖼️ Imagen")
 
-        if self.debug_mode:
-            panel.display = True
-            await self._refrescar_lista_debug()
-            self.query_one("#debug-list", ListView).focus()
+        if items:
+            bar.update(" | ".join(items) +
+                       "  [dim](Ctrl+U para limpiar)[/dim]")
+            bar.display = True
         else:
-            panel.display = False
-            self.query_one("#input-box", Input).focus()
+            bar.update("")
+            bar.display = False
 
-    async def _refrescar_lista_debug(self):
-        list_view = self.query_one("#debug-list", ListView)
-        await list_view.clear()
+    async def handle_file_paste(self, path: str):
+        """Procesa el archivo pegado."""
+        p = Path(path)
 
-        events = get_debug_events()
-        if not events:
-            list_view.append(ListItem(Label("No hay eventos aún.")))
-            return
+        if p.suffix.lower() in [".png", ".jpg", ".jpeg", ".gif", ".webp"]:
+            with open(p, "rb") as f:
+                img_data = base64.b64encode(f.read()).decode("utf-8")
 
-        for idx, log in enumerate(events):
-            summary = f"#{idx+1} {log['timestamp']} • {log['type']} • {log['summary'][:50]}..."
-            list_view.append(ListItem(Label(summary), id=f"log-{idx}"))
+            mime = "image/jpeg"
+            if p.suffix.lower() == ".png":
+                mime = "image/png"
+            elif p.suffix.lower() == ".gif":
+                mime = "image/gif"
+            elif p.suffix.lower() == ".webp":
+                mime = "image/webp"
 
-    # 🔥 AL SELECCIONAR UN EVENTO, ABRIMOS EL MODAL DE DETALLE
-    async def on_list_view_selected(self, event: ListView.Selected) -> None:
-        if not event.item.id or not event.item.id.startswith("log-"):
-            return
+            b64_url = f"data:{mime};base64,{img_data}"
+            self.attached_images.append(b64_url)
+            await self.write_to_chat(f"🖼️ **Imagen adjunta:** `{p.name}`", type="system")
+        else:
+            if str(p) not in self.attached_files:
+                self.attached_files.append(str(p))
+                await self.write_to_chat(f"📎 **Archivo adjunto:** `{p.name}`", type="system")
 
-        idx = int(event.item.id.split("-")[1])
-        events = get_debug_events()
-        if idx < len(events):
-            log = events[idx]
-            await self.push_screen(DebugDetailScreen(title=log['summary'], payload=log['payload']))
+        self.update_attachments_bar()
 
-    async def pedir_permiso_textual(self, tool_name: str, signature: str, args: dict, diff_text: str | None = None) -> str:
+    async def request_permission(self, tool_name: str, signature: str, args: dict, diff_text: str | None = None) -> str:
         args_str = ""
         for k, v in args.items():
             if k in ("content", "edits") and diff_text:
@@ -438,132 +470,185 @@ class AgentHarnessApp(App):
             result = "n"
 
         if result == "y":
-            await self.escribir_en_chat(f"✅ Permiso **concedido** para ejecutar: `{signature}`", tipo="system")
+            await self.write_to_chat(f"✅ Permiso **concedido** para ejecutar: `{signature}`", type="system")
         elif result == "a":
-            await self.escribir_en_chat(f"✅ Permiso **concedido permanentemente** para ejecutar: `{signature}`", tipo="system")
+            await self.write_to_chat(f"✅ Permiso **concedido permanentemente** para ejecutar: `{signature}`", type="system")
         else:
-            await self.escribir_en_chat(f"❌ Permiso **denegado** para ejecutar: `{signature}`", tipo="system")
+            await self.write_to_chat(f"❌ Permiso **denegado** para ejecutar: `{signature}`", type="system")
 
-        self.query_one("#input-box", Input).focus()
+        self.query_one("#input-box", FileAwareInput).focus()
         return result
 
+    async def action_toggle_debug(self) -> None:
+        self.debug_mode = not self.debug_mode
+        panel = self.query_one("#debug-panel")
+
+        if self.debug_mode:
+            panel.display = True
+            await self._refresh_debug_list()
+            self.query_one("#debug-list", ListView).focus()
+        else:
+            panel.display = False
+            self.query_one("#input-box", FileAwareInput).focus()
+
+    async def toggle_debug_panel(self, show: bool) -> None:
+        panel = self.query_one("#debug-panel")
+        if show:
+            panel.display = True
+            await self._refresh_debug_list()
+        else:
+            panel.display = False
+            self.query_one("#input-box", FileAwareInput).focus()
+
+    def clear_debug_events(self) -> None:
+        from app.core.logger import debug_collector
+        debug_collector.events.clear()
+        if self.debug_mode:
+            asyncio.create_task(self._refresh_debug_list())
+
+    async def _refresh_debug_list(self):
+        list_view = self.query_one("#debug-list", ListView)
+        await list_view.clear()
+
+        events = get_debug_events()
+        if not events:
+            list_view.append(ListItem(Label("No hay eventos aún.")))
+            return
+
+        for idx, log in enumerate(events):
+            summary = f"#{idx+1} {log['timestamp']} • {log['type']} • {log['summary'][:50]}..."
+            list_view.append(ListItem(Label(summary), id=f"log-{idx}"))
+
+    async def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if not event.item.id or not event.item.id.startswith("log-"):
+            return
+
+        idx = int(event.item.id.split("-")[1])
+        events = get_debug_events()
+        if idx < len(events):
+            log = events[idx]
+            await self.push_screen(DebugDetailScreen(title=log['summary'], payload=log['payload']))
+
     @work(exclusive=True)
-    async def procesar_entrada(self, user_input: str):
+    async def process_input(self, user_input: str):
         loading = self.query_one("#loading-indicator", LoadingIndicator)
 
         if user_input.startswith("/"):
-            await self.escribir_en_chat(f"⚙️ Ejecutando comando: {user_input}", tipo="system")
+            await self.write_to_chat(f"⚙️ Ejecutando comando: {user_input}", type="system")
             try:
                 await handle_command(user_input, self.ctx, self.state, get_llm(self.state["provider"]), self)
             except Exception as e:
-                await self.escribir_en_chat(f"❌ Error en comando: {e}", tipo="system")
+                await self.write_to_chat(f"❌ Error en comando: {e}", type="system")
             return
 
-        self.actualizar_dashboard("Pensando...")
-        texto_mostrar = user_input if len(
+        self.update_dashboard("Pensando...")
+        display_text = user_input if len(
             user_input) < 300 else user_input[:300] + "..."
-        await self.escribir_en_chat(texto_mostrar, tipo="user")
+        await self.write_to_chat(display_text, type="user")
         loading.display = True
 
         try:
-            result = await asyncio.wait_for(
-                self.loop_agent.run(user_input, context=self.ctx, verbose=getattr(
-                    self, 'verbose_mode', False)),
-                timeout=120.0
+            stream_gen = self.agent_loop.stream(
+                user_input,
+                context=self.ctx,
+                verbose=getattr(self, 'verbose_mode', False)
             )
+            full_text = await self.stream_to_chat(stream_gen)
 
-            self.actualizar_dashboard(
-                "Listo",
-                tokens=result.usage_total.get("total_tokens", 0),
-                last_tool=result.tools_used[-1] if result.tools_used else "Ninguna"
-            )
-            await self.escribir_en_chat(result.final_answer, tipo="agent")
+            self.update_dashboard("Listo")
 
         except asyncio.TimeoutError:
-            self.actualizar_dashboard("Error")
-            await self.escribir_en_chat("⏳ **Timeout:** El agente tardó demasiado.", tipo="system")
+            self.update_dashboard("Error")
+            await self.write_to_chat("⏳ **Timeout:** El agente tardó demasiado.", type="system")
         except Exception as e:
-            self.actualizar_dashboard("Error")
-            await self.escribir_en_chat(f"❌ **Error:** {e}", tipo="system")
+            self.update_dashboard("Error")
+            await self.write_to_chat(f"❌ **Error:** {e}", type="system")
             logger.error(f"Error en AgentLoop: {e}", exc_info=True)
         finally:
             loading.display = False
-            self.query_one("#input-box", Input).focus()
-            # 🔥 Si el panel está abierto, lo refrescamos
+            self.query_one("#input-box", FileAwareInput).focus()
             if self.debug_mode:
-                await self._refrescar_lista_debug()
+                await self._refresh_debug_list()
+
+    async def stream_to_chat(self, stream_generator):
+        scroll = self.query_one("#chat-scroll", VerticalScroll)
+        markdown_widget = Markdown("", classes="message-agent")
+        await scroll.mount(markdown_widget)
+        scroll.scroll_end(animate=False)
+
+        full_text = ""
+        async for chunk in stream_generator:
+            full_text += chunk
+            await markdown_widget.update(full_text)
+            scroll.scroll_end(animate=False)
+
+        return full_text
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         user_text = event.value.strip()
-        if not user_text and not self.attached_files:
+        if not user_text and not self.attached_files and not self.attached_images:
             return
+
         event.input.value = ""
-        mensaje_final = user_text
+
+        # 🔥 Si hay imágenes, las procesamos directamente
+        if self.attached_images:
+            # Mostramos el mensaje del usuario en el chat
+            display_text = user_text if user_text else "[Imagen adjunta]"
+            await self.write_to_chat(display_text, type="user")
+
+            # Añadimos el mensaje multimodal al contexto
+            self.ctx.add_user_with_image(user_text, self.attached_images)
+
+            # Limpiamos las imágenes
+            self.attached_images = []
+            self.update_attachments_bar()
+
+            # Llamamos al loop directamente (sin pasar por process_input)
+            self.update_dashboard("Pensando...")
+            loading = self.query_one("#loading-indicator", LoadingIndicator)
+            loading.display = True
+
+            try:
+                stream_gen = self.agent_loop.stream(
+                    "",  # 🔥 String vacío para que no añada otro mensaje
+                    context=self.ctx,
+                    verbose=getattr(self, 'verbose_mode', False)
+                )
+                await self.stream_to_chat(stream_gen)
+                self.update_dashboard("Listo")
+            except Exception as e:
+                await self.write_to_chat(f"❌ **Error:** {e}", type="system")
+            finally:
+                loading.display = False
+                self.query_one("#input-box", FileAwareInput).focus()
+            return
+
+        # Flujo normal (texto y archivos)
+        final_message = user_text
         if self.attached_files:
-            archivos_str = ", ".join([f"`{f}`" for f in self.attached_files])
+            files_str = ", ".join([f"`{f}`" for f in self.attached_files])
             if user_text:
-                mensaje_final = f"{user_text}\n\n[Archivos adjuntos para revisar: {archivos_str}]"
+                final_message = f"{user_text}\n\n[Archivos adjuntos para revisar: {files_str}]"
             else:
-                mensaje_final = f"[Por favor, revisa estos archivos: {archivos_str}]"
+                final_message = f"[Por favor, revisa estos archivos: {files_str}]"
             self.attached_files = []
-        self.procesar_entrada(mensaje_final)
+            self.update_attachments_bar()
 
-    async def on_paste(self, event) -> None:
-        texto_pegado = event.text.strip()
-        ruta_limpia = texto_pegado.strip("'\"")
-        if ruta_limpia.startswith("file://"):
-            ruta_limpia = ruta_limpia.replace("file://", "")
-            if not ruta_limpia.startswith("/"):
-                ruta_limpia = "/" + ruta_limpia
-
-        try:
-            p = Path(ruta_limpia).expanduser()
-            if p.exists() and p.is_file():
-                if str(p) not in self.attached_files:
-                    self.attached_files.append(str(p))
-                    icono = "📎"
-                    if p.suffix.lower() in [".png", ".jpg", ".jpeg", ".gif"]:
-                        icono = "🖼️"
-                    elif p.suffix.lower() == ".pdf":
-                        icono = "📄"
-                    elif p.suffix.lower() in [".mp3", ".wav", ".m4a"]:
-                        icono = "🎵"
-                    elif p.suffix.lower() in [".py", ".js", ".ts", ".txt"]:
-                        icono = "📝"
-
-                    await self.escribir_en_chat(f"{icono} **Archivo adjunto:** `{p}`", tipo="system")
-
-                event.prevent_default()
-        except Exception:
-            pass
+        self.process_input(final_message)
 
     async def action_clear_chat(self) -> None:
         scroll = self.query_one("#chat-scroll", VerticalScroll)
         await scroll.remove_children()
-        await self.escribir_en_chat("🧹 Chat limpiado (Ctrl+L)", tipo="system")
+        await self.write_to_chat("🧹 Chat limpiado (Ctrl+L)", type="system")
 
     def action_clear_input(self) -> None:
-        input_box = self.query_one("#input-box", Input)
+        input_box = self.query_one("#input-box", FileAwareInput)
         input_box.value = ""
         input_box.focus()
-
-    async def toggle_debug_panel(self, show: bool) -> None:
-        """Abre o cierra el panel de debug."""
-        panel = self.query_one("#debug-panel")
-        if show:
-            panel.display = True
-            await self._refrescar_lista_debug()
-        else:
-            panel.display = False
-            self.query_one("#input-box", Input).focus()
-
-    def clear_debug_events(self) -> None:
-        """Limpia los eventos del logger y refresca la lista."""
-        from app.core.logger import debug_collector
-        debug_collector.events.clear()
-        # Refrescamos la lista si el panel está abierto
-        if self.debug_mode:
-            asyncio.create_task(self._refrescar_lista_debug())
+        self.attached_files = []
+        self.attached_images = []
+        self.update_attachments_bar()
 
     async def on_unmount(self) -> None:
         for client in reversed(self.mcp_clients):

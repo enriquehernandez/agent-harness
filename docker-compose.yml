@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  agent-harness:
+    build: .
+    container_name: agent-harness
+    env_file:
+      - .env
+    stdin_open: true # Necesario para TUI
+    tty: true # Necesario para TUI
+    volumes:
+      # Montamos el código para desarrollo (opcional)
+      - .:/app
+      # Montamos los archivos locales de configuración
+      - ./mcp_config.json:/app/mcp_config.json:ro
+      - ~/.harness_memory:/app/.harness_memory
+      - ~/.harness_permissions.json:/app/.harness_permissions.json
+    working_dir: /app
+    command: uv run python -m app.main

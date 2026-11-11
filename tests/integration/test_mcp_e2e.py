@@ -10,23 +10,23 @@ from app.core.llm.base import LLMResponse
 @pytest.mark.asyncio
 async def test_mcp_local_server_e2e():
     print("\n" + "="*50)
-    print("🚀 INICIANDO TEST DE INTEGRACIÓN MCP")
+    print("🚀 STARTING MCP INTEGRATION TEST")
     print("="*50)
 
-    print("\n1️⃣ Levantando servidor MCP local...")
+    print("\n1️⃣ Starting local MCP server...")
     client = MCPClient(
         command="uv",
         args=["run", "python", "scripts/local_mcp_server.py"]
     )
     await client.connect()
-    print("✅ Servidor conectado.")
+    print("✅ Server connected.")
 
-    print("\n2️⃣ Descubriendo herramientas...")
+    print("\n2️⃣ Discovering tools...")
     registry = ToolRegistry()
     await client.register_tools(registry, server_name="local_dev")
 
     tools = registry.names()
-    print(f"✅ Herramientas descubiertas: {tools}")
+    print(f"✅ Tools discovered: {tools}")
     assert "get_system_info" in tools
     assert "echo_message" in tools
     assert "analyze_code_complexity" in tools
@@ -36,60 +36,54 @@ async def test_mcp_local_server_e2e():
     for tool in tools:
         gate.policies[tool] = Decision.ALLOW
 
-    # ---------------------------------------------------------
-    print("\n3️⃣ Probando: get_system_info...")
+    print("\n3️⃣ Testing: get_system_info...")
     fake_llm_1 = FakeLLM(responses=[
         LLMResponse(
             tool_calls=[{"id": "c1", "name": "get_system_info", "arguments": {}}]),
-        LLMResponse(content="El sistema está funcionando.")
+        LLMResponse(content="The system is working.")
     ])
     loop1 = AgentLoop(llm=fake_llm_1, tools=registry, permissions=gate)
-    result1 = await loop1.run("Dime el sistema operativo")
-    print(f"✅ get_system_info ejecutado.")
+    result1 = await loop1.run("Tell me the OS")
+    print(f"✅ get_system_info executed.")
     assert "get_system_info" in result1.tools_used
 
-    # ---------------------------------------------------------
-    print("\n4️⃣ Probando: echo_message...")
+    print("\n4️⃣ Testing: echo_message...")
     fake_llm_2 = FakeLLM(responses=[
         LLMResponse(tool_calls=[{"id": "c2", "name": "echo_message", "arguments": {
-                    "message": "Hola Harness"}}]),
-        LLMResponse(content="El mensaje fue enviado.")
+                    "message": "Hello Harness"}}]),
+        LLMResponse(content="The message was sent.")
     ])
     loop2 = AgentLoop(llm=fake_llm_2, tools=registry, permissions=gate)
-    result2 = await loop2.run("Haz eco")
-    print(f"✅ echo_message ejecutado.")
+    result2 = await loop2.run("Echo")
+    print(f"✅ echo_message executed.")
     assert "echo_message" in result2.tools_used
 
-    # ---------------------------------------------------------
-    print("\n5️⃣ Probando: analyze_code_complexity...")
+    print("\n5️⃣ Testing: analyze_code_complexity...")
     fake_llm_3 = FakeLLM(responses=[
         LLMResponse(tool_calls=[{"id": "c3", "name": "analyze_code_complexity", "arguments": {
                     "file_path": "app/core/harness/loop.py"}}]),
-        LLMResponse(content="El archivo tiene varias clases.")
+        LLMResponse(content="The file has several classes.")
     ])
     loop3 = AgentLoop(llm=fake_llm_3, tools=registry, permissions=gate)
-    result3 = await loop3.run("Analiza el loop")
-    print(f"✅ analyze_code_complexity ejecutado.")
+    result3 = await loop3.run("Analyze the loop")
+    print(f"✅ analyze_code_complexity executed.")
     assert "analyze_code_complexity" in result3.tools_used
 
-    # ---------------------------------------------------------
-    print("\n6️⃣ Probando: run_tests...")
+    print("\n6️⃣ Testing: run_tests...")
     fake_llm_4 = FakeLLM(responses=[
         LLMResponse(
             tool_calls=[{"id": "c4", "name": "run_tests", "arguments": {}}]),
-        LLMResponse(content="Los tests pasaron.")
+        LLMResponse(content="Tests passed.")
     ])
     loop4 = AgentLoop(llm=fake_llm_4, tools=registry, permissions=gate)
-
-    # 🔥 ADVERTENCIA: Esto es lo que tarda 60s (el bucle recursivo de pytest)
-    print("⏳ Ejecutando run_tests (esto puede tardar)...")
-    result4 = await loop4.run("Corre los tests")
-    print(f"✅ run_tests ejecutado.")
+    print("⏳ Running tests (this may take a while)...")
+    result4 = await loop4.run("Run tests")
+    print(f"✅ run_tests executed.")
     assert "run_tests" in result4.tools_used
 
-    print("\n7️⃣ Cerrando servidor MCP...")
+    print("\n7️⃣ Closing MCP server...")
     await client.disconnect()
-    print("✅ Servidor cerrado.")
+    print("✅ Server closed.")
     print("\n" + "="*50)
-    print("🎉 TODOS LOS TESTS E2E PASARON")
+    print("🎉 ALL E2E TESTS PASSED")
     print("="*50 + "\n")

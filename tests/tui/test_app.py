@@ -1,269 +1,649 @@
+import asyncio
 import pytest
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
-from app.tui.app import run_tui
-from app.tui.prompt import ask_user_permission
-from app.core.llm.base import LLMResponse
+from unittest.mock import patch, AsyncMock, MagicMock
+from app.tui.app import AgentHarnessApp, FileAwareInput
+from textual.widgets import Input, Static, ListView
+from textual.worker import NoActiveWorker
 from app.core.harness.loop import LoopResult
+from pathlib import Path
 
 
 @pytest.mark.asyncio
-@patch("app.tui.app.PromptSession")
-@patch("app.tui.app.get_llm")
-@patch("app.tui.app.register_core_tools")
-@patch("app.tui.app.AgentLoop")
-@patch("app.tui.app.console.print")
-async def test_run_tui_flow(mock_print, mock_loop_class, mock_register, mock_get_llm, mock_session_class):
-    mock_session = mock_session_class.return_value
-    mock_session.prompt_async = AsyncMock(side_effect=[
-        "/help", "Hola agente", "", "/model fake", "/quit"
-    ])
+async def test_app_mount_and_bindings():
+    """Cubre el montaje, la entrada de texto y los atajos básicos."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.agent_loop = MagicMock()
+        app.agent_loop.stream = AsyncMock(
+            return_value=iter([]))  # Mock de stream
+        async with app.run_test() as pilot:
+            input_box = app.query_one("#input-box", FileAwareInput)
+            input_box.focus()
+            await pilot.pause()
 
-    mock_loop_instance = mock_loop_class.return_value
-    mock_loop_instance.run = AsyncMock(return_value=LoopResult(
-        final_answer="Hola humano", steps=1, tools_used=[], usage_total={"total_tokens": 10}
-    ))
+            # Escribir y enviar
+            input_box.value = "Hola"
+            await pilot.press("enter")
+            await pilot.pause()
 
-    await run_tui()
-    assert mock_session.prompt_async.call_count == 5
-
-
-@pytest.mark.asyncio
-@patch("app.tui.app.PromptSession")
-@patch("app.tui.app.get_llm")
-@patch("app.tui.app.MCPClient")
-@patch("builtins.open")
-@patch("app.tui.app.console.print")
-async def test_run_tui_mcp_config(mock_print, mock_open, mock_mcp_class, mock_get_llm, mock_session_class):
-    """Cubre la rama donde existe mcp_config.json y falla la conexión MCP."""
-    mock_file = MagicMock()
-    mock_file.read.return_value = '{"mcpServers": {"dummy": {"command": "uv", "args": []}}}'
-    mock_open.return_value.__enter__.return_value = mock_file
-
-    mock_mcp_instance = AsyncMock()
-    mock_mcp_instance.connect.side_effect = Exception("MCP Error")
-    mock_mcp_class.return_value = mock_mcp_instance
-
-    mock_session = mock_session_class.return_value
-    mock_session.prompt_async = AsyncMock(side_effect=["/quit"])
-
-    with patch("pathlib.Path.exists", return_value=True):
-        await run_tui()
-
-    mock_mcp_instance.connect.assert_called_once()
-    # Verifica que se imprimió el error de MCP
-    mock_print.assert_any_call(
-        "[bold red]Error conectando MCP 'dummy': MCP Error[/bold red]")
+            # Limpiar input (Ctrl+U)
+            input_box.value = "Algo"
+            app.action_clear_input()
+            await pilot.pause()
+            assert input_box.value == ""
 
 
 @pytest.mark.asyncio
-@patch("app.tui.app.PromptSession")
-@patch("app.tui.app.get_llm")
-@patch("app.tui.app.AgentLoop")  # 🔥 Mockeamos AgentLoop
-@patch("app.tui.app.console.print")
-async def test_run_tui_catches_general_exception(mock_print, mock_loop_class, mock_get_llm, mock_session_class):
-    mock_session = mock_session_class.return_value
-    mock_session.prompt_async = AsyncMock(side_effect=["Hola", "/quit"])
-
-    # El LLM se inicializa bien
-    mock_llm = MagicMock()
-    mock_get_llm.return_value = mock_llm
-
-    # 🔥 El error se lanza al ejecutar el AgentLoop
-    mock_loop_instance = mock_loop_class.return_value
-    mock_loop_instance.run = AsyncMock(
-        side_effect=Exception("Error forzado en LLM"))
-
-    with patch("pathlib.Path.exists", return_value=False):
-        await run_tui()
-
-    # Verificamos que se imprimió el error general
-    error_encontrado = any("Error forzado en LLM" in str(call)
-                           for call in mock_print.call_args_list)
-    assert error_encontrado
+async def test_app_clear_chat():
+    """Cubre el atajo Ctrl+L."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            await app.write_to_chat("Mensaje", type="user")
+            await pilot.pause()
+            await pilot.press("ctrl+l")
+            await pilot.pause()
+            assert len(app.query_one("#chat-scroll").children) <= 1
 
 
 @pytest.mark.asyncio
-@patch("app.tui.prompt.console.print")
-@patch("app.tui.prompt.Prompt.ask")
-async def test_ask_user_permission(mock_ask, mock_print):
-    mock_ask.return_value = "y"
-    response = await ask_user_permission(
-        tool_name="bash", signature="bash:echo 'Hola'", args={"command": "echo 'Hola'"}, diff_text=None
-    )
-    assert response == "y"
-    assert mock_print.call_count == 2
-    mock_ask.assert_called_once()
+async def test_app_process_input_command():
+    """Cubre el procesamiento de comandos."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        with patch("app.tui.app.handle_command", new_callable=AsyncMock) as mock_handle:
+            async with app.run_test() as pilot:
+                app.process_input("/help")
+                await pilot.pause()
+                mock_handle.assert_called_once()
 
 
 @pytest.mark.asyncio
-@patch("app.tui.prompt.console.print")
-@patch("app.tui.prompt.Prompt.ask")
-async def test_ask_user_permission_multiline(mock_ask, mock_print):
-    mock_ask.return_value = "y"
-    response = await ask_user_permission(
-        tool_name="bash", signature="bash:line1\nline2", args={"command": "line1\nline2"}, diff_text="diff simulado"
-    )
-    assert response == "y"
+async def test_app_process_input_agent_success():
+    """Cubre el procesamiento exitoso del agente con streaming."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        mock_loop = MagicMock()
+        # Mockeamos stream como un generador asíncrono
+
+        async def mock_stream(*args, **kwargs):
+            yield "Respuesta"
+        mock_loop.stream = mock_stream
+        app.agent_loop = mock_loop
+        async with app.run_test() as pilot:
+            app.process_input("Hola")
+            await pilot.pause()
+            # Verificamos que se creó el widget de Markdown
+            assert len(app.query_one("#chat-scroll").children) > 0
 
 
 @pytest.mark.asyncio
-@patch("app.tui.app.PromptSession")
-@patch("app.tui.app.get_llm")
-@patch("app.tui.app.register_core_tools")
-@patch("app.tui.app.console.print")
-async def test_run_tui_covers_exceptions(mock_print, mock_register, mock_get_llm, mock_session_class):
-    """Cubre las líneas 94-96 de la TUI: except EOFError y except SystemExit."""
-    mock_session = mock_session_class.return_value
+async def test_app_process_input_agent_error():
+    """Cubre el manejo de errores del agente."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        mock_loop = MagicMock()
+        # Simulamos un error en el stream
 
-    # Simulamos que el prompt lanza EOFError (Ctrl+D) y SystemExit en el segundo intento
-    mock_session.prompt_async = AsyncMock(side_effect=[EOFError, SystemExit])
-
-    with patch("pathlib.Path.exists", return_value=False):
-        # Al primer EOFError, la TUI debería atraparlo y hacer 'break' (por eso SystemExit no se llega a lanzar si es break)
-        # Pero si no hay break, el segundo input dispara SystemExit.
-        # Para asegurar que pasa por ambos, hacemos que el primero sea KeyboardInterrupt (que hace continue) y el segundo EOFError (que hace break).
-        await run_tui()
-
-    # Verificamos que se intentó usar el prompt
-    assert mock_session.prompt_async.call_count >= 1
-
-
-@pytest.mark.asyncio
-@patch("app.tui.app.PromptSession")
-@patch("app.tui.app.get_llm")
-@patch("app.tui.app.console.print")
-async def test_run_tui_eof_error(mock_print, mock_get_llm, mock_session_class):
-    """Cubre la línea 95: el except EOFError de la TUI."""
-    mock_session = mock_session_class.return_value
-
-    # 🔥 Simulamos que el usuario pulsa Ctrl+D inmediatamente
-    mock_session.prompt_async = AsyncMock(side_effect=KeyboardInterrupt)
-
-    with patch("pathlib.Path.exists", return_value=False):
-        await run_tui()
-
-    assert mock_session.prompt_async.call_count == 1
+        async def mock_stream(*args, **kwargs):
+            raise Exception("Error simulado")
+        mock_loop.stream = mock_stream
+        app.agent_loop = mock_loop
+        async with app.run_test() as pilot:
+            app.process_input("Hola")
+            await pilot.pause()
+            # Verificamos que se mostró el error
+            scroll = app.query_one("#chat-scroll")
+            texts = []
+            for child in scroll.children:
+                if hasattr(child, "content"):
+                    texts.append(str(child.content))
+                elif hasattr(child, "renderable"):
+                    texts.append(str(child.renderable))
+            assert any("Error" in t for t in texts)
 
 
 @pytest.mark.asyncio
-@patch("app.tui.app.PromptSession")
-@patch("app.tui.app.get_llm")
-@patch("app.tui.app.MCPClient")
-@patch("app.tui.app.console.print")
-async def test_run_tui_covers_finally_and_systemexit(mock_print, mock_mcp_class, mock_get_llm, mock_session_class):
-    """Cubre el cierre de MCP (finally) y el except SystemExit."""
-    mock_session = mock_session_class.return_value
-
-    # 🔥 Lanzamos una excepción genérica que NO sea atrapada por los excepts del bucle
-    # (así se propaga al finally y luego al except Exception externo)
-    mock_session.prompt_async = AsyncMock(
-        side_effect=Exception("Fallo catastrófico"))
-
-    # Simulamos que hay un cliente MCP conectado para el finally
-    mock_mcp_instance = AsyncMock()
-    mock_mcp_class.return_value = mock_mcp_instance
-
-    # Forzamos que mcp_config.json exista para cargar el cliente
-    with patch("pathlib.Path.exists", return_value=True):
-        with patch("builtins.open") as mock_open:
-            mock_file = MagicMock()
-            mock_file.read.return_value = '{"mcpServers": {"test": {"command": "uv", "args": []}}}'
-            mock_open.return_value.__enter__.return_value = mock_file
-
-            # La excepción se propaga hasta el except Exception externo, que la atrapa
-            await run_tui()
-
-    # Verificamos que se intentó cerrar el cliente
-    mock_mcp_instance.disconnect.assert_called_once()
+async def test_app_toggle_debug():
+    """Cubre la apertura y cierre del panel de debug."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            debug_panel = app.query_one("#debug-panel")
+            assert debug_panel.display is False
+            await pilot.press("f1")
+            await pilot.pause()
+            assert debug_panel.display is True
+            await pilot.press("f1")
+            await pilot.pause()
+            assert debug_panel.display is False
 
 
 @pytest.mark.asyncio
-@patch("app.tui.app.PromptSession")
-@patch("app.tui.app.get_llm")
-@patch("app.tui.app.MCPClient")
-@patch("app.tui.app.console.print")
-async def test_run_tui_covers_finally(mock_print, mock_mcp_class, mock_get_llm, mock_session_class):
-    """Cubre el bloque finally de la TUI (cierre de MCP)."""
-    mock_session = mock_session_class.return_value
-
-    # Forzamos una excepción genérica que se propaga hasta el finally
-    mock_session.prompt_async = AsyncMock(
-        side_effect=Exception("Fallo crítico"))
-
-    mock_mcp_instance = AsyncMock()
-    mock_mcp_class.return_value = mock_mcp_instance
-
-    with patch("pathlib.Path.exists", return_value=True):
-        with patch("builtins.open") as mock_open:
-            mock_file = MagicMock()
-            mock_file.read.return_value = '{"mcpServers": {"test": {"command": "uv", "args": []}}}'
-            mock_open.return_value.__enter__.return_value = mock_file
-
-            await run_tui()
-
-    # El finally debe haber intentado cerrar el cliente
-    mock_mcp_instance.disconnect.assert_called_once()
+async def test_app_debug_list_selected():
+    """Cubre la selección de un evento en el panel de debug."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        with patch("app.tui.app.get_debug_events", return_value=[
+            {"timestamp": "12:00", "type": "DEBUG",
+                "summary": "Test", "payload": "{}"}
+        ]):
+            async with app.run_test() as pilot:
+                await pilot.press("f1")
+                await pilot.pause()
+                list_view = app.query_one("#debug-list", ListView)
+                if list_view.children:
+                    list_view.index = 0
+                    await pilot.press("enter")
+                    await pilot.pause()
 
 
 @pytest.mark.asyncio
-@patch("app.tui.app.PromptSession")
-@patch("app.tui.app.get_llm")
-@patch("app.tui.app.AgentLoop")
-@patch("app.tui.app.console.print")
-async def test_run_tui_agent_loop_exception(mock_print, mock_loop_class, mock_get_llm, mock_session_class):
-    """Cubre las líneas 107-110: el except que atrapa errores del AgentLoop."""
-    mock_session = mock_session_class.return_value
-    mock_session.prompt_async = AsyncMock(side_effect=["Hola", "/quit"])
-
-    mock_llm = MagicMock()
-    mock_get_llm.return_value = mock_llm
-
-    # Forzamos a que el AgentLoop lance una excepción al ejecutarse
-    mock_loop_instance = mock_loop_class.return_value
-    mock_loop_instance.run = AsyncMock(
-        side_effect=Exception("Fallo simulado en el loop"))
-
-    with patch("pathlib.Path.exists", return_value=False):
-        await run_tui()
-
-    # 🔥 Búsqueda flexible: recorremos todas las llamadas al print
-    error_encontrado = False
-    for call in mock_print.call_args_list:
-        # Convertimos los argumentos de la llamada a string para buscar el mensaje
-        call_str = str(call)
-        if "Fallo simulado en el loop" in call_str:
-            error_encontrado = True
-            break
-
-    assert error_encontrado, f"No se encontró el error en las llamadas: {mock_print.call_args_list}"
+async def test_app_permission_modal():
+    """Cubre el modal de permisos."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def ask():
+                try:
+                    await app.request_permission(
+                        tool_name="bash", signature="bash:ls", args={"command": "ls"}, diff_text=None
+                    )
+                except NoActiveWorker:
+                    pass
+            app.run_worker(ask())
+            await pilot.pause()
+            await pilot.press("y")
+            await pilot.pause()
 
 
 @pytest.mark.asyncio
-@patch("app.tui.app.PromptSession")
-@patch("app.tui.app.get_llm")
-@patch("app.tui.app.AgentLoop")
-@patch("app.tui.app.console.print")
-async def test_run_tui_shows_tools(mock_print, mock_loop_class, mock_get_llm, mock_session_class):
-    """Cubre la línea 107: cuando el agente usa herramientas y muestra los stats."""
-    mock_session = mock_session_class.return_value
-    mock_session.prompt_async = AsyncMock(
-        side_effect=["Usa una tool", "/quit"])
+async def test_app_update_dashboard():
+    """Cubre la actualización del dashboard."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            app.update_dashboard("Pensando...", tokens=100, last_tool="bash")
+            await pilot.pause()
+            dash = app.query_one("#dashboard", Static)
+            assert "Pensando" in str(dash.render())
 
-    # Simulamos que el AgentLoop devuelve un resultado con herramientas usadas
-    from app.core.harness.loop import LoopResult
-    mock_loop_instance = mock_loop_class.return_value
-    mock_loop_instance.run = AsyncMock(return_value=LoopResult(
-        final_answer="He usado la tool",
-        steps=2,
-        tools_used=["bash", "read_file"],  # 🔥 Aquí forzamos la línea 107
-        usage_total={"total_tokens": 50}
-    ))
 
-    with patch("pathlib.Path.exists", return_value=False):
-        await run_tui()
+@pytest.mark.asyncio
+async def test_app_unmount_cleanup():
+    """Cubre el cierre limpio de la app (on_unmount)."""
+    app = AgentHarnessApp()
+    mock_client = AsyncMock()
+    app.mcp_clients.append(mock_client)
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            pass
+        mock_client.disconnect.assert_called_once()
 
-    # Verificamos que se imprimió el resumen de pasos y herramientas
-    mock_print.assert_any_call(
-        "[dim]Pasos: 2 | Tools: ['bash', 'read_file'] | Tokens API: 50[/dim]\n"
-    )
+
+@pytest.mark.asyncio
+async def test_app_initialize_agent_real():
+    """Cubre el bloque de initialize_agent."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient") as mock_mcp_class:
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+        mock_client.register_tools = AsyncMock()
+        mock_mcp_class.return_value = mock_client
+        with patch("app.tui.app.register_core_tools"):
+            with patch("app.tui.app.SUMMARY_FILE") as mock_summary:
+                mock_summary.exists.return_value = False
+                async with app.run_test() as pilot:
+                    await app.initialize_agent()
+                    await pilot.pause()
+                    assert app.ctx is not None
+                    assert app.registry is not None
+                    assert app.agent_loop is not None
+                    assert app.gate is not None
+
+
+@pytest.mark.asyncio
+async def test_app_initialize_agent_error():
+    """Cubre el except de MCP."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient") as mock_mcp_class:
+        mock_mcp_class.return_value.connect = AsyncMock(
+            side_effect=Exception("MCP Error"))
+        with patch("app.tui.app.register_core_tools"):
+            with patch("app.tui.app.SUMMARY_FILE") as mock_summary:
+                mock_summary.exists.return_value = False
+                async with app.run_test() as pilot:
+                    await app.initialize_agent()
+                    await pilot.pause()
+                    scroll = app.query_one("#chat-scroll")
+                    texts = []
+                    for child in scroll.children:
+                        if hasattr(child, "renderable"):
+                            texts.append(str(child.renderable))
+                        elif hasattr(child, "content"):
+                            texts.append(str(child.content))
+                    assert any("Error conectando MCP" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_app_request_permission_multiline():
+    """Cubre args_str con multilinea."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def ask():
+                try:
+                    await app.request_permission(
+                        tool_name="bash", signature="bash:echo",
+                        args={"command": "line1\nline2"}, diff_text=None
+                    )
+                except NoActiveWorker:
+                    pass
+            app.run_worker(ask())
+            await pilot.pause()
+            await pilot.press("y")
+            await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_app_debug_panel_show_hide():
+    """Cubre toggle_debug_panel."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            await app.toggle_debug_panel(True)
+            assert app.query_one("#debug-panel").display is True
+            await app.toggle_debug_panel(False)
+            assert app.query_one("#debug-panel").display is False
+
+
+@pytest.mark.asyncio
+async def test_app_clear_debug_events():
+    """Cubre clear_debug_events."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            app.debug_mode = True
+            app.clear_debug_events()
+            await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_app_debug_list_empty():
+    """Cubre _refresh_debug_list sin eventos."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        with patch("app.tui.app.get_debug_events", return_value=[]):
+            async with app.run_test() as pilot:
+                await app._refresh_debug_list()
+                await pilot.pause()
+                list_view = app.query_one("#debug-list", ListView)
+                first_item = list_view.children[0]
+                label = first_item.children[0]
+                assert "No hay eventos" in str(label.render())
+
+
+@pytest.mark.asyncio
+async def test_app_process_input_agent_timeout():
+    """Cubre el except TimeoutError."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        mock_loop = MagicMock()
+
+        # 🔥 Definimos un generador asíncrono que lance TimeoutError
+        async def slow_stream(*args, **kwargs):
+            await asyncio.sleep(0.1)
+            raise asyncio.TimeoutError()
+            yield  # (nunca se alcanza, pero hace que sea un generador)
+
+        mock_loop.stream = slow_stream
+        app.agent_loop = mock_loop
+
+        async with app.run_test() as pilot:
+            app.process_input("Hola")
+            await pilot.pause(0.5)
+
+            scroll = app.query_one("#chat-scroll")
+            texts = []
+            for child in scroll.children:
+                if hasattr(child, "renderable"):
+                    texts.append(str(child.renderable))
+                elif hasattr(child, "content"):
+                    texts.append(str(child.content))
+
+            assert any("Timeout" in t for t in texts), f"Textos: {texts}"
+
+
+@pytest.mark.asyncio
+async def test_app_initialize_agent_with_memory():
+    """Cubre la carga de memoria."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient") as mock_mcp_class:
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+        mock_client.register_tools = AsyncMock()
+        mock_mcp_class.return_value = mock_client
+        with patch("app.tui.app.register_core_tools"):
+            with patch("app.tui.app.SUMMARY_FILE") as mock_summary:
+                mock_summary.exists.return_value = True
+                mock_summary.read_text.return_value = "Memoria de prueba"
+                async with app.run_test() as pilot:
+                    await app.initialize_agent()
+                    await pilot.pause()
+                    assert "Memoria de prueba" in str(
+                        app.ctx.messages[0]["content"])
+
+
+@pytest.mark.asyncio
+async def test_app_initialize_agent_with_tools():
+    """Cubre el registro de herramientas del reviewer."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient") as mock_mcp_class:
+        mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+        mock_client.register_tools = AsyncMock()
+        mock_mcp_class.return_value = mock_client
+        with patch("app.tui.app.register_core_tools") as mock_register:
+            def side_effect(registry):
+                from app.core.harness.tool import FunctionTool
+                registry.register(FunctionTool(
+                    name="read_text_file", description="", parameters_schema={}, func=lambda: ""
+                ))
+            mock_register.side_effect = side_effect
+            with patch("app.tui.app.SUMMARY_FILE") as mock_summary:
+                mock_summary.exists.return_value = False
+                async with app.run_test() as pilot:
+                    await app.initialize_agent()
+                    await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_app_request_permission_responses():
+    """Cubre las respuestas del usuario en el modal."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            with patch.object(app, "push_screen_wait", new_callable=AsyncMock) as mock_wait:
+                def get_last_message():
+                    children = app.query_one("#chat-scroll").children
+                    if not children:
+                        return ""
+                    last = children[-1]
+                    if hasattr(last, "content"):
+                        return str(last.content)
+                    elif hasattr(last, "renderable"):
+                        return str(last.renderable)
+                    return str(last.render())
+
+                mock_wait.return_value = "y"
+                await app.request_permission("bash", "bash:ls", {"command": "ls"})
+                assert "Permiso **concedido**" in get_last_message()
+
+                mock_wait.return_value = "a"
+                await app.request_permission("bash", "bash:ls", {"command": "ls"})
+                assert "concedido permanentemente" in get_last_message()
+
+                mock_wait.return_value = "n"
+                await app.request_permission("bash", "bash:ls", {"command": "ls"})
+                assert "denegado" in get_last_message()
+
+
+@pytest.mark.asyncio
+async def test_app_list_view_empty_id():
+    """Cubre id inválido en on_list_view_selected."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            mock_event = MagicMock()
+            mock_event.item.id = None
+            await app.on_list_view_selected(mock_event)
+
+
+@pytest.mark.asyncio
+async def test_app_process_input_debug_mode():
+    """Cubre refrescar debug al terminar."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            app.debug_mode = True
+            mock_loop = MagicMock()
+
+            async def mock_stream(*args, **kwargs):
+                yield "OK"
+            mock_loop.stream = mock_stream
+            app.agent_loop = mock_loop
+            with patch.object(app, "_refresh_debug_list", new_callable=AsyncMock) as mock_refresh:
+                app.process_input("Hola")
+                await pilot.pause()
+                mock_refresh.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_app_on_input_submitted_with_files():
+    """Cubre archivos adjuntos."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            app.attached_files = ["file1.txt", "file2.txt"]
+            mock_event = MagicMock()
+            mock_event.value = "Revisa esto"
+            mock_event.input = MagicMock()
+            with patch.object(app, "process_input", new_callable=MagicMock) as mock_process:
+                await app.on_input_submitted(mock_event)
+                mock_process.assert_called_once()
+                assert "file1.txt" in mock_process.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_app_on_input_submitted_only_files():
+    """Cubre cuando hay archivos pero no texto."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            app.attached_files = ["file1.txt"]
+            mock_event = MagicMock()
+            mock_event.value = ""
+            mock_event.input = MagicMock()
+            with patch.object(app, "process_input", new_callable=MagicMock) as mock_process:
+                await app.on_input_submitted(mock_event)
+                mock_process.assert_called_once()
+                assert "Por favor, revisa estos archivos" in mock_process.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_app_on_paste_different_extensions(tmp_path):
+    """Cubre extensiones de archivos."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            for ext in [".pdf", ".mp3", ".py"]:
+                test_file = tmp_path / f"test{ext}"
+                test_file.write_text("Hello")
+                mock_event = MagicMock()
+                mock_event.text = str(test_file)
+                mock_event.prevent_default = MagicMock()
+                await app.handle_file_paste(str(test_file))
+            assert len(app.attached_files) == 3
+
+
+@pytest.mark.asyncio
+async def test_app_on_paste_image_icon(tmp_path):
+    """Cubre el icono de imagen."""
+    app = AgentHarnessApp()
+    test_file = tmp_path / "test.png"
+    test_file.write_text("fake image content")
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            await app.handle_file_paste(str(test_file))
+            assert len(app.attached_images) == 1
+            scroll = app.query_one("#chat-scroll")
+            texts = []
+            for child in scroll.children:
+                if hasattr(child, "renderable"):
+                    texts.append(str(child.renderable))
+                elif hasattr(child, "content"):
+                    texts.append(str(child.content))
+            assert any("🖼️" in t for t in texts), f"Textos: {texts}"
+
+
+@pytest.mark.asyncio
+async def test_app_handle_file_paste_all_image_formats(tmp_path):
+    """Cubre la detección de MIME types para todas las imágenes."""
+    app = AgentHarnessApp()
+
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            # Probamos .png, .gif, .webp
+            for ext, expected_mime in [(".png", "image/png"), (".gif", "image/gif"), (".webp", "image/webp")]:
+                test_file = tmp_path / f"test{ext}"
+                test_file.write_text("fake image")
+
+                await app.handle_file_paste(str(test_file))
+
+                # Verificamos que se guardó con el MIME correcto
+                last_image = app.attached_images[-1]
+                assert expected_mime in last_image
+
+
+@pytest.mark.asyncio
+async def test_app_on_input_submitted_with_images():
+    """Cubre el envío de mensajes con imágenes adjuntas."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            app.attached_images = ["data:image/png;base64,fake_base64"]
+            mock_event = MagicMock()
+            mock_event.value = "¿Qué ves?"
+            mock_event.input = MagicMock()
+
+            # Mockeamos el agent_loop para que el stream funcione
+            app.agent_loop = MagicMock()
+
+            async def mock_stream(*args, **kwargs):
+                yield "Es una imagen"
+            app.agent_loop.stream = mock_stream
+
+            await app.on_input_submitted(mock_event)
+            await pilot.pause()
+
+            # Verificamos que se limpió la lista de imágenes
+            assert len(app.attached_images) == 0
+            # Verificamos que se añadió el mensaje multimodal al contexto
+            last_msg = app.ctx.messages[-1]
+            assert last_msg["role"] == "user"
+            assert any(m["type"] == "image_url" for m in last_msg["content"])
+
+
+@pytest.mark.asyncio
+async def test_app_write_to_chat_exception():
+    """Cubre el except de write_to_chat."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            # Forzamos un error en query_one
+            with patch.object(app, "query_one", side_effect=Exception("Error visual")):
+                await app.write_to_chat("Test", type="agent")
+                # No debe lanzar excepción (el except la atrapa)
+
+
+@pytest.mark.asyncio
+async def test_app_on_input_submitted_with_images():
+    """Cubre el envío de mensajes con imágenes adjuntas."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            # 🔥 Inyectamos un ContextManager real para que add_user_with_image funcione
+            from app.core.harness.context import ContextManager
+            app.ctx = ContextManager(system_prompt="System")
+
+            app.attached_images = ["data:image/png;base64,fake_base64"]
+            mock_event = MagicMock()
+            mock_event.value = "¿Qué ves?"
+            mock_event.input = MagicMock()
+
+            # Mockeamos el agent_loop para que el stream funcione
+            app.agent_loop = MagicMock()
+
+            async def mock_stream(*args, **kwargs):
+                yield "Es una imagen"
+            app.agent_loop.stream = mock_stream
+
+            await app.on_input_submitted(mock_event)
+            await pilot.pause()
+
+            # Verificamos que se limpió la lista de imágenes
+            assert len(app.attached_images) == 0
+            # Verificamos que se añadió el mensaje multimodal al contexto
+            last_msg = app.ctx.messages[-1]
+            assert last_msg["role"] == "user"
+            assert any(m["type"] == "image_url" for m in last_msg["content"])
+
+
+@pytest.mark.asyncio
+async def test_file_aware_input_paste():
+    """Cubre las líneas 34-50: _on_paste del FileAwareInput."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            input_box = app.query_one("#input-box", FileAwareInput)
+
+            # Creamos un evento de paste con un archivo real
+            from pathlib import Path
+            test_file = Path("test_paste.txt")
+            test_file.write_text("Hello")
+
+            try:
+                # Simulamos el paste
+                mock_event = MagicMock()
+                mock_event.text = str(test_file)
+                mock_event.prevent_default = MagicMock()
+                mock_event.stop = MagicMock()
+
+                # Llamamos directamente al método
+                await input_box._on_paste(mock_event)
+
+                # Verificamos que se procesó el archivo
+                assert len(app.attached_files) > 0
+            finally:
+                test_file.unlink()
+
+
+@pytest.mark.asyncio
+async def test_write_to_chat_markdown():
+    """Cubre la línea 402: write_to_chat con Markdown."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            await app.write_to_chat("**Negrita**", type="agent")
+            await pilot.pause()
+            # Verificamos que se creó el widget
+            assert len(app.query_one("#chat-scroll").children) > 0
+
+
+@pytest.mark.asyncio
+async def test_app_on_input_submitted_with_images():
+    """Cubre las líneas 604-624: envío de imágenes."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            # Inyectamos contexto real
+            from app.core.harness.context import ContextManager
+            app.ctx = ContextManager(system_prompt="System")
+
+            app.attached_images = ["data:image/png;base64,fake"]
+            mock_event = MagicMock()
+            mock_event.value = "¿Qué ves?"
+            mock_event.input = MagicMock()
+
+            # Mockeamos el stream
+            app.agent_loop = MagicMock()
+
+            async def mock_stream(*args, **kwargs):
+                yield "Es una imagen"
+            app.agent_loop.stream = mock_stream
+
+            await app.on_input_submitted(mock_event)
+            await pilot.pause()
+
+            # Verificamos que se procesó
+            assert len(app.attached_images) == 0

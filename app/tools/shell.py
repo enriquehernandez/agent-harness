@@ -6,13 +6,13 @@ from app.core.harness.tool import BaseTool, ToolResult
 class BashTool(BaseTool):
     def __init__(self, timeout_seconds: int = 30):
         self.name = "bash"
-        self.description = "Ejecuta un comando de shell (bash) en el sistema. Úsalo para correr tests, instalar dependencias o explorar el sistema."
+        self.description = "Execute a shell command (bash) on the system. Use it to run tests, install dependencies, or explore the system."
         self.parameters_schema = {
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "El comando a ejecutar (ej. 'ls -la', 'uv run pytest')."
+                    "description": "The command to execute (e.g., 'ls -la', 'uv run pytest')."
                 }
             },
             "required": ["command"]
@@ -21,7 +21,6 @@ class BashTool(BaseTool):
 
     async def run(self, command: str) -> ToolResult:
         try:
-            # Ejecutamos en un subproceso
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
@@ -35,17 +34,16 @@ class BashTool(BaseTool):
                 )
             except asyncio.TimeoutError:
                 process.kill()
-                return ToolResult(success=False, content="", error=f"Timeout de {self.timeout_seconds}s excedido.")
+                return ToolResult(success=False, content="", error=f"Timeout of {self.timeout_seconds}s exceeded.")
 
             out_str = stdout.decode(errors="replace").strip()
             err_str = stderr.decode(errors="replace").strip()
 
-            # Si falla, devolvemos el stderr como error
             if process.returncode != 0:
                 error_msg = err_str or out_str or f"Exit code {process.returncode}"
                 return ToolResult(success=False, content="", error=error_msg)
 
-            return ToolResult(success=True, content=out_str or "Comando ejecutado sin salida.")
+            return ToolResult(success=True, content=out_str or "Command executed with no output.")
 
         except Exception as e:
             return ToolResult(success=False, content="", error=str(e))

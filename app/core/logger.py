@@ -6,13 +6,13 @@ from app.core.config import settings
 logger = logging.getLogger("agent_harness")
 logger.setLevel(settings.LOG_LEVEL)
 
-# 1. Handler para archivo (siempre guarda todo)
+# 1. File handler (always saves everything)
 file_handler = logging.FileHandler("harness_debug.log", encoding="utf-8")
 file_handler.setFormatter(logging.Formatter(
     '[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
 logger.addHandler(file_handler)
 
-# 2. Handler de memoria para el Panel de Debug
+# 2. Memory handler for the Debug Panel
 
 
 class DebugEventCollector(logging.Handler):
@@ -26,12 +26,12 @@ class DebugEventCollector(logging.Handler):
             payload = msg
             summary = msg
 
-            # Intentamos extraer el modelo si es una petición JSON
+            # Try to extract the model if it's a JSON request
             try:
                 if msg.strip().startswith("{"):
                     parsed = json.loads(msg)
                     if "model" in parsed and "messages" in parsed:
-                        summary = f"Petición LLM ({parsed['model']})"
+                        summary = f"LLM Request ({parsed['model']})"
                     else:
                         summary = "JSON Payload"
                     payload = json.dumps(parsed, indent=2, ensure_ascii=False)
@@ -49,11 +49,11 @@ class DebugEventCollector(logging.Handler):
                 self.events.pop(0)
 
 
-# Instancia global del collector
+# Global collector instance
 debug_collector = DebugEventCollector()
 logger.addHandler(debug_collector)
 
 
 def get_debug_events():
-    """Devuelve la lista de eventos de debug capturados."""
+    """Returns the list of captured debug events."""
     return debug_collector.events

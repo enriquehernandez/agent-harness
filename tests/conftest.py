@@ -6,13 +6,13 @@ from app.core.harness.tool import ToolRegistry, FunctionTool
 
 @pytest.fixture
 def fake_llm():
-    """Retorna un FakeLLM listo para inyectarle respuestas."""
+    """Returns a FakeLLM ready to inject responses."""
     return FakeLLM()
 
 
 @pytest.fixture
 def basic_registry():
-    """Retorna un registry con una tool de suma simple."""
+    """Returns a registry with a simple add tool."""
     registry = ToolRegistry()
 
     def add(a: int, b: int) -> int:
@@ -20,7 +20,7 @@ def basic_registry():
 
     registry.register(FunctionTool(
         name="add",
-        description="Suma dos números",
+        description="Adds two numbers",
         parameters_schema={
             "type": "object",
             "properties": {

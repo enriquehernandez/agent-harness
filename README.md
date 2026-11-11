@@ -1,8 +1,8 @@
 # 🤖 Agent Harness: Multi-Tool, MCP, Subagents & TUI
 
-[![codecov](https://codecov.io/github/enriquehernandez/agent-harness/graph/badge.svg?token=TU_TOKEN_AQUI)](https://codecov.io/github/enriquehernandez/agent-harness)
-![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white) 
-![Textual](https://img.shields.io/badge/Textual-TUI-FF4B4B?style=for-the-badge&logo=textual&logoColor=white) 
+[![codecov](https://codecov.io/github/enriquehernandez/agent-harness/graph/badge.svg?token=NXCPH1ESNN)](https://codecov.io/github/enriquehernandez/agent-harness)
+
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white) ![Textual](https://img.shields.io/badge/Textual-TUI-FF4B4B?style=for-the-badge&logo=textual&logoColor=white) 
 ![OpenRouter](https://img.shields.io/badge/OpenRouter-Provider--Agnostic-6467F2?style=for-the-badge) 
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=for-the-badge)

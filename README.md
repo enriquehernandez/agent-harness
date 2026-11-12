@@ -5,7 +5,8 @@
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white) ![Textual](https://img.shields.io/badge/Textual-TUI-FF4B4B?style=for-the-badge&logo=textual&logoColor=white) 
 ![OpenRouter](https://img.shields.io/badge/OpenRouter-Provider--Agnostic-6467F2?style=for-the-badge) 
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)
-![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=for-the-badge)
+![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=for-the-badge) ![Skills](https://img.shields.io/badge/Skills-Markdown-blue?style=for-the-badge)
+![Memory](https://img.shields.io/badge/Memory-SQLite-green?style=for-the-badge)
 
 Un **Agent Harness** de nivel producción construido desde cero. Este proyecto no es solo un "chatbot con herramientas"; es un motor de ejecución que gestiona el ciclo de vida completo de un agente autónomo: razonamiento, ejecución de herramientas locales y remotas (**MCP**), delegación a **subagentes**, multimodalidad (**imágenes**), gestión de permisos con **diff-first**, streaming en tiempo real y una interfaz de terminal (**TUI**) moderna construida con Textual.
 
@@ -23,6 +24,35 @@ Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible 
 - **🖼️ Multimodalidad:** Soporte para arrastrar y pegar imágenes (codificadas en Base64) que el LLM puede analizar.
 - **💻 TUI con Textual:** Una interfaz moderna con temas oscuros, autocompletado, *modales* interactivos, panel de debug (F1) y barra de adjuntos.
 - **🧪 100% de Cobertura:** Suite de tests robusta con `pytest` y `textual.pilot`.
+
+### 📦 Skills (Habilidades)
+El Harness puede cargar **skills** desde `.agents/skills/`. Son manuales en Markdown
+(`SKILL.md`) que le enseñan al agente a realizar tareas complejas (ej. auditar la
+arquitectura, generar reportes HTML, etc.).
+
+- **Descubrimiento automático:** El agente detecta las skills al arrancar.
+- **Carga con `@`:** Escribe `@nombre-de-skill` en el input para cargarla.
+- **Autocompletado:** Presiona `Tab` después de `@` para ver las skills disponibles.
+
+**Ejemplo:**
+```text
+🐚 > @improve-codebase-architecture ¿Cómo está la arquitectura de mi proyecto?
+```
+
+### 💾 Memoria Persistente (SQLite)
+El agente recuerda hechos importantes entre sesiones usando **SQLite** con FTS5
+(búsqueda de texto completo). Los recuerdos se guardan en .`harness/memory.db`
+y se inyectan en el `system_prompt` al arrancar.
+
+Backends soportados: `sqlite` (por defecto), files (Markdown), `memory` (RAM).
+
+Comandos: `/memory clear`, `/memory migrate sqlit`e.
+
+### 📁 Sesiones Guardadas
+El Harness guarda el historial completo de cada conversación en `.harness/sessions/`
+como archivos JSON. Al reiniciar la TUI, **carga automáticamente la última sesión**.
+
+Comandos: `/session list`, `/session load <id>`, `/session save`, `/session delete <id>`.
 
 ## 🏗️ Arquitectura
 

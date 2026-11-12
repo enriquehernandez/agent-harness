@@ -273,3 +273,89 @@ async def test_cmd_export(mock_app, ctx):
     # 3. Exportar a JSON
     assert await handle_command("/export json", ctx, {}, None, mock_app) is True
     assert '"role": "user"' in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_skills(mock_app, ctx):
+    handled = await handle_command("/skills", ctx, {}, None, mock_app)
+    assert handled is True
+    assert "Skills Disponibles" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_memory_clear(mock_app, ctx):
+    mock_app.memory_store = MagicMock()
+    mock_app.memory_store.clear = AsyncMock()
+    handled = await handle_command("/memory clear", ctx, {}, None, mock_app)
+    assert handled is True
+    mock_app.memory_store.clear.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cmd_memory_migrate(mock_app, ctx):
+    from unittest.mock import patch
+    mock_app.memory_store = MagicMock()
+    # 🔥 Cambiamos get_all por recall
+    mock_app.memory_store.get_all = AsyncMock(return_value=[])
+    with patch("app.core.harness.memory.factory.create_memory_store") as mock_create:
+        handled = await handle_command("/memory migrate sqlite", ctx, {}, None, mock_app)
+        assert handled is True
+        mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cmd_skills_no_registry(mock_app, ctx):
+    mock_app.registry = None
+    assert await handle_command("/skills", ctx, {}, None, mock_app) is True
+    assert "no está inicializado" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_memory_no_store(mock_app, ctx):
+    mock_app.memory_store = None  # 🔥 Aseguramos que sea None
+    assert await handle_command("/memory clear", ctx, {}, None, mock_app) is True
+    assert "Store no inicializado" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_memory_invalid_subcommand(mock_app, ctx):
+    assert await handle_command("/memory invalid", ctx, {}, None, mock_app) is True
+    assert "Uso:" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_memory_invalid_subcommand(mock_app, ctx):
+    assert await handle_command("/memory invalid", ctx, {}, None, mock_app) is True
+    assert "Uso:" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_memory_migrate_no_store(mock_app, ctx):
+    mock_app.memory_store = None
+    assert await handle_command("/memory migrate sqlite", ctx, {}, None, mock_app) is True
+    assert "Store no inicializado" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_memory_migrate_with_entries(mock_app, ctx):
+    """Cubre la línea 311: migración con entradas reales."""
+    from unittest.mock import patch, MagicMock, AsyncMock
+    from app.core.harness.memory.base import MemoryEntry
+    from datetime import datetime
+
+    # Mock del store actual con una entrada
+    mock_app.memory_store = MagicMock()
+    mock_app.memory_store.get_all = AsyncMock(return_value=[
+        MemoryEntry(key="test", value="Hello", timestamp=datetime.now())
+    ])
+    mock_app.memory_store.clear = AsyncMock()
+
+    # Mock del nuevo store
+    mock_new_store = MagicMock()
+    mock_new_store.save = AsyncMock()
+
+    with patch("app.core.harness.memory.factory.create_memory_store", return_value=mock_new_store):
+        handled = await handle_command("/memory migrate sqlite", ctx, {}, None, mock_app)
+        assert handled is True
+        # 🔥 Verificamos que se llamó a save (cubre línea 311)
+        mock_new_store.save.assert_called_once()

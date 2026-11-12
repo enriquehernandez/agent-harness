@@ -2,6 +2,8 @@ import difflib
 import json
 import fnmatch
 from pathlib import Path
+from app.core.config import settings
+from app.core.logger import logger
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Awaitable
@@ -22,15 +24,16 @@ class PermissionGate:
     ask_user: Callable[[str, str, dict, str | None],
                        Awaitable[str]] | None = None
     persist_file: Path = field(
-        default_factory=lambda: Path(".harness_permissions.json"))
+        default_factory=lambda: settings.permissions_file  # 🔥 Ruta centralizada
+    )
 
     def __post_init__(self):
         if not self.policies:
             self.policies = {
-                "read_file": Decision.ALLOW,
-                "read_text_file": Decision.ALLOW,
-                "list_dir": Decision.ALLOW,
-                "list_directory": Decision.ALLOW,
+                "read_file": Decision.ASK,
+                "read_text_file": Decision.ASK,
+                "list_dir": Decision.ASK,
+                "list_directory": Decision.ASK,
                 "write_file": Decision.ASK,
                 "edit_file": Decision.ASK,
                 "bash": Decision.ASK,
@@ -53,7 +56,7 @@ class PermissionGate:
             with open(self.persist_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
-            print(f"Error saving permissions: {e}")
+            logger.error(f"Error saving permissions: {e}")
 
     def _get_signature(self, tool_name: str, arguments: dict) -> str:
         if tool_name == "bash":

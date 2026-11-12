@@ -81,7 +81,11 @@ class MCPToolProxy(BaseTool):
                 else:
                     content_str += f"[{item.type} data]\n"
 
-            if result.isError:
+            # 🔥 En la nueva versión del SDK, el error se detecta con getattr
+            is_error = getattr(result, "isError", False) or getattr(
+                result, "is_error", False)
+
+            if is_error:
                 return ToolResult(success=False, content="", error=content_str.strip())
 
             return ToolResult(success=True, content=content_str.strip())

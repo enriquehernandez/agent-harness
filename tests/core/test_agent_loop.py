@@ -122,3 +122,238 @@ async def test_loop_tool_repair_limit(fake_llm, basic_registry):
 
     # Verificamos que el contador llegó a 3
     assert loop.repair_counts.get("fail_tool", 0) >= 3
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_with_tools(fake_llm, basic_registry):
+    """Cubre el método stream() del AgentLoop."""
+    from unittest.mock import AsyncMock, patch
+
+    # Mockeamos stream_chat para que devuelva texto y tool_calls
+    async def mock_stream(*args, **kwargs):
+        yield "Pensando..."
+        yield {"type": "tool_call", "id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}
+        yield "El resultado es 3."
+        yield {"type": "usage", "usage": {"total_tokens": 100}}
+        yield {"type": "result", "final_answer": "El resultado es 3.", "steps": 2, "tools_used": ["add"], "usage_total": {"total_tokens": 100}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        gate = PermissionGate(policies={"add": Decision.ALLOW})
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+
+        chunks = []
+        async for chunk in loop.stream("Suma 1 y 2"):
+            chunks.append(chunk)
+
+        # Verificamos que hay texto, tool_call y result
+        assert any(isinstance(c, str) for c in chunks)
+        assert any(isinstance(c, dict) and c.get(
+            "type") == "tool_call" for c in chunks)
+        assert any(isinstance(c, dict) and c.get(
+            "type") == "result" for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_edge_cases(fake_llm, basic_registry):
+    """Cubre las ramas de error del stream()."""
+    from unittest.mock import patch
+
+    # 1. Permission denied
+    async def mock_stream_denied(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}
+        yield {"type": "result", "final_answer": "Denied", "steps": 1, "tools_used": [], "usage_total": {}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream_denied):
+        gate = PermissionGate(policies={"add": Decision.DENY})
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+        async for _ in loop.stream("Suma"):
+            pass
+
+    # 2. Tool not found
+    async def mock_stream_not_found(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "ghost", "arguments": {}}
+        yield {"type": "result", "final_answer": "Not found", "steps": 1, "tools_used": [], "usage_total": {}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream_not_found):
+        gate = PermissionGate(policies={"ghost": Decision.ALLOW})
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+        async for _ in loop.stream("Ghost"):
+            pass
+
+    # 3. Tool fails
+    from app.core.harness.tool import FunctionTool, ToolResult
+
+    async def fail_tool(): return ToolResult(
+        success=False, content="", error="Fail")
+    basic_registry.register(FunctionTool(
+        name="fail", description="", parameters_schema={}, func=fail_tool))
+
+    async def mock_stream_fail(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "fail", "arguments": {}}
+        yield {"type": "result", "final_answer": "Failed", "steps": 1, "tools_used": ["fail"], "usage_total": {}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream_fail):
+        gate = PermissionGate(policies={"fail": Decision.ALLOW})
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+        async for _ in loop.stream("Fail"):
+            pass
+
+    # 4. Max iterations
+    async def mock_stream_loop(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "add", "arguments": {"a": 1, "b": 1}}
+        # No emitimos result para forzar el max_iterations
+        yield "texto"
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream_loop):
+        gate = PermissionGate(policies={"add": Decision.ALLOW})
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry,
+                         permissions=gate, max_iterations=2)
+        async for _ in loop.stream("Loop"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_edge_cases(fake_llm, basic_registry):
+    """Cubre las ramas de error del stream()."""
+    from unittest.mock import patch
+
+    # 1. Cubre if not tool_calls (línea 154-155)
+    async def mock_stream_no_tools(*args, **kwargs):
+        yield "Solo texto"
+        yield {"type": "result", "final_answer": "Solo texto", "steps": 1, "tools_used": [], "usage_total": {}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream_no_tools):
+        gate = PermissionGate(policies={})
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+        async for _ in loop.stream("Hola"):
+            pass
+
+    # 2. Cubre else de result.success (línea 189)
+    from app.core.harness.tool import FunctionTool, ToolResult
+
+    async def fail_tool(): return ToolResult(
+        success=False, content="", error="Fail")
+    basic_registry.register(FunctionTool(
+        name="fail", description="", parameters_schema={}, func=fail_tool))
+
+    async def mock_stream_fail(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "fail", "arguments": {}}
+        yield {"type": "result", "final_answer": "Failed", "steps": 1, "tools_used": ["fail"], "usage_total": {}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream_fail):
+        gate = PermissionGate(policies={"fail": Decision.ALLOW})
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+        async for _ in loop.stream("Fail"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_all_error_branches(fake_llm, basic_registry):
+    """Cubre todas las ramas de error del stream()."""
+    from unittest.mock import patch
+    from app.core.harness.tool import FunctionTool, ToolResult
+
+    # 1. Permission DENY (línea 173)
+    async def mock_stream_denied(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}
+        yield {"type": "result", "final_answer": "Denied", "steps": 1, "tools_used": [], "usage_total": {}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream_denied):
+        gate = PermissionGate(policies={"add": Decision.DENY})
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+        async for _ in loop.stream("Suma"):
+            pass
+
+    # 2. Tool not found (línea 179)
+    async def mock_stream_not_found(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "ghost", "arguments": {}}
+        yield {"type": "result", "final_answer": "Not found", "steps": 1, "tools_used": [], "usage_total": {}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream_not_found):
+        gate = PermissionGate(policies={"ghost": Decision.ALLOW})
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+        async for _ in loop.stream("Ghost"):
+            pass
+
+    # 3. Tool fails (línea 189)
+    async def fail_tool(): return ToolResult(
+        success=False, content="", error="Fail")
+    basic_registry.register(FunctionTool(
+        name="fail", description="", parameters_schema={}, func=fail_tool))
+
+    async def mock_stream_fail(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "fail", "arguments": {}}
+        yield {"type": "result", "final_answer": "Failed", "steps": 1, "tools_used": ["fail"], "usage_total": {}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream_fail):
+        gate = PermissionGate(policies={"fail": Decision.ALLOW})
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+        async for _ in loop.stream("Fail"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_tool_fails(fake_llm, basic_registry):
+    """Cubre el else de result.success en stream()."""
+    from unittest.mock import patch
+    from app.core.harness.tool import FunctionTool, ToolResult
+
+    async def fail_tool():
+        return ToolResult(success=False, content="", error="Forced failure")
+
+    basic_registry.register(FunctionTool(
+        name="fail_stream", description="", parameters_schema={}, func=fail_tool
+    ))
+
+    async def mock_stream(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "fail_stream", "arguments": {}}
+        yield {"type": "result", "final_answer": "Failed", "steps": 1, "tools_used": ["fail_stream"], "usage_total": {}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        gate = PermissionGate(policies={"fail_stream": Decision.ALLOW})
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+
+        async for _ in loop.stream("Fail"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_tool_fails_successfully(fake_llm, basic_registry):
+    """Cubre la línea 189: tool falla en stream y se inyecta el error."""
+    from unittest.mock import patch
+    from app.core.harness.tool import FunctionTool, ToolResult
+
+    # 1. Registramos una tool que falla
+    async def fail_tool():
+        return ToolResult(success=False, content="", error="Forced stream failure")
+
+    basic_registry.register(FunctionTool(
+        name="fail_stream", description="", parameters_schema={}, func=fail_tool
+    ))
+
+    # 2. Mockeamos stream_chat para que emita un tool_call y luego un texto
+    # (el texto hace que no haya más tool_calls, y el bucle termine)
+    async def mock_stream(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "fail_stream", "arguments": {}}
+        yield "Texto después de la tool"  # 🔥 Esto evita que el bucle itere de nuevo
+
+    # 3. Ejecutamos el stream con max_iterations=1 para asegurar
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        gate = PermissionGate(policies={"fail_stream": Decision.ALLOW})
+        loop = AgentLoop(
+            llm=fake_llm,
+            tools=basic_registry,
+            permissions=gate,
+            max_iterations=1  # 🔥 Solo 1 iteración
+        )
+
+        chunks = []
+        async for chunk in loop.stream("Fail"):
+            chunks.append(chunk)
+
+        # 4. Verificamos que el error se inyectó en el contexto
+        # (Esto cubre la línea 189)
+        result_chunks = [c for c in chunks if isinstance(
+            c, dict) and c.get("type") == "result"]
+        assert len(result_chunks) > 0
+        assert "fail_stream" in result_chunks[0]["tools_used"]

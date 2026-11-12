@@ -7,7 +7,9 @@ logger = logging.getLogger("agent_harness")
 logger.setLevel(settings.LOG_LEVEL)
 
 # 1. File handler (always saves everything)
-file_handler = logging.FileHandler("harness_debug.log", encoding="utf-8")
+log_file = settings.logs_dir / "harness_debug.log"  # 🔥 Ruta centralizada
+
+file_handler = logging.FileHandler(log_file, encoding="utf-8")
 file_handler.setFormatter(logging.Formatter(
     '[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
 logger.addHandler(file_handler)
@@ -31,7 +33,22 @@ class DebugEventCollector(logging.Handler):
                 if msg.strip().startswith("{"):
                     parsed = json.loads(msg)
                     if "model" in parsed and "messages" in parsed:
-                        summary = f"LLM Request ({parsed['model']})"
+                        # 🔥 Extraemos el último mensaje del usuario
+                        user_msg = ""
+                        for m in reversed(parsed["messages"]):
+                            if m["role"] == "user":
+                                content = m.get("content", "")
+                                if isinstance(content, list):
+                                    # Multimodal: buscamos el texto
+                                    for c in content:
+                                        if c.get("type") == "text":
+                                            user_msg = c.get("text", "")
+                                            break
+                                else:
+                                    user_msg = content
+                                break
+
+                        summary = f"LLM Request ({parsed['model']}): {user_msg[:60]}..."
                     else:
                         summary = "JSON Payload"
                     payload = json.dumps(parsed, indent=2, ensure_ascii=False)

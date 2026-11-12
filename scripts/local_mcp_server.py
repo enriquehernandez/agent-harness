@@ -16,6 +16,8 @@ def get_system_info() -> str:
 @mcp.tool()
 def run_tests() -> str:
     """Ejecuta la suite de tests del proyecto (pytest) y devuelve el resultado o los errores."""
+    if os.environ.get("HARNESS_E2E") == "1":
+        return "⏭️ run_tests saltado en modo E2E (HARNESS_E2E=1)."
     try:
         # 🔥 Añadimos --ignore=tests/integration para evitar el bucle infinito
         result = subprocess.run(

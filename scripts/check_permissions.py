@@ -37,6 +37,9 @@ async def main():
     result = await loop.run("Haz tu magia.")
 
     print(f"\n[bold green]Respuesta final:[/bold green] {result.final_answer}")
+    # 🔥 Añadimos el detalle de las herramientas
+    print(f"[bold cyan]Pasos:[/bold cyan] {result.steps}")
+    print(f"[bold cyan]Tools usadas:[/bold cyan] {result.tools_used}")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -7,20 +7,70 @@ from textual.containers import Vertical, Horizontal, Center, VerticalScroll
 from textual.widgets import Input, Static, LoadingIndicator, Markdown, Button, ListView, ListItem, Label
 from textual import work
 from textual.screen import ModalScreen
-from textual.suggester import SuggestFromList
+from textual.suggester import SuggestFromList, Suggester
 from rich.syntax import Syntax
 
 from app.core.llm import get_llm
 from app.core.harness import AgentLoop, ToolRegistry, ContextManager
 from app.core.harness.permissions import PermissionGate
 from app.core.harness.subagents import DelegateTool
+from app.core.harness.memory.factory import create_memory_store
+from app.core.harness.session import SessionManager
 from app.tools import register_core_tools
 from app.tui.commands import handle_command
 from app.mcp.client import MCPClient
 from app.core.config import settings
+from app.tui.suggester import SkillSuggester, CombinedSuggester
 from app.core.logger import logger, get_debug_events
-from app.tools.memory import SUMMARY_FILE
 from app.tui.debug_screen import DebugDetailScreen
+
+# # ==========================================
+# # SUGGESTER COMBINADO (COMANDOS + SKILLS)
+# # ==========================================
+
+
+# class SkillSuggester(Suggester):
+#     """Sugiere skills instaladas cuando el usuario escribe '@'."""
+
+#     def __init__(self, skills_dir: str = ".agents/skills"):
+#         super().__init__(case_sensitive=False)
+#         self.skills_dir = Path(skills_dir)
+#         self._skills = self._load_skills()
+
+#     def _load_skills(self) -> list[str]:
+#         if not self.skills_dir.exists():
+#             return []
+#         skills = []
+#         for d in self.skills_dir.iterdir():
+#             if d.is_dir() and (d / "SKILL.md").exists():
+#                 skills.append(f"@{d.name}")
+#         return sorted(skills)
+
+#     async def get_suggestion(self, value: str) -> str | None:
+#         if not value.startswith("@"):
+#             return None
+#         if value == "@":
+#             return self._skills[0] if self._skills else None
+#         for skill in self._skills:
+#             if skill.startswith(value):
+#                 return skill
+#         return None
+
+
+# class CombinedSuggester(Suggester):
+#     """Combina el autocompletado de comandos (/) y de skills (@)."""
+
+#     def __init__(self, commands: list[str]):
+#         super().__init__(case_sensitive=False)
+#         self.cmd_suggester = SuggestFromList(commands, case_sensitive=False)
+#         self.skill_suggester = SkillSuggester()
+
+#     async def get_suggestion(self, value: str) -> str | None:
+#         if value.startswith("@"):
+#             return await self.skill_suggester.get_suggestion(value)
+#         if value.startswith("/"):
+#             return await self.cmd_suggester.get_suggestion(value)
+#         return None
 
 # ==========================================
 # INPUT PERSONALIZADO (INTERCEPTA ARCHIVOS)
@@ -30,6 +80,10 @@ from app.tui.debug_screen import DebugDetailScreen
 class FileAwareInput(Input):
     """Input que detecta si el texto es una ruta de archivo y lo intercepta."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._processing_paste = False
+
     async def _on_paste(self, event) -> None:
         text = event.text.strip().strip("'\"")
         clean_path = text.replace(
@@ -38,7 +92,6 @@ class FileAwareInput(Input):
         try:
             p = Path(clean_path).expanduser()
             if p.exists() and p.is_file():
-                # 🔥 Es un archivo: lo procesamos y NO lo escribimos en el input
                 await self.app.handle_file_paste(str(p))
                 event.prevent_default()
                 event.stop()
@@ -46,16 +99,16 @@ class FileAwareInput(Input):
         except Exception:
             pass
 
-        # Si no es un archivo, dejamos que el Input lo maneje normalmente
-        await super()._on_paste(event)  # pragma: no cover
-
     def watch_value(self, value: str) -> None:
         """Watcher: si el texto se cuela, lo limpiamos."""
+        if self._processing_paste:
+            self._processing_paste = False
+            return
+
         if value and value.startswith("/") and " " not in value.strip():
-            # Si parece una ruta de archivo (empieza con / y no tiene espacios)
             p = Path(value.strip().strip("'\""))
             if p.exists() and p.is_file():
-                # 🔥 Es un archivo: lo borramos del input y lo procesamos
+                self._processing_paste = True  # 🔥 Evita el re-disparo
                 self.value = ""
                 self.app.call_later(self.app.handle_file_paste, str(p))
                 return
@@ -74,13 +127,15 @@ class PermissionModal(ModalScreen[str]):
     #dialog {
         width: 80;
         height: auto;
-        max-height: 30;
+        max-height: 30;  /* 🔥 Altura máxima del modal */
         border: round $accent;
         background: $surface;
         padding: 1 2;
     }
     #message {
         height: auto;
+        max-height: 20;  /* 🔥 Limita la altura del mensaje/diff */
+        overflow-y: auto; /* 🔥 Scroll si hay más contenido */
         width: 100%;
         padding: 0 0 1 0;
     }
@@ -88,6 +143,7 @@ class PermissionModal(ModalScreen[str]):
         height: auto;
         width: 100%;
         align: center middle;
+        dock: bottom;  /* 🔥 Fija los botones abajo */
     }
     Button {
         width: 1fr;
@@ -288,6 +344,7 @@ class AgentHarnessApp(App):
         self.attached_images = []
         self.debug_mode = False
         self.verbose_mode = False
+        self.session_manager = SessionManager()
 
     def compose(self) -> ComposeResult:
         with Center(id="header-container"):
@@ -305,43 +362,59 @@ class AgentHarnessApp(App):
 
         with Vertical(id="input-container"):
             yield Static("", id="attachments-bar")
-            # 🔥 Usamos nuestro Input personalizado
             yield FileAwareInput(placeholder="Escribe tu mensaje... (Ctrl+U para limpiar)", id="input-box")
 
     async def on_mount(self) -> None:
         await self.initialize_agent()
+
+        sessions = SessionManager.list_sessions()
+        if sessions:
+            last_session = sessions[0]
+            self.session_manager = SessionManager(last_session["id"])
+            messages = self.session_manager.load()
+            if messages:
+                self.ctx.messages = messages
+                await self.write_to_chat(
+                    f"🔄 Sesión `{last_session['id']}` cargada ({last_session['message_count']} mensajes).",
+                    type="system"
+                )
+
         await self.write_to_chat("🤖 Agent Harness iniciado. Escribe /help para ver comandos.", type="system")
-        await self.write_to_chat("💡 Puedes pegar imágenes o archivos. Se mostrarán en la barra de adjuntos.", type="system")
+        await self.write_to_chat("💡 Puedes pegar imágenes o archivos. Escribe @ para cargar una skill.", type="system")
 
         available_commands = [
             "/help", "/shortcuts", "/model", "/provider", "/tools", "/subagents",
-            "/tokens", "/compact", "/verbose", "/clear", "/debug", "/permissions", "/export", "/quit"
+            "/skills", "/tokens", "/compact", "/verbose", "/clear", "/debug",
+            "/permissions", "/export", "/session", "/memory", "/quit"
         ]
 
         input_box = self.query_one("#input-box", FileAwareInput)
-        input_box.suggester = SuggestFromList(
-            available_commands, case_sensitive=False)
+        input_box.suggester = CombinedSuggester(available_commands)
         input_box.focus()
 
     async def initialize_agent(self):
+        memory_store = create_memory_store(settings.MEMORY_BACKEND)
+        self.memory_store = memory_store
         memory_context = ""
-        if SUMMARY_FILE.exists():
-            content = SUMMARY_FILE.read_text(encoding="utf-8").strip()
-            if content:
-                memory_context = f"\n\n[Long-term memory]:\n{content}"
+        preamble = memory_store.preamble()
+        if preamble:
+            memory_context = f"\n\n[Long-term memory]:\n{preamble}"
 
         self.ctx = ContextManager(
             system_prompt=(
                 "You are a helpful assistant. You have access to local and remote tools (MCP). "
                 "Answer concisely. Use 'write_file' or 'edit_file' to modify files. "
                 "To review code, use 'delegate_to_reviewer'. To remember things, use 'memory_save'. "
-                "If the user provides an image, describe it or use it as context."
+                "If the user provides an image, describe it or use it as context. "
+                "If you need detailed instructions for a complex task, use 'load_skill' with the skill name. "
                 f"{memory_context}"
             )
         )
 
         self.registry = ToolRegistry()
-        register_core_tools(self.registry)
+        # register_core_tools(self.registry, memory_store=memory_store)
+        register_core_tools(
+            self.registry, memory_store=memory_store, mcp_clients=self.mcp_clients)
 
         config_path = Path("mcp_config.json")
         if config_path.exists():
@@ -394,8 +467,8 @@ class AgentHarnessApp(App):
         try:
             scroll = self.query_one("#chat-scroll", VerticalScroll)
             if type == "user":
-                widget = Static(f"👤 **Tú:**\n{text}",
-                                classes="message-user", markup=True)
+                widget = Static(
+                    f"👤 **Tú:**\n{text}", classes="message-user", markup=True)
             elif type == "system":
                 widget = Static(text, classes="message-system", markup=True)
             else:
@@ -423,7 +496,6 @@ class AgentHarnessApp(App):
             bar.display = False
 
     async def handle_file_paste(self, path: str):
-        """Procesa el archivo pegado."""
         p = Path(path)
 
         if p.suffix.lower() in [".png", ".jpg", ".jpeg", ".gif", ".webp"]:
@@ -448,6 +520,30 @@ class AgentHarnessApp(App):
 
         self.update_attachments_bar()
 
+    async def _expand_skills(self, user_input: str) -> str:
+        """Si el usuario escribe @skill-name, carga la skill y la inyecta en el contexto."""
+        import re
+        from app.tools.skills import LoadSkillTool
+
+        matches = re.findall(r'@([\w\-]+)', user_input)
+
+        if not matches:
+            return user_input
+
+        skill_tool = LoadSkillTool()
+        skills_context = ""
+
+        for skill_name in matches:
+            result = await skill_tool.run(skill_name)
+            if result.success:
+                skills_context += f"\n\n[SKILL CARGADA: {skill_name}]\n{result.content}\n[/SKILL]"
+                await self.write_to_chat(f"📖 Skill `{skill_name}` cargada automáticamente.", type="system")
+            else:
+                await self.write_to_chat(f"❌ No se pudo cargar la skill `{skill_name}`: {result.error}", type="system")
+
+        clean_input = re.sub(r'@[\w\-]+', '', user_input).strip()
+        return f"{clean_input}\n\n{skills_context}"
+
     async def request_permission(self, tool_name: str, signature: str, args: dict, diff_text: str | None = None) -> str:
         args_str = ""
         for k, v in args.items():
@@ -460,11 +556,18 @@ class AgentHarnessApp(App):
 
         self.query_one("#loading-indicator", LoadingIndicator).display = False
 
+        # 🔥 Truncamos el diff si es muy largo (ej. más de 50 líneas)
+        if diff_text:
+            lines = diff_text.split("\n")
+            if len(lines) > 50:
+                diff_text = "\n".join(
+                    lines[:50]) + f"\n\n... [TRUNCADO: {len(lines) - 50} líneas más] ..."
+
         try:
             result = await asyncio.wait_for(
                 self.push_screen_wait(PermissionModal(
                     tool_name, args_str, diff_text)),
-                timeout=300.0
+                timeout=settings.LLM_STREAM_TIMEOUT
             )
         except asyncio.TimeoutError:
             result = "n"
@@ -551,19 +654,14 @@ class AgentHarnessApp(App):
             stream_gen = self.agent_loop.stream(
                 user_input,
                 context=self.ctx,
-                verbose=getattr(self, 'verbose_mode', False)
+                verbose=getattr(self, 'verbose_mode', False),
+                timeout_seconds=settings.LLM_STREAM_TIMEOUT
             )
-            full_text = await self.stream_to_chat(stream_gen)
-
-            self.update_dashboard("Listo")
-
-        except asyncio.TimeoutError:
-            self.update_dashboard("Error")
-            await self.write_to_chat("⏳ **Timeout:** El agente tardó demasiado.", type="system")
+            await self.stream_to_chat(stream_gen)
         except Exception as e:
             self.update_dashboard("Error")
-            await self.write_to_chat(f"❌ **Error:** {e}", type="system")
-            logger.error(f"Error en AgentLoop: {e}", exc_info=True)
+            await self.write_to_chat(f"❌ **Error inesperado:** {e}", type="system")
+            logger.error(f"Error en process_input: {e}", exc_info=True)
         finally:
             loading.display = False
             self.query_one("#input-box", FileAwareInput).focus()
@@ -571,16 +669,59 @@ class AgentHarnessApp(App):
                 await self._refresh_debug_list()
 
     async def stream_to_chat(self, stream_generator):
+        """Renderiza el streaming en el chat y actualiza el dashboard al final."""
         scroll = self.query_one("#chat-scroll", VerticalScroll)
         markdown_widget = Markdown("", classes="message-agent")
         await scroll.mount(markdown_widget)
         scroll.scroll_end(animate=False)
 
         full_text = ""
-        async for chunk in stream_generator:
-            full_text += chunk
-            await markdown_widget.update(full_text)
-            scroll.scroll_end(animate=False)
+        final_result = None
+        start_time = asyncio.get_event_loop().time()
+        # 🔥 Nuevo timeout: 300s (5 minutos)
+        TIMEOUT_SECONDS = settings.LLM_STREAM_TIMEOUT
+
+        try:
+            async for chunk in stream_generator:
+                # 🔥 Verificamos el timeout en cada chunk
+                if asyncio.get_event_loop().time() - start_time > TIMEOUT_SECONDS:
+                    raise asyncio.TimeoutError()
+
+                if isinstance(chunk, str):
+                    full_text += chunk
+                    await markdown_widget.update(full_text)
+                    scroll.scroll_end(animate=False)
+                elif isinstance(chunk, dict) and chunk.get("type") == "result":
+                    final_result = chunk
+                    break
+        except asyncio.TimeoutError:
+            self.update_dashboard("Error")
+            await self.write_to_chat(
+                f"⏳ **Timeout:** El agente tardó más de {TIMEOUT_SECONDS}s. "
+                f"El modelo `nemotron` es lento generando reportes largos. "
+                f"Prueba a cambiar de modelo con `/model openai`.",
+                type="system"
+            )
+            return full_text
+        except Exception as e:
+            self.update_dashboard("Error")
+            await self.write_to_chat(f"❌ **Error del LLM:** {e}", type="system")
+            return full_text
+
+        if final_result:
+            # tokens = final_result.get("usage_total", {}).get("total_tokens", 0)
+            tokens = (final_result.get("usage_total")
+                      or {}).get("total_tokens", 0)
+            if tokens == 0:
+                tokens = len(full_text) // 4
+
+            last_tool = final_result["tools_used"][-1] if final_result["tools_used"] else "Ninguna"
+
+            self.update_dashboard(
+                "Listo",
+                tokens=tokens,
+                last_tool=last_tool
+            )
 
         return full_text
 
@@ -591,29 +732,28 @@ class AgentHarnessApp(App):
 
         event.input.value = ""
 
-        # 🔥 Si hay imágenes, las procesamos directamente
+        # 🔥 Expandimos las skills con @
+        user_text = await self._expand_skills(user_text)
+
         if self.attached_images:
-            # Mostramos el mensaje del usuario en el chat
             display_text = user_text if user_text else "[Imagen adjunta]"
             await self.write_to_chat(display_text, type="user")
 
-            # Añadimos el mensaje multimodal al contexto
             self.ctx.add_user_with_image(user_text, self.attached_images)
 
-            # Limpiamos las imágenes
             self.attached_images = []
             self.update_attachments_bar()
 
-            # Llamamos al loop directamente (sin pasar por process_input)
             self.update_dashboard("Pensando...")
             loading = self.query_one("#loading-indicator", LoadingIndicator)
             loading.display = True
 
             try:
                 stream_gen = self.agent_loop.stream(
-                    "",  # 🔥 String vacío para que no añada otro mensaje
+                    "",
                     context=self.ctx,
-                    verbose=getattr(self, 'verbose_mode', False)
+                    verbose=getattr(self, 'verbose_mode', False),
+                    timeout_seconds=settings.LLM_STREAM_TIMEOUT
                 )
                 await self.stream_to_chat(stream_gen)
                 self.update_dashboard("Listo")
@@ -624,7 +764,6 @@ class AgentHarnessApp(App):
                 self.query_one("#input-box", FileAwareInput).focus()
             return
 
-        # Flujo normal (texto y archivos)
         final_message = user_text
         if self.attached_files:
             files_str = ", ".join([f"`{f}`" for f in self.attached_files])
@@ -651,6 +790,9 @@ class AgentHarnessApp(App):
         self.update_attachments_bar()
 
     async def on_unmount(self) -> None:
+        if self.ctx:
+            self.session_manager.save(self.ctx)
+
         for client in reversed(self.mcp_clients):
             try:
                 await client.disconnect()

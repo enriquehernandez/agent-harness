@@ -9,7 +9,7 @@ from app.mcp.client import MCPClient
 async def main():
     mcp_client = MCPClient(
         command="uv",
-        args=["run", "python", "scripts/dummy_mcp_server.py"]
+        args=["run", "python", "scripts/local_mcp_server.py"]
     )
 
     print("Conectando al servidor MCP...")

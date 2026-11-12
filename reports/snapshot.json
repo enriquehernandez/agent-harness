@@ -1,0 +1,1390 @@
+{
+  "schemaVersion": "1.0",
+  "snapshotId": "2026-11-12T15-37-38Z",
+  "capturedAt": "2026-11-12T15:37:38Z",
+  "skillVersion": "0.1.0",
+  "probeSuiteVersion": "0.1.0",
+  "catalogVersion": "1.1",
+  "runtime": {
+    "pythonVersion": "3.11.18",
+    "implementation": "CPython",
+    "platform": "macOS-26.7.2-x86_64-i386-64bit",
+    "machine": "x86_64"
+  },
+  "pythonLibraries": [
+    {
+      "id": "python.package:agent-harness",
+      "name": "agent-harness",
+      "version": "0.1.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Agent Harness agnóstico: MCP, Tool Calling, Permisos y TUI.",
+      "documentationUrl": "",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:annotated-types",
+      "name": "annotated-types",
+      "version": "0.8.0",
+      "status": "available",
+      "importName": "annotated_types",
+      "category": "Utilities",
+      "description": "Reusable constraint types for use with typing Annotated.",
+      "documentationUrl": "https://github.com/annotated-types/annotated-types",
+      "tags": [
+        "typing",
+        "validation"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:anyio",
+      "name": "anyio",
+      "version": "4.16.0",
+      "status": "available",
+      "importName": "anyio",
+      "category": "Networking",
+      "description": "Asynchronous concurrency and networking layer over asyncio and Trio.",
+      "documentationUrl": "https://anyio.readthedocs.io/",
+      "tags": [
+        "async",
+        "concurrency",
+        "networking"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:attrs",
+      "name": "attrs",
+      "version": "26.1.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Classes Without Boilerplate",
+      "documentationUrl": "https://www.attrs.org/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:certifi",
+      "name": "certifi",
+      "version": "2026.10.23",
+      "status": "available",
+      "importName": "certifi",
+      "category": "Security",
+      "description": "Curated collection of Mozilla root CA certificates for TLS validation.",
+      "documentationUrl": "https://github.com/certifi/python-certifi",
+      "tags": [
+        "tls",
+        "certificates",
+        "security"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:cffi",
+      "name": "cffi",
+      "version": "2.1.1",
+      "status": "available",
+      "importName": "cffi",
+      "category": "Utilities",
+      "description": "Foreign Function Interface for calling C code from Python.",
+      "documentationUrl": "https://cffi.readthedocs.io/",
+      "tags": [
+        "ffi",
+        "c",
+        "bindings"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:charset-normalizer",
+      "name": "charset-normalizer",
+      "version": "3.5.2",
+      "status": "available",
+      "importName": "charset_normalizer",
+      "category": "Utilities",
+      "description": "Character-set detection and text encoding normalization.",
+      "documentationUrl": "https://charset-normalizer.readthedocs.io/",
+      "tags": [
+        "encoding",
+        "text"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:click",
+      "name": "click",
+      "version": "8.5.0",
+      "status": "available",
+      "importName": "click",
+      "category": "Utilities",
+      "description": "Composable toolkit for building command-line interfaces.",
+      "documentationUrl": "https://click.palletsprojects.com/",
+      "tags": [
+        "cli",
+        "commands"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:coverage",
+      "name": "coverage",
+      "version": "7.17.2",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Code coverage measurement for Python",
+      "documentationUrl": "https://coverage.readthedocs.io/en/7.17.2",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:cryptography",
+      "name": "cryptography",
+      "version": "50.0.2",
+      "status": "available",
+      "importName": "cryptography",
+      "category": "Security",
+      "description": "Cryptographic recipes and primitives for Python.",
+      "documentationUrl": "https://cryptography.io/",
+      "tags": [
+        "crypto",
+        "encryption",
+        "security"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:distro",
+      "name": "distro",
+      "version": "1.9.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Distro - an OS platform information API",
+      "documentationUrl": "https://github.com/python-distro/distro",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:h11",
+      "name": "h11",
+      "version": "0.16.0",
+      "status": "available",
+      "importName": "h11",
+      "category": "Networking",
+      "description": "Pure-Python, spec-compliant HTTP/1.1 protocol implementation.",
+      "documentationUrl": "https://h11.readthedocs.io/",
+      "tags": [
+        "http",
+        "protocol"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:httpcore",
+      "name": "httpcore",
+      "version": "1.0.9",
+      "status": "available",
+      "importName": "httpcore",
+      "category": "Networking",
+      "description": "Minimal low-level HTTP client that powers the HTTPX transport.",
+      "documentationUrl": "https://www.encode.io/httpcore/",
+      "tags": [
+        "http",
+        "client"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:httpcore2",
+      "name": "httpcore2",
+      "version": "2.16.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "A minimal low-level HTTP client.",
+      "documentationUrl": "https://github.com/pydantic/httpx2",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:httpx",
+      "name": "httpx",
+      "version": "0.28.1",
+      "status": "available",
+      "importName": "httpx",
+      "category": "Networking",
+      "description": "Next-generation HTTP client with sync and async support.",
+      "documentationUrl": "https://www.python-httpx.org/",
+      "tags": [
+        "http",
+        "async",
+        "client"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:httpx2",
+      "name": "httpx2",
+      "version": "2.16.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "The next generation HTTP client.",
+      "documentationUrl": "https://github.com/pydantic/httpx2",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:idna",
+      "name": "idna",
+      "version": "3.20",
+      "status": "available",
+      "importName": "idna",
+      "category": "Networking",
+      "description": "Internationalized Domain Names in Applications (IDNA) encoding support.",
+      "documentationUrl": "https://github.com/kjd/idna",
+      "tags": [
+        "dns",
+        "encoding"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:iniconfig",
+      "name": "iniconfig",
+      "version": "2.3.1",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "brain-dead simple config-ini parsing",
+      "documentationUrl": "https://github.com/pytest-dev/iniconfig",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:jiter",
+      "name": "jiter",
+      "version": "0.18.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Fast iterable JSON parser.",
+      "documentationUrl": "https://github.com/pydantic/jiter/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:jsonpatch",
+      "name": "jsonpatch",
+      "version": "1.44",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Apply JSON-Patches (RFC 6902)",
+      "documentationUrl": "https://python-json-patch.readthedocs.org/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:jsonpointer",
+      "name": "jsonpointer",
+      "version": "3.10",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Identify specific nodes in a JSON document (RFC 6901)",
+      "documentationUrl": "https://github.com/stefankoegl/python-json-pointer",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:jsonschema",
+      "name": "jsonschema",
+      "version": "4.26.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "An implementation of JSON Schema validation for Python",
+      "documentationUrl": "https://python-jsonschema.readthedocs.io/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:jsonschema-specifications",
+      "name": "jsonschema-specifications",
+      "version": "2025.9.1",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "The JSON Schema meta-schemas and vocabularies, exposed as a Registry",
+      "documentationUrl": "https://jsonschema-specifications.readthedocs.io/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:langchain-core",
+      "name": "langchain-core",
+      "version": "1.7.6",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Building applications with LLMs through composability",
+      "documentationUrl": "https://reference.langchain.com/python/langchain_core/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:langchain-openai",
+      "name": "langchain-openai",
+      "version": "1.7.4",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "An integration package connecting OpenAI and LangChain",
+      "documentationUrl": "https://reference.langchain.com/python/integrations/langchain_openai/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:langchain-protocol",
+      "name": "langchain-protocol",
+      "version": "0.0.21",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Python bindings for the LangChain agent streaming protocol",
+      "documentationUrl": "https://github.com/langchain-ai/agent-protocol/tree/main/streaming",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:langsmith",
+      "name": "langsmith",
+      "version": "0.14.17",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Client library to connect to the LangSmith Observability and Evaluation Platform.",
+      "documentationUrl": "https://github.com/langchain-ai/langsmith-python",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:linkify-it-py",
+      "name": "linkify-it-py",
+      "version": "2.2.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Links recognition library with FULL unicode support.",
+      "documentationUrl": "https://github.com/tsutsu3/linkify-it-py",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:markdown-it-py",
+      "name": "markdown-it-py",
+      "version": "4.2.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Python port of markdown-it. Markdown parsing, done right!",
+      "documentationUrl": "https://markdown-it-py.readthedocs.io",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:mcp",
+      "name": "mcp",
+      "version": "2.3.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Model Context Protocol SDK",
+      "documentationUrl": "https://py.sdk.modelcontextprotocol.io/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:mcp-types",
+      "name": "mcp-types",
+      "version": "2.3.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Model Context Protocol wire types",
+      "documentationUrl": "https://py.sdk.modelcontextprotocol.io/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:mdit-py-plugins",
+      "name": "mdit-py-plugins",
+      "version": "0.6.1",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Collection of plugins for markdown-it-py",
+      "documentationUrl": "https://mdit-py-plugins.readthedocs.io",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:mdurl",
+      "name": "mdurl",
+      "version": "0.1.2",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Markdown URL utilities",
+      "documentationUrl": "https://github.com/executablebooks/mdurl",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:openai",
+      "name": "openai",
+      "version": "3.46.0",
+      "status": "available",
+      "importName": "openai",
+      "category": "AI",
+      "description": "Official client library for the OpenAI API.",
+      "documentationUrl": "https://platform.openai.com/docs/libraries",
+      "tags": [
+        "llm",
+        "api",
+        "openai"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:opentelemetry-api",
+      "name": "opentelemetry-api",
+      "version": "1.45.2",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "OpenTelemetry Python API",
+      "documentationUrl": "https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-api",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:orjson",
+      "name": "orjson",
+      "version": "3.13.0",
+      "status": "available",
+      "importName": "orjson",
+      "category": "Serialization",
+      "description": "Fast JSON serialization library implemented in Rust.",
+      "documentationUrl": "https://github.com/ijl/orjson",
+      "tags": [
+        "json",
+        "serialization"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:packaging",
+      "name": "packaging",
+      "version": "26.3",
+      "status": "available",
+      "importName": "packaging",
+      "category": "Utilities",
+      "description": "Core utilities for Python package versions, specifiers, and markers.",
+      "documentationUrl": "https://packaging.pypa.io/",
+      "tags": [
+        "packaging",
+        "versions"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:pathlib",
+      "name": "pathlib",
+      "version": "1.0.1",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Object-oriented filesystem paths",
+      "documentationUrl": "https://pathlib.readthedocs.org/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:platformdirs",
+      "name": "platformdirs",
+      "version": "4.14.5",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`.",
+      "documentationUrl": "https://platformdirs.readthedocs.io",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:pluggy",
+      "name": "pluggy",
+      "version": "1.7.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "plugin and hook calling mechanisms for python",
+      "documentationUrl": "https://pluggy.readthedocs.io/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:prompt-toolkit",
+      "name": "prompt_toolkit",
+      "version": "3.0.53",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Library for building powerful interactive command lines in Python",
+      "documentationUrl": "https://python-prompt-toolkit.readthedocs.io/en/stable/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:pycparser",
+      "name": "pycparser",
+      "version": "3.12",
+      "status": "available",
+      "importName": "pycparser",
+      "category": "Utilities",
+      "description": "Complete C99 parser written in pure Python.",
+      "documentationUrl": "https://github.com/eliben/pycparser",
+      "tags": [
+        "c",
+        "parser"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:pydantic",
+      "name": "pydantic",
+      "version": "2.14.3",
+      "status": "available",
+      "importName": "pydantic",
+      "category": "Utilities",
+      "description": "Data validation and settings management using type hints.",
+      "documentationUrl": "https://docs.pydantic.dev/",
+      "tags": [
+        "validation",
+        "schema",
+        "typing"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:pydantic-core",
+      "name": "pydantic_core",
+      "version": "2.50.4",
+      "status": "available",
+      "importName": "pydantic_core",
+      "category": "Utilities",
+      "description": "Rust-based validation core that powers Pydantic v2.",
+      "documentationUrl": "https://github.com/pydantic/pydantic-core",
+      "tags": [
+        "validation",
+        "core"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:pydantic-settings",
+      "name": "pydantic-settings",
+      "version": "2.16.2",
+      "status": "available",
+      "importName": "pydantic_settings",
+      "category": "Utilities",
+      "description": "Settings management using Pydantic models and environment variables.",
+      "documentationUrl": "https://docs.pydantic.dev/latest/concepts/pydantic_settings/",
+      "tags": [
+        "settings",
+        "config"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:pygments",
+      "name": "Pygments",
+      "version": "2.21.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Pygments is a syntax highlighting package written in Python.",
+      "documentationUrl": "https://pygments.org/docs",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:pyjwt",
+      "name": "PyJWT",
+      "version": "2.15.1",
+      "status": "available",
+      "importName": "jwt",
+      "category": "Security",
+      "description": "Encode and decode JSON Web Tokens (JWT).",
+      "documentationUrl": "https://pyjwt.readthedocs.io/",
+      "tags": [
+        "jwt",
+        "auth",
+        "security"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:pyperclip",
+      "name": "pyperclip",
+      "version": "1.11.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "A cross-platform clipboard module for Python. (Only handles plain text for now.)",
+      "documentationUrl": "https://github.com/asweigart/pyperclip",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:pytest",
+      "name": "pytest",
+      "version": "9.2.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "pytest: simple powerful testing with Python",
+      "documentationUrl": "https://docs.pytest.org/en/latest/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:pytest-asyncio",
+      "name": "pytest-asyncio",
+      "version": "1.4.1.post1",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Pytest support for asyncio",
+      "documentationUrl": "https://pytest-asyncio.readthedocs.io",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:pytest-cov",
+      "name": "pytest-cov",
+      "version": "7.1.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Pytest plugin for measuring coverage.",
+      "documentationUrl": "https://pytest-cov.readthedocs.io/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:python-dotenv",
+      "name": "python-dotenv",
+      "version": "1.2.4",
+      "status": "available",
+      "importName": "dotenv",
+      "category": "Utilities",
+      "description": "Load environment variables from .env files.",
+      "documentationUrl": "https://saurabh-kumar.com/python-dotenv/",
+      "tags": [
+        "env",
+        "config"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:python-multipart",
+      "name": "python-multipart",
+      "version": "0.0.33",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "A streaming multipart parser for Python",
+      "documentationUrl": "https://kludex.github.io/python-multipart/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:pyyaml",
+      "name": "PyYAML",
+      "version": "6.0.3",
+      "status": "available",
+      "importName": "yaml",
+      "category": "Serialization",
+      "description": "YAML parser and emitter for Python.",
+      "documentationUrl": "https://pyyaml.org/wiki/PyYAMLDocumentation",
+      "tags": [
+        "yaml",
+        "config",
+        "serialization"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:referencing",
+      "name": "referencing",
+      "version": "0.37.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "JSON Referencing + Python",
+      "documentationUrl": "https://referencing.readthedocs.io/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:regex",
+      "name": "regex",
+      "version": "2026.9.29",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Alternative regular expression module, to replace re.",
+      "documentationUrl": "https://github.com/mrabarnett/mrab-regex",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:requests",
+      "name": "requests",
+      "version": "2.34.2",
+      "status": "available",
+      "importName": "requests",
+      "category": "Networking",
+      "description": "Simple, human-friendly HTTP client for Python.",
+      "documentationUrl": "https://requests.readthedocs.io/",
+      "tags": [
+        "http",
+        "web",
+        "client"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:requests-toolbelt",
+      "name": "requests-toolbelt",
+      "version": "1.0.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "A utility belt for advanced users of python-requests",
+      "documentationUrl": "https://toolbelt.readthedocs.io/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:rich",
+      "name": "rich",
+      "version": "15.0.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Render rich text, tables, progress bars, syntax highlighting, markdown and more to the terminal",
+      "documentationUrl": "https://rich.readthedocs.io/en/latest/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:rpds-py",
+      "name": "rpds-py",
+      "version": "2026.9.1",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Python bindings to Rust's persistent data structures (rpds)",
+      "documentationUrl": "https://rpds.readthedocs.io/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:sniffio",
+      "name": "sniffio",
+      "version": "1.3.1",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Sniff out which async library your code is running under",
+      "documentationUrl": "https://sniffio.readthedocs.io/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:sse-starlette",
+      "name": "sse-starlette",
+      "version": "3.6.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "SSE plugin for Starlette",
+      "documentationUrl": "https://github.com/sysid/sse-starlette",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:starlette",
+      "name": "starlette",
+      "version": "1.10.0",
+      "status": "available",
+      "importName": "starlette",
+      "category": "Web",
+      "description": "Lightweight ASGI framework and toolkit that underpins FastAPI.",
+      "documentationUrl": "https://www.starlette.io/",
+      "tags": [
+        "asgi",
+        "web"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:tenacity",
+      "name": "tenacity",
+      "version": "9.2.1",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Retry code until it succeeds",
+      "documentationUrl": "https://tenacity.readthedocs.io",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:textual",
+      "name": "textual",
+      "version": "8.2.8",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Modern Text User Interface framework",
+      "documentationUrl": "https://textual.textualize.io/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:tiktoken",
+      "name": "tiktoken",
+      "version": "0.14.0",
+      "status": "available",
+      "importName": "tiktoken",
+      "category": "AI",
+      "description": "Fast byte-pair-encoding tokenizer for OpenAI models.",
+      "documentationUrl": "https://github.com/openai/tiktoken",
+      "tags": [
+        "tokenizer",
+        "llm",
+        "encoding"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:tomlscript",
+      "name": "tomlscript",
+      "version": "0.2.1",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "A lightweight, dependency-free tool to manage your scripts directly from pyproject.toml",
+      "documentationUrl": "https://github.com/phihung/tomlscript",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:truststore",
+      "name": "truststore",
+      "version": "0.10.5",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Verify certificates using native system trust stores",
+      "documentationUrl": "https://truststore.readthedocs.io",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:typing-extensions",
+      "name": "typing_extensions",
+      "version": "4.16.0",
+      "status": "available",
+      "importName": "typing_extensions",
+      "category": "Utilities",
+      "description": "Backported and experimental type hints for older Python versions.",
+      "documentationUrl": "https://typing-extensions.readthedocs.io/",
+      "tags": [
+        "typing"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:typing-inspection",
+      "name": "typing-inspection",
+      "version": "0.4.5",
+      "status": "available",
+      "importName": "typing_inspection",
+      "category": "Utilities",
+      "description": "Runtime inspection utilities for typing annotations.",
+      "documentationUrl": "https://github.com/pydantic/typing-inspection",
+      "tags": [
+        "typing",
+        "introspection"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:urllib3",
+      "name": "urllib3",
+      "version": "2.8.0",
+      "status": "available",
+      "importName": "urllib3",
+      "category": "Networking",
+      "description": "Powerful, user-friendly HTTP client library.",
+      "documentationUrl": "https://urllib3.readthedocs.io/",
+      "tags": [
+        "http",
+        "client"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:uuid-utils",
+      "name": "uuid_utils",
+      "version": "0.19.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Fast, drop-in replacement for Python's uuid module, powered by Rust.",
+      "documentationUrl": "https://github.com/aminalaee/uuid-utils",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:uvicorn",
+      "name": "uvicorn",
+      "version": "0.54.0",
+      "status": "available",
+      "importName": "uvicorn",
+      "category": "Web",
+      "description": "Lightning-fast ASGI server implementation.",
+      "documentationUrl": "https://www.uvicorn.org/",
+      "tags": [
+        "asgi",
+        "server"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:wcwidth",
+      "name": "wcwidth",
+      "version": "0.9.4",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Measures the displayed width of unicode strings in a terminal",
+      "documentationUrl": "https://github.com/jquast/wcwidth",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:websockets",
+      "name": "websockets",
+      "version": "17.4",
+      "status": "available",
+      "importName": "websockets",
+      "category": "Networking",
+      "description": "Library for building WebSocket servers and clients with asyncio.",
+      "documentationUrl": "https://websockets.readthedocs.io/",
+      "tags": [
+        "websocket",
+        "async"
+      ],
+      "catalogStatus": "cataloged",
+      "descriptionSource": "catalog"
+    },
+    {
+      "id": "python.package:xxhash",
+      "name": "xxhash",
+      "version": "4.0.2",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Python binding for xxHash",
+      "documentationUrl": "https://github.com/ifduyue/python-xxhash",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    },
+    {
+      "id": "python.package:zstandard",
+      "name": "zstandard",
+      "version": "0.25.0",
+      "status": "available",
+      "category": "Uncataloged",
+      "description": "Zstandard bindings for Python",
+      "documentationUrl": "https://python-zstandard.readthedocs.io/en/latest/",
+      "catalogStatus": "uncataloged",
+      "descriptionSource": "package-metadata"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "python.runtime",
+      "status": "available",
+      "value": "3.11.18",
+      "details": {
+        "implementation": "CPython",
+        "platform": "macOS-26.7.2-x86_64-i386-64bit",
+        "machine": "x86_64",
+        "pythonVersion": "3.11.18"
+      },
+      "confidence": "high",
+      "source": "runtime"
+    },
+    {
+      "id": "runtime.filesystem:temp-dir",
+      "status": "available",
+      "value": true,
+      "confidence": "high",
+      "source": "runtime"
+    },
+    {
+      "id": "runtime.filesystem:write",
+      "status": "unverified",
+      "value": null,
+      "confidence": "low",
+      "source": "skipped"
+    },
+    {
+      "id": "runtime.network:https",
+      "status": "unverified",
+      "value": null,
+      "confidence": "low",
+      "source": "skipped"
+    },
+    {
+      "id": "runtime.os",
+      "status": "available",
+      "value": "Darwin",
+      "details": {
+        "system": "Darwin",
+        "release": "25.6.0",
+        "machine": "x86_64"
+      },
+      "confidence": "high",
+      "source": "runtime"
+    },
+    {
+      "id": "runtime.subprocess:exec",
+      "status": "unverified",
+      "value": null,
+      "confidence": "low",
+      "source": "skipped"
+    },
+    {
+      "id": "skill:{'name': 'agent-harness-explorer'}",
+      "name": "{'name': 'agent-harness-explorer'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "skill:{'name': 'improve-codebase-architecture'}",
+      "name": "{'name': 'improve-codebase-architecture'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'analyze_code_complexity', 'description': '[MCP:local_dev] Analiza la complejidad de un archivo Python (número de líneas, funciones y clases).', 'origin': 'Local'}",
+      "name": "{'name': 'analyze_code_complexity', 'description': '[MCP:local_dev] Analiza la complejidad de un archivo Python (número de líneas, funciones y clases).', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'bash', 'description': 'Ejecuta un comando de shell (bash) en el sistema. Úsalo para correr tests, instalar dependencias o explorar el sistema.', 'origin': 'Local'}",
+      "name": "{'name': 'bash', 'description': 'Ejecuta un comando de shell (bash) en el sistema. Úsalo para correr tests, instalar dependencias o explorar el sistema.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'create_directory', 'description': '[MCP:filesystem] Create a new directory or ensure a directory exists. Can create multiple nested directories in one operation. If the directory already exists, this operation will succeed silently. Perfect for setting up directory structures for projects or ensuring required paths exist. Only works within allowed directories.', 'origin': 'Local'}",
+      "name": "{'name': 'create_directory', 'description': '[MCP:filesystem] Create a new directory or ensure a directory exists. Can create multiple nested directories in one operation. If the directory already exists, this operation will succeed silently. Perfect for setting up directory structures for projects or ensuring required paths exist. Only works within allowed directories.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'delegate_to_reviewer', 'description': 'Delega una tarea de revisión de código.', 'origin': 'Local'}",
+      "name": "{'name': 'delegate_to_reviewer', 'description': 'Delega una tarea de revisión de código.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'directory_tree', 'description': \"[MCP:filesystem] Get a recursive tree view of files and directories as a JSON structure. Each entry includes 'name', 'type' (file/directory), and 'children' for directories. Files have no children array, while directories always have a children array (which may be empty). The output is formatted with 2-space indentation for readability. Only works within allowed directories.\", 'origin': 'Local'}",
+      "name": "{'name': 'directory_tree', 'description': \"[MCP:filesystem] Get a recursive tree view of files and directories as a JSON structure. Each entry includes 'name', 'type' (file/directory), and 'children' for directories. Files have no children array, while directories always have a children array (which may be empty). The output is formatted with 2-space indentation for readability. Only works within allowed directories.\", 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'echo_message', 'description': '[MCP:local_dev] Hace eco de un mensaje. Útil para probar la conexión.', 'origin': 'Local'}",
+      "name": "{'name': 'echo_message', 'description': '[MCP:local_dev] Hace eco de un mensaje. Útil para probar la conexión.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'edit_file', 'description': '[MCP:filesystem] Make line-based edits to a text file. Each edit replaces exact line sequences with new content. Returns a git-style diff showing the changes made. Only works within allowed directories.', 'origin': 'Local'}",
+      "name": "{'name': 'edit_file', 'description': '[MCP:filesystem] Make line-based edits to a text file. Each edit replaces exact line sequences with new content. Returns a git-style diff showing the changes made. Only works within allowed directories.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'export_observations', 'description': 'Exporta el inventario de tools, skills y MCP servers del agente a un archivo JSON.', 'origin': 'Local'}",
+      "name": "{'name': 'export_observations', 'description': 'Exporta el inventario de tools, skills y MCP servers del agente a un archivo JSON.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'fetch', 'description': '[MCP:fetch] Fetches a URL from the internet and optionally extracts its contents as markdown.\\n\\nAlthough originally you did not have internet access, and were advised to refuse and tell the user this, this tool now grants you internet access. Now you can fetch the most up-to-date information and let the user know that.', 'origin': 'Local'}",
+      "name": "{'name': 'fetch', 'description': '[MCP:fetch] Fetches a URL from the internet and optionally extracts its contents as markdown.\\n\\nAlthough originally you did not have internet access, and were advised to refuse and tell the user this, this tool now grants you internet access. Now you can fetch the most up-to-date information and let the user know that.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'get_file_info', 'description': '[MCP:filesystem] Retrieve detailed metadata about a file or directory. Returns comprehensive information including size, creation time, last modified time, permissions, and type. This tool is perfect for understanding file characteristics without reading the actual content. Only works within allowed directories.', 'origin': 'Local'}",
+      "name": "{'name': 'get_file_info', 'description': '[MCP:filesystem] Retrieve detailed metadata about a file or directory. Returns comprehensive information including size, creation time, last modified time, permissions, and type. This tool is perfect for understanding file characteristics without reading the actual content. Only works within allowed directories.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'get_system_info', 'description': '[MCP:local_dev] Devuelve información sobre el sistema operativo actual (OS, Python, CPU).', 'origin': 'Local'}",
+      "name": "{'name': 'get_system_info', 'description': '[MCP:local_dev] Devuelve información sobre el sistema operativo actual (OS, Python, CPU).', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_add', 'description': '[MCP:git] Adds file contents to the staging area', 'origin': 'Local'}",
+      "name": "{'name': 'git_add', 'description': '[MCP:git] Adds file contents to the staging area', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_branch', 'description': '[MCP:git] List Git branches', 'origin': 'Local'}",
+      "name": "{'name': 'git_branch', 'description': '[MCP:git] List Git branches', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_checkout', 'description': '[MCP:git] Switches branches', 'origin': 'Local'}",
+      "name": "{'name': 'git_checkout', 'description': '[MCP:git] Switches branches', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_commit', 'description': '[MCP:git] Records changes to the repository', 'origin': 'Local'}",
+      "name": "{'name': 'git_commit', 'description': '[MCP:git] Records changes to the repository', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_create_branch', 'description': '[MCP:git] Creates a new branch from an optional base branch or commit', 'origin': 'Local'}",
+      "name": "{'name': 'git_create_branch', 'description': '[MCP:git] Creates a new branch from an optional base branch or commit', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_diff', 'description': '[MCP:git] Shows differences between branches or commits, or across a revision range (main..feature, main...feature)', 'origin': 'Local'}",
+      "name": "{'name': 'git_diff', 'description': '[MCP:git] Shows differences between branches or commits, or across a revision range (main..feature, main...feature)', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_diff_staged', 'description': '[MCP:git] Shows changes that are staged for commit', 'origin': 'Local'}",
+      "name": "{'name': 'git_diff_staged', 'description': '[MCP:git] Shows changes that are staged for commit', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_diff_unstaged', 'description': '[MCP:git] Shows changes in the working directory that are not yet staged', 'origin': 'Local'}",
+      "name": "{'name': 'git_diff_unstaged', 'description': '[MCP:git] Shows changes in the working directory that are not yet staged', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_log', 'description': '[MCP:git] Shows the commit logs', 'origin': 'Local'}",
+      "name": "{'name': 'git_log', 'description': '[MCP:git] Shows the commit logs', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_merge', 'description': '[MCP:git] Merges a branch into the current branch. Fast-forward only unless fast_forward_only is false; refuses a dirty working tree, and aborts a merge that conflicts, leaving the repository unchanged', 'origin': 'Local'}",
+      "name": "{'name': 'git_merge', 'description': '[MCP:git] Merges a branch into the current branch. Fast-forward only unless fast_forward_only is false; refuses a dirty working tree, and aborts a merge that conflicts, leaving the repository unchanged', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_remote', 'description': \"[MCP:git] Lists the repository's remotes with their fetch and push URLs, like `git remote -v`. Credentials embedded in a URL are shown as <redacted>\", 'origin': 'Local'}",
+      "name": "{'name': 'git_remote', 'description': \"[MCP:git] Lists the repository's remotes with their fetch and push URLs, like `git remote -v`. Credentials embedded in a URL are shown as <redacted>\", 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_reset', 'description': '[MCP:git] Unstages all staged changes', 'origin': 'Local'}",
+      "name": "{'name': 'git_reset', 'description': '[MCP:git] Unstages all staged changes', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_show', 'description': '[MCP:git] Shows the contents of a commit, or of a file or directory given as <revision>:<path>', 'origin': 'Local'}",
+      "name": "{'name': 'git_show', 'description': '[MCP:git] Shows the contents of a commit, or of a file or directory given as <revision>:<path>', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'git_status', 'description': '[MCP:git] Shows the working tree status', 'origin': 'Local'}",
+      "name": "{'name': 'git_status', 'description': '[MCP:git] Shows the working tree status', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'list_allowed_directories', 'description': '[MCP:filesystem] Returns the list of directories that this server is allowed to access. Subdirectories within these allowed directories are also accessible. Use this to understand which directories and their nested paths are available before trying to access files.', 'origin': 'Local'}",
+      "name": "{'name': 'list_allowed_directories', 'description': '[MCP:filesystem] Returns the list of directories that this server is allowed to access. Subdirectories within these allowed directories are also accessible. Use this to understand which directories and their nested paths are available before trying to access files.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'list_directory', 'description': '[MCP:filesystem] Get a detailed listing of all files and directories in a specified path. Results clearly distinguish between files and directories with [FILE] and [DIR] prefixes. This tool is essential for understanding directory structure and finding specific files within a directory. Only works within allowed directories.', 'origin': 'Local'}",
+      "name": "{'name': 'list_directory', 'description': '[MCP:filesystem] Get a detailed listing of all files and directories in a specified path. Results clearly distinguish between files and directories with [FILE] and [DIR] prefixes. This tool is essential for understanding directory structure and finding specific files within a directory. Only works within allowed directories.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'list_directory_with_sizes', 'description': '[MCP:filesystem] Get a detailed listing of all files and directories in a specified path, including sizes. Results clearly distinguish between files and directories with [FILE] and [DIR] prefixes. This tool is useful for understanding directory structure and finding specific files within a directory. Only works within allowed directories.', 'origin': 'Local'}",
+      "name": "{'name': 'list_directory_with_sizes', 'description': '[MCP:filesystem] Get a detailed listing of all files and directories in a specified path, including sizes. Results clearly distinguish between files and directories with [FILE] and [DIR] prefixes. This tool is useful for understanding directory structure and finding specific files within a directory. Only works within allowed directories.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'load_skill', 'description': \"Carga las instrucciones de una 'skill' (habilidad) específica. Úsalo cuando necesites un manual de instrucciones detallado.\", 'origin': 'Local'}",
+      "name": "{'name': 'load_skill', 'description': \"Carga las instrucciones de una 'skill' (habilidad) específica. Úsalo cuando necesites un manual de instrucciones detallado.\", 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'memory_recall', 'description': 'Search long-term memory.', 'origin': 'Local'}",
+      "name": "{'name': 'memory_recall', 'description': 'Search long-term memory.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'memory_save', 'description': 'Save a fact or preference in long-term memory.', 'origin': 'Local'}",
+      "name": "{'name': 'memory_save', 'description': 'Save a fact or preference in long-term memory.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'move_file', 'description': '[MCP:filesystem] Move or rename files and directories. Can move files between directories and rename them in a single operation. If the destination exists, the operation will fail. Works across different directories and can be used for simple renaming within the same directory. Both source and destination must be within allowed directories.', 'origin': 'Local'}",
+      "name": "{'name': 'move_file', 'description': '[MCP:filesystem] Move or rename files and directories. Can move files between directories and rename them in a single operation. If the destination exists, the operation will fail. Works across different directories and can be used for simple renaming within the same directory. Both source and destination must be within allowed directories.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'read_file', 'description': '[MCP:filesystem] Read the complete contents of a file as text. DEPRECATED: Use read_text_file instead.', 'origin': 'Local'}",
+      "name": "{'name': 'read_file', 'description': '[MCP:filesystem] Read the complete contents of a file as text. DEPRECATED: Use read_text_file instead.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'read_media_file', 'description': '[MCP:filesystem] Read a file and return it as a base64-encoded content block with its MIME type. Image and audio files are returned as image/audio content; any other file type is returned as an embedded resource. Only works within allowed directories.', 'origin': 'Local'}",
+      "name": "{'name': 'read_media_file', 'description': '[MCP:filesystem] Read a file and return it as a base64-encoded content block with its MIME type. Image and audio files are returned as image/audio content; any other file type is returned as an embedded resource. Only works within allowed directories.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'read_multiple_files', 'description': \"[MCP:filesystem] Read the contents of multiple files simultaneously. This is more efficient than reading files one by one when you need to analyze or compare multiple files. Each file's content is returned with its path as a reference. Failed reads for individual files won't stop the entire operation. Only works within allowed directories.\", 'origin': 'Local'}",
+      "name": "{'name': 'read_multiple_files', 'description': \"[MCP:filesystem] Read the contents of multiple files simultaneously. This is more efficient than reading files one by one when you need to analyze or compare multiple files. Each file's content is returned with its path as a reference. Failed reads for individual files won't stop the entire operation. Only works within allowed directories.\", 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'read_text_file', 'description': \"[MCP:filesystem] Read the complete contents of a file from the file system as text. Handles various text encodings and provides detailed error messages if the file cannot be read. Use this tool when you need to examine the contents of a single file. Use the 'head' parameter to read only the first N lines of a file, or the 'tail' parameter to read only the last N lines of a file. Operates on the file as text regardless of extension. Only works within allowed directories.\", 'origin': 'Local'}",
+      "name": "{'name': 'read_text_file', 'description': \"[MCP:filesystem] Read the complete contents of a file from the file system as text. Handles various text encodings and provides detailed error messages if the file cannot be read. Use this tool when you need to examine the contents of a single file. Use the 'head' parameter to read only the first N lines of a file, or the 'tail' parameter to read only the last N lines of a file. Operates on the file as text regardless of extension. Only works within allowed directories.\", 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'run_tests', 'description': '[MCP:local_dev] Ejecuta la suite de tests del proyecto (pytest) y devuelve el resultado o los errores.', 'origin': 'Local'}",
+      "name": "{'name': 'run_tests', 'description': '[MCP:local_dev] Ejecuta la suite de tests del proyecto (pytest) y devuelve el resultado o los errores.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'search_files', 'description': \"[MCP:filesystem] Recursively search for files and directories matching a pattern. The patterns should be glob-style patterns that match paths relative to the working directory. Use pattern like '*.ext' to match files in current directory, and '**/*.ext' to match files in all subdirectories. Returns full paths to all matching items. Great for finding files when you don't know their exact location. Only searches within allowed directories.\", 'origin': 'Local'}",
+      "name": "{'name': 'search_files', 'description': \"[MCP:filesystem] Recursively search for files and directories matching a pattern. The patterns should be glob-style patterns that match paths relative to the working directory. Use pattern like '*.ext' to match files in current directory, and '**/*.ext' to match files in all subdirectories. Returns full paths to all matching items. Great for finding files when you don't know their exact location. Only searches within allowed directories.\", 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    },
+    {
+      "id": "tool:{'name': 'write_file', 'description': '[MCP:filesystem] Create a new file or completely overwrite an existing file with new content. Use with caution as it will overwrite existing files without warning. Handles text content with proper encoding. Only works within allowed directories.', 'origin': 'Local'}",
+      "name": "{'name': 'write_file', 'description': '[MCP:filesystem] Create a new file or completely overwrite an existing file with new content. Use with caution as it will overwrite existing files without warning. Handles text content with proper encoding. Only works within allowed directories.', 'origin': 'Local'}",
+      "status": "available",
+      "confidence": "high",
+      "source": "agent-observed"
+    }
+  ],
+  "probes": [
+    {
+      "probeId": "python-runtime-packages",
+      "probeVersion": "0.1.0",
+      "status": "success",
+      "safetyLevel": "passive"
+    },
+    {
+      "probeId": "runtime-environment",
+      "probeVersion": "0.1.0",
+      "status": "success",
+      "safetyLevel": "passive"
+    },
+    {
+      "probeId": "tool-mcp-visibility",
+      "probeVersion": "0.1.0",
+      "status": "success",
+      "safetyLevel": "passive"
+    }
+  ],
+  "warnings": [],
+  "summary": {
+    "available": 121,
+    "visible": 41,
+    "restricted": 0,
+    "unknown": 3,
+    "libraries": 77,
+    "uncataloged": 48
+  },
+  "fingerprint": "sha256:a679ac5af638e5563f26ec194f6e09569e8c8696e2156b95660d0eee1aa817a2"
+}

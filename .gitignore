@@ -61,11 +61,16 @@ chroma_db/
 *.log
 
 # ==========================================
-# Permisos Locales del Harness
+# Datos de usuario del Harness
 # ==========================================
-.harness_permissions.json
+.harness/
 
-# ==========================================
-# Memoria a largo plazo
-# ==========================================
-.harness_memory/
+# # ==========================================
+# # Permisos Locales del Harness
+# # ==========================================
+# .harness_permissions.json
+
+# # ==========================================
+# # Memoria a largo plazo
+# # ==========================================
+# .harness_memory/

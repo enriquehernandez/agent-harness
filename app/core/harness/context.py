@@ -1,5 +1,6 @@
 import json
 from typing import Any
+from app.core.logger import logger
 from ..llm.base import BaseLLM
 from .compaction import (
     CompactionStrategy, SummarizationStrategy, SlidingWindowStrategy, NoneStrategy
@@ -87,17 +88,15 @@ class ContextManager:
 
     def add_user_with_image(self, text: str, image_urls: list[str]):
         """Añade un mensaje de usuario con imágenes en formato multimodal."""
+        if not text and not image_urls:
+            logger.warning(
+                "add_user_with_image llamado sin texto ni imágenes; ignorado.")
+            return
         content = []
         if text:
             content.append({"type": "text", "text": text})
         else:
-            content.append(
-                {"type": "text", "text": "[Imagen adjunta]"})  # pragma: no cover
-
+            content.append({"type": "text", "text": "[Imagen adjunta]"})
         for url in image_urls:
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": url}
-            })
-
+            content.append({"type": "image_url", "image_url": {"url": url}})
         self.messages.append({"role": "user", "content": content})

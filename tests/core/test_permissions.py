@@ -9,7 +9,7 @@ from app.core.harness.permissions import PermissionGate, Decision
 
 @pytest.fixture(autouse=True)
 def clean_permissions_file():
-    path = Path(".harness_permissions.json")
+    path = Path(".harness/permissions.json")
     if path.exists():
         path.unlink()
     yield
@@ -70,7 +70,7 @@ async def test_permission_gate_ask_user_always():
 
 @pytest.mark.asyncio
 async def test_permission_gate_ask_user_no():
-    async def mock_ask_user(tool, signature, args, diff_text):
+    async def mock_ask_user(tool, signature, args, diff_text):  # 🔥 Añadido diff_text
         return "n"
 
     gate = PermissionGate(ask_user=mock_ask_user)

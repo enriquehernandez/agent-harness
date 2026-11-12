@@ -11,14 +11,19 @@ An autonomous AI agent engine (Harness) built in Python with a Textual TUI, MCP 
 - **Tool Protocol:** `mcp` (Model Context Protocol)
 - **Orchestration:** Custom `AgentLoop` (ReAct pattern)
 - **Testing:** `pytest`, `pytest-asyncio`, `pytest-cov` (100% coverage)
+- **Memory:** SQLite with FTS5 (default), files, or in-memory.
+- **Sessions:** JSON files in `.harness/sessions/`.
+- **Skills:** Markdown files in `.agents/skills/`.
 
 **Folder Structure:**
-- `app/core/`: Core logic (LLM, Harness, Permissions, Memory, Subagents).
-- `app/tui/`: User Interface (Textual, modals, dashboard).
-- `app/tools/`: Local tools (bash, filesystem, memory).
+- `app/core/`: Core logic (LLM, Harness, Permissions, Memory, Subagents, Sessions).
+- `app/tui/`: User Interface (Textual, modals, dashboard, suggester).
+- `app/tools/`: Local tools (bash, filesystem, memory, skills).
 - `app/mcp/`: Client for external MCP servers.
 - `tests/`: Unit and integration test suite.
 - `scripts/`: Auxiliary scripts (local MCP servers).
+- `.agents/skills/`: Installed skills (external, e.g., `agent-harness-explorer`).
+- `.harness/`: Persistent data (memory, sessions, permissions, logs).
 
 ## Comandos
 
@@ -40,12 +45,16 @@ An autonomous AI agent engine (Harness) built in Python with a Textual TUI, MCP 
 
 - **Prompt Caching:** `OpenAICompatibleProvider` injects `cache_control` if `ENABLE_PROMPT_CACHING=True`. Only works on supported models.
 - **Safe Split Point:** `SummarizationStrategy` never cuts a `tool` message from its corresponding `assistant` call.
-- **Permission Gate:** Sensitive tools (`bash`, `write_file`) always ask for confirmation. Users can approve with `y`, always with `a` (saved to `.harness_permissions.json`), or deny with `n`.
+- **Permission Gate:** Sensitive tools (`bash`, `write_file`) always ask for confirmation. Users can approve with `y`, always with `a` (saved to `.harness/permissions.json`), or deny with `n`.
 - **MCP:** Servers are configured in `mcp_config.json`. They are connected at TUI startup. Failed servers are ignored.
 - **TUI:** Use `await app.write_to_chat()` to add messages. Do not use `print()`.
-- **Streaming:** El `AgentLoop` ahora tiene un método `stream` que devuelve chunks de texto. La TUI los renderiza en tiempo real usando `Markdown.update()`.
-- **Multimodalidad:** Las imágenes se codifican en Base64 y se inyectan como bloques `image_url` en el contexto. El `FileAwareInput` intercepta el pegado de archivos para evitar que se escriban como texto.
-- **Exportación:** El comando `/export` permite guardar la transcripción en Markdown o JSON usando `render_transcript`.
+- **Streaming:** `AgentLoop.stream()` yields text chunks. The TUI renders them in real-time with `Markdown.update()`. The `stream_to_chat` method has a timeout (300s) and handles `503` errors from the LLM provider gracefully.
+- **Multimodal:** Images are encoded in Base64 and injected as `image_url` blocks. `FileAwareInput` intercepts file pastes to prevent them from being typed as text.
+- **Export:** `/export` saves the transcript in Markdown or JSON using `render_transcript`.
+- **Skills:** Skills are loaded from `.agents/skills/<name>/SKILL.md`. The agent can load them with the `load_skill` tool or the `@name` syntax. The `SkillSuggester` autocompletes skill names when typing `@`. Skills are discovered at startup and injected into the `system_prompt`.
+- **Memory:** The `MemoryStore` interface supports three backends (`sqlite`, `files`, `memory`). The default is `sqlite`. The `preamble()` of the store is injected into the `system_prompt` at startup. Tools: `memory_save`, `memory_recall`.
+- **Sessions:** The `SessionManager` saves the conversation history to `.harness/sessions/<id>.json` on exit. It loads the last session automatically at startup. Commands: `/session list`, `/session load <id>`, `/session save`, `/session delete <id>`.
+- **Hooks:** `BashTool` intercepts commands containing `capture_snapshot.py` and injects `--tools observations.json` automatically, so the `agent-harness-explorer` skill includes the harness tools in its report.
 
 ## Working Style
 
@@ -64,4 +73,11 @@ An autonomous AI agent engine (Harness) built in Python with a Textual TUI, MCP 
 
 - **Unit tests:** `uv run tom test` must pass with >99% coverage.
 - **Integration tests:** `uv run tom test-integration` verifies that MCP servers respond.
-- **Manual test:** `uv run tom dev` and verify the TUI starts, chat works, permissions function, and the debug panel (F1) shows events.
+- **Manual test:** `uv run tom dev` and verify:
+    - TUI starts.
+    - Chat works (streaming).
+    - Permissions function (modals).
+    - Debug panel (F1) shows events.
+    - `@skill-name` loads a skill.
+    - `/session list` shows sessions.
+    - `/memory clear` clears memory.

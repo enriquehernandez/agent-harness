@@ -40,11 +40,14 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `/export [formato]` | Exporta la conversación (markdown/json) |\n"
             "| `/memory [clear/migrate]` | Gestiona la memoria persistente |\n"
             "| `/session [list/load/delete/save]` | Gestiona las sesiones guardadas |\n"
+            "| `/doctor` | 🩺 Diagnóstico del estado del sistema |\n"
+            "| `/trace` | 📊 Muestra el uso de tokens real de la última llamada |\n"
             "| `/quit` | Sale del programa |\n"
             "\n### 💡 Skills\n\n"
             "Escribe `@` seguido del nombre de la skill para cargarla automáticamente.\n"
             "Ejemplo: `@improve-codebase-architecture ¿Cómo está mi proyecto?`\n"
         )
+
         await app.write_to_chat(help_text, type="agent")
         return True
 
@@ -60,6 +63,115 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `Enter` | Enviar el mensaje o comando |\n"
         )
         await app.write_to_chat(shortcuts, type="agent")
+        return True
+
+    elif cmd == "/doctor":
+
+        txt = "### 🩺 Diagnóstico del Sistema\n\n"
+        issues = 0
+
+        # 1. LLM Config
+        txt += "#### ⚙️ Configuración del LLM\n"
+        if settings.LLM_PROVIDER == "fake":
+            txt += "- ⚠️ Usando `FakeLLM` (no hay conexión real a IA).\n"
+        else:
+            api_key = getattr(
+                settings, f"{settings.LLM_PROVIDER.upper()}_API_KEY", "")
+            if not api_key or "..." in api_key:
+                txt += f"- ❌ Falta `{settings.LLM_PROVIDER.upper()}_API_KEY` válida en .env.\n"
+                issues += 1
+            else:
+                txt += f"- ✅ LLM configurado: `{settings.LLM_PROVIDER}`.\n"
+
+        # 2. MCP Config
+        txt += "\n#### 🔌 Servidores MCP\n"
+        config_path = Path("mcp_config.json")
+        if not config_path.exists():
+            txt += "- ⚠️ No existe `mcp_config.json`. El agente no tendrá tools remotas.\n"
+        else:
+            try:
+                config = json.loads(config_path.read_text())
+                servers = config.get("mcpServers", {})
+                if not servers:
+                    txt += "- ⚠️ No hay servidores MCP configurados.\n"
+                for name, conf in servers.items():
+                    cmd = conf.get("command", "")
+                    txt += f"- ✅ `{name}` (`{cmd}`)\n"
+            except Exception as e:
+                txt += f"- ❌ Error parseando `mcp_config.json`: {e}\n"
+                issues += 1
+
+        # 3. Skills
+        txt += "\n#### 🧠 Skills\n"
+        skills_dir = Path(".agents/skills")
+        if not skills_dir.exists():
+            txt += "- ⚠️ No existe el directorio `.agents/skills/`.\n"
+        else:
+            installed = [d.name for d in skills_dir.iterdir() if (
+                d / "SKILL.md").exists()]
+            if not installed:
+                txt += "- ⚠️ No hay skills instaladas.\n"
+            else:
+                txt += f"- ✅ {len(installed)} skill(s) detectada(s): `{', '.join(installed)}`\n"
+
+        # 4. Memoria
+        txt += "\n#### 💾 Memoria\n"
+        txt += f"- Backend: `{settings.MEMORY_BACKEND}`\n"
+        if settings.MEMORY_BACKEND == "sqlite" and not settings.memory_db.exists():
+            txt += "- ⚠️ La base de datos SQLite aún no se ha creado (se creará al guardar).\n"
+        else:
+            txt += f"- ✅ Almacenamiento en `{settings.DATA_DIR}`.\n"
+
+        # 5. Sesiones y Permisos
+        txt += "\n#### 🔐 Seguridad y Sesiones\n"
+        if settings.permissions_file.exists():
+            txt += "- ✅ Archivo de permisos persistentes existe.\n"
+        else:
+            txt += "- ⚠️ No hay permisos guardados (todo pedirá confirmación).\n"
+
+        sessions = app.session_manager.list_sessions(
+        ) if hasattr(app, "session_manager") else []
+        txt += f"- Sesiones guardadas: `{len(sessions)}`\n"
+
+        # Resultado final
+        if issues == 0:
+            txt += "\n**✨ Todo en orden. Listo para trabajar.**"
+        else:
+            txt += f"\n**⚠️ Se encontraron {issues} problema(s) crítico(s).**"
+
+        await app.write_to_chat(txt, type="agent")
+        return True
+
+    elif cmd == "/trace":
+        usage = getattr(app, "last_usage", None)
+        model = getattr(app, "last_model", "Desconocido")
+
+        if not usage:
+            await app.write_to_chat("⚠️ No hay datos de uso recientes. Envía un mensaje primero.", type="system")
+            return True
+
+        prompt = usage.get("prompt_tokens", 0)
+        completion = usage.get("completion_tokens", 0)
+        cached = usage.get("prompt_tokens_details", {}).get(
+            "cached_tokens", 0) if isinstance(usage.get("prompt_tokens_details"), dict) else 0
+        total = usage.get("total_tokens", 0)
+
+        txt = f"### 📊 Traza de la Última Llamada\n\n"
+        txt += f"**Modelo:** `{model}`\n\n"
+        txt += "| Métrica | Tokens |\n"
+        txt += "| :--- | :--- |\n"
+        txt += f"| Prompt (Entrada) | `{prompt}` |\n"
+        txt += f"| Completion (Salida) | `{completion}` |\n"
+        if cached:
+            txt += f"| 🎯 Cached (Ahorro) | `{cached}` |\n"
+        txt += f"| **Total** | `{total}` |\n\n"
+
+        if cached > 0:
+            txt += f"✨ *Prompt Caching activo: {cached} tokens leídos de caché.*\n"
+        else:
+            txt += "💡 *Consejo: Activa `ENABLE_PROMPT_CACHING=true` en .env para ahorrar costes en prompts largos.*\n"
+
+        await app.write_to_chat(txt, type="agent")
         return True
 
     elif cmd == "/tools":
@@ -409,7 +521,9 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
 
             elif subcmd == "save":
                 if getattr(app, "session_manager", None) and app.ctx:
-                    file_path = app.session_manager.save(app.ctx)
+                    # 🔥 Pasamos app.agent_loop
+                    file_path = app.session_manager.save(
+                        app.ctx, getattr(app, "agent_loop", None))
                     await app.write_to_chat(f"✅ Sesión guardada en `{file_path}`.", type="system")
                 else:
                     await app.write_to_chat("❌ No hay sesión activa.", type="system")

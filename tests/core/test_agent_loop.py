@@ -1,11 +1,48 @@
+import asyncio
+from typing import AsyncIterator
+
 import pytest
 from unittest.mock import patch, AsyncMock
 from app.core.harness.loop import AgentLoop
 from app.core.harness.permissions import PermissionGate, Decision
-from app.core.harness.tool import FunctionTool, ToolResult
-from app.core.llm.base import LLMResponse
+from app.core.harness.tool import FunctionTool, ToolRegistry, ToolResult
+from app.core.llm.base import BaseLLM, LLMResponse
 from app.core.harness.context import ContextManager
 from app.core.llm.providers.fake import FakeLLM
+
+
+class HangingLLM(BaseLLM):
+    async def chat(self, messages, tools=None, **kwargs) -> LLMResponse:
+        pass
+
+    async def stream_chat(self, messages, tools=None, **kwargs) -> AsyncIterator:
+        yield "Inicio..."
+        await asyncio.sleep(2)  # Se colgará aquí
+        yield "Fin"
+
+    def count_tokens(self, text: str) -> int: return 0
+    @property
+    def supports_tool_calling(self) -> bool: return True
+    @property
+    def max_context_window(self) -> int: return 1000
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_timeout():
+    """Cubre el except de TimeoutError en AgentLoop.stream."""
+    llm = HangingLLM()
+    loop = AgentLoop(llm=llm, tools=ToolRegistry())
+    ctx = ContextManager()
+
+    chunks = []
+    async for chunk in loop.stream("Hola", context=ctx, timeout_seconds=0.1):
+        chunks.append(chunk)
+
+    # El último chunk debe ser el diccionario de timeout
+    last_chunk = chunks[-1]
+    assert isinstance(last_chunk, dict)
+    assert last_chunk.get("timeout") is True
+    assert "Timeout" in last_chunk["final_answer"]
 
 
 @pytest.mark.asyncio
@@ -357,3 +394,84 @@ async def test_loop_stream_tool_fails_successfully(fake_llm, basic_registry):
             c, dict) and c.get("type") == "result"]
         assert len(result_chunks) > 0
         assert "fail_stream" in result_chunks[0]["tools_used"]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_repair_counts(fake_llm, basic_registry):
+    """Cubre las líneas 199-208 de loop.py: lógica de reintentos en stream()."""
+    from unittest.mock import patch
+    from app.core.harness.tool import FunctionTool, ToolResult
+    from app.core.harness.context import ContextManager
+
+    async def fail_tool():
+        return ToolResult(success=False, content="", error="Forced failure")
+
+    basic_registry.register(FunctionTool(
+        name="fail_stream", description="", parameters_schema={}, func=fail_tool
+    ))
+
+    async def mock_stream(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "fail_stream", "arguments": {}}
+        yield "Terminando..."
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        gate = PermissionGate(policies={"fail_stream": Decision.ALLOW})
+        loop = AgentLoop(
+            llm=fake_llm, tools=basic_registry, permissions=gate, max_iterations=3
+        )
+        ctx = ContextManager()
+
+        async for _ in loop.stream("Fail", context=ctx):
+            pass
+
+        # 🔥 El mensaje inyectado es: "Error: Forced failure. (Reintento 1/3...)"
+        # Verificamos que contiene el error original
+        assert any("Forced failure" in str(msg.get("content", ""))
+                   for msg in ctx.messages)
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_repair_counts_real(fake_llm, basic_registry):
+    """Cubre las líneas 199-208 de loop.py: lógica de reintentos en stream()."""
+    from app.core.harness.tool import FunctionTool, ToolResult
+    from app.core.harness.context import ContextManager
+    from unittest.mock import patch
+
+    # 🔥 Hacemos que lance una excepción para que FunctionTool devuelva success=False
+    async def fail_tool():
+        raise ValueError("Forced failure")
+
+    basic_registry.register(FunctionTool(
+        name="fail_stream", description="", parameters_schema={}, func=fail_tool
+    ))
+
+    step_counter = 0
+
+    async def mock_stream(*args, **kwargs):
+        nonlocal step_counter
+        step_counter += 1
+
+        if step_counter <= 3:
+            # Emitimos el tool_call
+            yield {"type": "tool_call", "id": f"c{step_counter}", "name": "fail_stream", "arguments": {}}
+        else:
+            # En el paso 4, solo texto -> el loop termina
+            yield "Fin."
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        gate = PermissionGate(policies={"fail_stream": Decision.ALLOW})
+        loop = AgentLoop(
+            llm=fake_llm, tools=basic_registry, permissions=gate, max_iterations=5
+        )
+        ctx = ContextManager()
+
+        async for _ in loop.stream("Fail", context=ctx):
+            pass
+
+        # Verificamos que los mensajes de reintento están en el contexto
+        all_content = " ".join(str(msg.get("content", ""))
+                               for msg in ctx.messages)
+
+        assert "Reintento 1/3" in all_content, f"Falta Reintento 1/3. Mensajes: {all_content}"
+        assert "Reintento 2/3" in all_content, f"Falta Reintento 2/3. Mensajes: {all_content}"
+        assert "falló 3 veces" in all_content, f"Falta mensaje de 3 fallos. Mensajes: {all_content}"

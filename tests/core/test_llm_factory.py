@@ -43,3 +43,26 @@ async def test_fake_llm_default_response():
     fake = FakeLLM(responses=[])
     resp = await fake.chat([])
     assert resp.content == "Simulated response by FakeLLM."
+
+
+@pytest.mark.asyncio
+async def test_fake_llm_stream_with_tools_and_usage():
+    """Cubre las líneas 33-34 y 43 de fake.py (emisión de tool_calls y usage)."""
+    from app.core.llm.providers.fake import FakeLLM
+    from app.core.llm.base import LLMResponse
+
+    fake = FakeLLM(responses=[LLMResponse(
+        content="Texto",
+        tool_calls=[{"id": "c1", "name": "test", "arguments": {}}],
+        usage={"total_tokens": 10}
+    )])
+
+    chunks = []
+    async for chunk in fake.stream_chat([]):
+        chunks.append(chunk)
+
+    assert "Texto" in chunks
+    assert any(isinstance(c, dict) and c.get(
+        "type") == "tool_call" for c in chunks)
+    assert any(isinstance(c, dict) and c.get(
+        "type") == "usage" for c in chunks)

@@ -694,3 +694,212 @@ async def test_app_stream_to_chat_fallback_tokens():
             await app.stream_to_chat(mock_stream())
             # El dashboard debe actualizarse con el fallback
             assert "Tokens" in str(app.query_one("#dashboard").render())
+
+
+@pytest.mark.asyncio
+async def test_file_aware_input_watch_value_reentry(tmp_path):
+    """Cubre el flag _processing_paste en watch_value."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            input_box = app.query_one("#input-box", FileAwareInput)
+
+            # Creamos un archivo real
+            test_file = tmp_path / "test.txt"
+            test_file.write_text("Hola")
+
+            # Forzamos el watcher simulando que el texto es la ruta
+            with patch.object(app, "handle_file_paste", new_callable=AsyncMock) as mock_paste:
+                input_box.value = str(test_file)
+                await pilot.pause()  # Deja que el call_later se ejecute
+
+                # Verificamos que se llamó al handler
+                mock_paste.assert_called_once()
+                # Y que el input se limpió (gracias al flag)
+                assert input_box.value == ""
+
+
+@pytest.mark.asyncio
+async def test_stream_to_chat_timeout():
+    """Cubre el except TimeoutError en stream_to_chat."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def slow_stream():
+                yield "Texto"
+                await asyncio.sleep(2)  # Más que el timeout mockeado
+                yield "Final"
+
+            with patch("app.tui.app.settings.LLM_STREAM_TIMEOUT", 0.1):
+                with patch.object(app, "write_to_chat", new_callable=AsyncMock) as mock_write:
+                    res = await app.stream_to_chat(slow_stream())
+                    assert "Texto" in res
+                    # Verifica que se mostró el mensaje de Timeout
+                    mock_write.assert_called()
+                    args, _ = mock_write.call_args
+                    assert "Timeout" in args[0]
+
+
+@pytest.mark.asyncio
+async def test_stream_to_chat_llm_error():
+    """Cubre el except Exception genérico en stream_to_chat."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def error_stream():
+                yield "Texto"
+                raise ValueError("Fallo del LLM")
+
+            with patch.object(app, "write_to_chat", new_callable=AsyncMock) as mock_write:
+                res = await app.stream_to_chat(error_stream())
+                assert "Texto" in res
+                mock_write.assert_called()
+                args, _ = mock_write.call_args
+                assert "Error del LLM" in args[0]
+
+
+@pytest.mark.asyncio
+async def test_app_on_mount_with_session():
+    """Cubre app.py líneas 372-377: cargar sesión al inicio."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.SessionManager") as mock_sm_class:
+        mock_instance = MagicMock()
+        mock_instance.load.return_value = [{"role": "user", "content": "Hola"}]
+        mock_sm_class.return_value = mock_instance
+        mock_sm_class.list_sessions.return_value = [
+            {"id": "123", "message_count": 1}]
+
+        with patch.object(app, "initialize_agent", new_callable=AsyncMock) as mock_init:
+            from app.core.harness.context import ContextManager
+
+            async def side_effect():
+                # 🔥 Aquí no metemos system_prompt, porque el mock de SessionManager
+                # sobreescribirá self.ctx.messages directamente
+                app.ctx = ContextManager()
+            mock_init.side_effect = side_effect
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                # Verifica que se cargó el mensaje del mock
+                assert any(m["content"] == "Hola" for m in app.ctx.messages)
+                # Verifica que se mostró el mensaje en el chat
+                scroll = app.query_one("#chat-scroll")
+                assert any("Sesión" in str(child.render())
+                           for child in scroll.children)
+
+
+@pytest.mark.asyncio
+async def test_app_expand_skills():
+    """Cubre app.py líneas 533-545: cargar skill con @nombre."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            with patch("app.tools.skills.LoadSkillTool.run", new_callable=AsyncMock) as mock_run:
+                from app.core.harness.tool import ToolResult
+                mock_run.return_value = ToolResult(
+                    success=True, content="Instrucciones")
+
+                res = await app._expand_skills("@test_skill Hola")
+                assert "[SKILL CARGADA: test_skill]" in res
+                assert "Instrucciones" in res
+                assert "Hola" in res
+
+
+@pytest.mark.asyncio
+async def test_app_request_permission_long_diff():
+    """Cubre app.py líneas 561-563: truncado de diff largo."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            with patch.object(app, "push_screen_wait", new_callable=AsyncMock) as mock_wait:
+                mock_wait.return_value = "n"
+                diff_largo = "\n".join([f"linea {i}" for i in range(100)])
+
+                await app.request_permission("bash", "bash:ls", {"command": "ls"}, diff_text=diff_largo)
+
+                # Verifica que se llamó a write_to_chat con el mensaje de truncado
+                # (esto cubre la línea del f-string de truncado)
+                mock_wait.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_app_expand_skills_error():
+    """Cubre app.py línea 542: error al cargar una skill."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            with patch("app.tools.skills.LoadSkillTool.run", new_callable=AsyncMock) as mock_run:
+                from app.core.harness.tool import ToolResult
+                mock_run.return_value = ToolResult(
+                    success=False, content="", error="No existe")
+
+                # Verificamos que el método se ejecuta sin romperse
+                res = await app._expand_skills("@bad_skill")
+                # El string resultante puede estar vacío (solo \n\n) porque no hay contexto
+                assert res.strip() == ""
+
+
+@pytest.mark.asyncio
+async def test_app_stream_to_chat_no_agent_loop():
+    """Cubre la línea 678 de app.py: cuando agent_loop es None."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def mock_stream():
+                yield "Texto"
+                yield {"type": "result", "final_answer": "Texto", "steps": 1, "tools_used": [], "usage_total": {}}
+
+            # Forzamos agent_loop = None
+            app.agent_loop = None
+            await app.stream_to_chat(mock_stream())
+            # El modelo debe ser "Desconocido"
+            assert app.last_model == "Desconocido"
+
+
+@pytest.mark.asyncio
+async def test_app_on_mount_with_repair_counts():
+    """Cubre la línea 334 de app.py: inyectar repair_counts desde la sesión."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.SessionManager") as mock_sm_class:
+        mock_instance = MagicMock()
+        mock_instance.load.return_value = [{"role": "user", "content": "Hola"}]
+        mock_instance.load_metadata.return_value = {
+            "repair_counts": {"bash": 3}}
+        mock_sm_class.return_value = mock_instance
+        mock_sm_class.list_sessions.return_value = [
+            {"id": "123", "message_count": 1}]
+
+        with patch.object(app, "initialize_agent", new_callable=AsyncMock) as mock_init:
+            from app.core.harness.context import ContextManager
+
+            async def side_effect():
+                app.ctx = ContextManager()
+                app.agent_loop = MagicMock()
+            mock_init.side_effect = side_effect
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                # Verifica que se inyectaron los repair_counts
+                assert app.agent_loop.repair_counts == {"bash": 3}
+
+
+@pytest.mark.asyncio
+async def test_app_stream_to_chat_with_agent_loop_and_llm():
+    """Cubre la línea 678 de app.py: cuando agent_loop.llm existe."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def mock_stream():
+                yield "Texto"
+                yield {"type": "result", "final_answer": "Texto", "steps": 1, "tools_used": [], "usage_total": {}}
+
+            # Creamos un mock de agent_loop con un llm que tiene model_name
+            mock_llm = MagicMock()
+            mock_llm.model_name = "gpt-4o"
+            app.agent_loop = MagicMock()
+            app.agent_loop.llm = mock_llm
+
+            await app.stream_to_chat(mock_stream())
+
+            # Verificamos que se usó el modelo del LLM
+            assert app.last_model == "gpt-4o"

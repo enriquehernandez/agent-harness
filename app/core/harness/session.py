@@ -12,7 +12,7 @@ class SessionManager:
         self.session_id = session_id or datetime.now().strftime("%Y%m%d_%H%M%S")
         self.session_file = settings.sessions_dir / f"{self.session_id}.json"
 
-    def save(self, ctx: ContextManager) -> None:
+    def save(self, ctx: ContextManager, agent_loop=None) -> None:
         """Guarda el historial de la conversación."""
         settings.sessions_dir.mkdir(parents=True, exist_ok=True)
 
@@ -26,14 +26,28 @@ class SessionManager:
             "session_id": self.session_id,
             "timestamp": datetime.now().isoformat(),
             "message_count": len(messages),
-            "messages": messages,
+            "messages": messages
         }
+
+        # 🔥 Guardamos los contadores de reparación si existen
+        if agent_loop and hasattr(agent_loop, "repair_counts"):
+            data["repair_counts"] = agent_loop.repair_counts
 
         self.session_file.write_text(
             json.dumps(data, indent=2, ensure_ascii=False),
             encoding="utf-8"
         )
         return str(self.session_file)
+
+    def load_metadata(self) -> dict:
+        """Carga los metadatos de la sesión (incluyendo repair_counts)."""
+        if not self.session_file.exists():
+            return {}
+        try:
+            data = json.loads(self.session_file.read_text(encoding="utf-8"))
+            return data
+        except Exception:
+            return {}
 
     def load(self) -> list[dict]:
         """Carga el historial de la conversación."""

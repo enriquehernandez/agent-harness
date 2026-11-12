@@ -1,7 +1,11 @@
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from app.core.harness.tool import FunctionTool
+from app.core.harness.tool import FunctionTool, ToolResult
 from app.tools.filesystem import ReadFileTool, WriteFileTool
 from app.tools.shell import BashTool
+from app.tools.skills import LoadSkillTool
 
 
 @pytest.mark.asyncio
@@ -170,3 +174,115 @@ async def test_filesystem_read_missing_truncate_and_write_denied(tmp_path):
     # 3. Write denied (línea 58)
     res = await tool_write.run(path="../outside.txt", content="Hack")
     assert "Access denied" in res.error
+
+
+@pytest.mark.asyncio
+async def test_bash_tool_capture_snapshot_hook():
+    """Cubre el hook que inyecta --tools observations.json."""
+    mock_export = AsyncMock()
+    mock_export.run.return_value = ToolResult(
+        success=True, content="Exportado")
+
+    tool = BashTool(export_observations=mock_export)
+
+    with patch("asyncio.create_subprocess_shell") as mock_shell:
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"OK", b"")
+        mock_process.returncode = 0
+        mock_shell.return_value = mock_process
+
+        # Ejecutamos un comando que simula el snapshot
+        await tool.run("python scripts/capture_snapshot.py --out report.md")
+
+        # Verificamos que se llamó al exportador
+        mock_export.run.assert_called_once_with("observations.json")
+        # Verificamos que el comando se modificó para incluir --tools
+        called_cmd = mock_shell.call_args[0][0]
+        assert "--tools observations.json" in called_cmd
+        assert called_cmd == "python scripts/capture_snapshot.py --tools observations.json --out report.md"
+
+
+@pytest.mark.asyncio
+async def test_load_skill_tool_not_found():
+    """Cubre el error de skill no encontrada."""
+    tool = LoadSkillTool()
+    result = await tool.run("skill_inexistente_123")
+    assert result.success is False
+    assert "no encontrada" in result.error
+
+
+@pytest.mark.asyncio
+async def test_load_skill_tool_success(tmp_path):
+    """Cubre la carga exitosa de una skill."""
+    skills_dir = tmp_path / ".agents" / "skills" / "test_skill"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text("# Test Skill\nInstrucciones.")
+
+    tool = LoadSkillTool()
+    tool.skills_dir = tmp_path / ".agents" / "skills"
+
+    result = await tool.run("test_skill")
+    assert result.success is True
+    assert "# Test Skill" in result.content
+    assert "test_skill" in result.content
+
+
+@pytest.mark.asyncio
+async def test_bash_tool_capture_snapshot_no_out():
+    """Cubre shell.py línea 53: añadir --tools sin que haya --out."""
+    from app.tools.shell import BashTool
+    from unittest.mock import AsyncMock, patch
+
+    mock_export = AsyncMock()
+    tool = BashTool(export_observations=mock_export)
+
+    with patch("asyncio.create_subprocess_shell") as mock_shell:
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"OK", b"")
+        mock_process.returncode = 0
+        mock_shell.return_value = mock_process
+
+        await tool.run("python scripts/capture_snapshot.py")
+
+        called_cmd = mock_shell.call_args[0][0]
+        assert called_cmd == "python scripts/capture_snapshot.py --tools observations.json"
+
+
+@pytest.mark.asyncio
+async def test_skill_tool_discover_no_dir():
+    """Cubre skills.py línea 28: return [] si no existe el dir."""
+    from app.tools.skills import LoadSkillTool
+    tool = LoadSkillTool()
+    tool.skills_dir = Path("/ruta/que/no/existe")
+    assert tool.discover_skills() == []
+
+
+@pytest.mark.asyncio
+async def test_observations_tool(tmp_path):
+    """Cubre observations.py líneas 23-56."""
+    from app.tools.observations import ExportObservationsTool
+    from app.core.harness.tool import ToolRegistry, FunctionTool
+
+    registry = ToolRegistry()
+    registry.register(FunctionTool(
+        name="dummy", description="[MCP] Test", parameters_schema={}, func=lambda: ""
+    ))
+
+    class MockClient:
+        class ServerParams:
+            command = "uv"
+        server_params = ServerParams()
+
+    tool = ExportObservationsTool(
+        registry=registry, mcp_clients=[MockClient()])
+
+    out_file = tmp_path / "out.json"
+    result = await tool.run(str(out_file))
+
+    assert result.success is True
+    assert out_file.exists()
+
+    import json
+    data = json.loads(out_file.read_text())
+    assert len(data["tools"]) == 1
+    assert data["mcp_servers"][0]["name"] == "uv"

@@ -24,6 +24,7 @@ class OpenAICompatibleProvider(BaseLLM):
             base_url=base_url,
             **client_kwargs,
         )
+        self.model_name = model
 
     async def chat(
         self,

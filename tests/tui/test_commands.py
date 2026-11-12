@@ -1,5 +1,8 @@
+from datetime import datetime
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from app.core.harness.memory.base import MemoryEntry
 from app.tui.commands import handle_command
 from app.core.harness.context import ContextManager
 from app.core.llm.base import LLMResponse
@@ -359,3 +362,249 @@ async def test_cmd_memory_migrate_with_entries(mock_app, ctx):
         assert handled is True
         # 🔥 Verificamos que se llamó a save (cubre línea 311)
         mock_new_store.save.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_memory_migrate_re_registers_tools():
+    """Verifica que al migrar la memoria se actualicen las tools del registry."""
+    app = MagicMock()
+    app.write_to_chat = AsyncMock()
+
+    # Mock del store viejo
+    old_store = AsyncMock()
+    old_store.get_all.return_value = [MemoryEntry(
+        key="k", value="v", timestamp=datetime.now(), kind="fact")]
+    app.memory_store = old_store
+
+    # Mock del registry
+    app.registry = MagicMock()
+
+    ctx = MagicMock()
+    state = {}
+    llm = MagicMock()
+
+    with patch("app.core.harness.memory.factory.create_memory_store") as mock_factory:
+        new_store = AsyncMock()
+        mock_factory.return_value = new_store
+
+        with patch("app.tools.memory.MemorySaveTool") as mock_save, \
+                patch("app.tools.memory.MemoryRecallTool") as mock_recall:
+
+            await handle_command("/memory migrate sqlite", ctx, state, llm, app)
+
+            # Verifica que se creó el nuevo store
+            mock_factory.assert_called_once_with("sqlite")
+            # Verifica que se migraron las entradas
+            new_store.save.assert_called_once()
+            # Verifica que se re-registraron las tools
+            assert app.registry.register.call_count == 2
+            app.write_to_chat.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cmd_skills_no_installed(mock_app, ctx):
+    """Cubre commands.py línea 143: sin skills instaladas."""
+    with patch("app.tools.skills.LoadSkillTool.discover_skills", return_value=[]):
+        await handle_command("/skills", ctx, {}, None, mock_app)
+        assert "No hay skills instaladas" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_list_empty(mock_app, ctx):
+    """Cubre commands.py líneas 366-373: listar sesiones vacías."""
+    with patch("app.core.harness.session.SessionManager.list_sessions", return_value=[]):
+        await handle_command("/session list", ctx, {}, None, mock_app)
+        assert "No hay sesiones guardadas" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_list_with_data(mock_app, ctx):
+    """Cubre commands.py líneas 375-382: listar sesiones con datos."""
+    sessions = [
+        {"id": "123", "timestamp": "2024-01-01T10:00:00", "message_count": 5}]
+    with patch("app.core.harness.session.SessionManager.list_sessions", return_value=sessions):
+        await handle_command("/session list", ctx, {}, None, mock_app)
+        assert "123" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_load(mock_app, ctx):
+    """Cubre commands.py líneas 384-396: cargar sesión."""
+    with patch("app.core.harness.session.SessionManager.load", return_value=[{"role": "user", "content": "Hola"}]):
+        await handle_command("/session load 123", ctx, {}, None, mock_app)
+        assert "cargada" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_load_empty(mock_app, ctx):
+    """Cubre commands.py líneas 394-395: sesión no encontrada."""
+    with patch("app.core.harness.session.SessionManager.load", return_value=[]):
+        await handle_command("/session load 123", ctx, {}, None, mock_app)
+        assert "no encontrada" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_delete(mock_app, ctx):
+    """Cubre commands.py líneas 398-408: borrar sesión."""
+    with patch("app.core.harness.session.SessionManager.delete_session", return_value=True):
+        await handle_command("/session delete 123", ctx, {}, None, mock_app)
+        assert "eliminada" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_save(mock_app, ctx):
+    """Cubre commands.py líneas 410-414: guardar sesión."""
+    mock_app.session_manager = MagicMock()
+    mock_app.session_manager.save.return_value = "/ruta/fake.json"
+    await handle_command("/session save", ctx, {}, None, mock_app)
+    assert "guardada" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_help(mock_app, ctx):
+    """Cubre commands.py líneas 419-427: mostrar ayuda de sesión."""
+    await handle_command("/session", ctx, {}, None, mock_app)
+    assert "Comandos de Sesión" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_reload_skills(mock_app, ctx):
+    """Cubre commands.py líneas 149-173: recargar skills."""
+    mock_app.ctx = ctx
+    with patch("app.tools.skills.LoadSkillTool.discover_skills", return_value=["skill1"]):
+        await handle_command("/reload-skills", ctx, {}, None, mock_app)
+        assert "Skills recargadas" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_all_subcommands(mock_app, ctx):
+    """Cubre commands.py líneas 397, 406-408, 415-418: todos los subcomandos de /session."""
+    # load sin id
+    await handle_command("/session load", ctx, {}, None, mock_app)
+    # delete sin id
+    await handle_command("/session delete", ctx, {}, None, mock_app)
+    # save sin sesión activa
+    mock_app.session_manager = None
+    await handle_command("/session save", ctx, {}, None, mock_app)
+    # subcomando inválido
+    await handle_command("/session invalid", ctx, {}, None, mock_app)
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_delete_not_found(mock_app, ctx):
+    """Cubre la línea 406 de commands.py: sesión no encontrada al borrar."""
+    with patch("app.core.harness.session.SessionManager.delete_session", return_value=False):
+        await handle_command("/session delete fake_id", ctx, {}, None, mock_app)
+        assert "no encontrada" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_doctor(mock_app, ctx):
+    """Cubre el comando /doctor al 100%."""
+    # Mockeamos el session_manager para que no falle al llamar a list_sessions
+    mock_app.session_manager = MagicMock()
+    mock_app.session_manager.list_sessions.return_value = [{"id": "1"}]
+
+    # Forzamos que no haya issues para cubrir el caso "Todo en orden"
+    with patch("pathlib.Path.exists", return_value=True):
+        with patch("pathlib.Path.read_text", return_value='{"mcpServers": {"test": {"command": "uv"}}}'):
+            with patch("app.core.config.settings.LLM_PROVIDER", "openai"):
+                with patch("app.core.config.settings.OPENAI_API_KEY", "sk-12345"):
+                    with patch("app.tools.skills.LoadSkillTool.discover_skills", return_value=["skill1"]):
+                        await handle_command("/doctor", ctx, {}, None, mock_app)
+                        assert "Diagnóstico del Sistema" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_trace(mock_app, ctx):
+    """Cubre el comando /trace al 100%."""
+    # Seteamos el usage y el modelo
+    mock_app.last_usage = {"prompt_tokens": 100,
+                           "completion_tokens": 50, "total_tokens": 150}
+    mock_app.last_model = "gpt-4o"
+
+    await handle_command("/trace", ctx, {}, None, mock_app)
+    assert "Traza de la Última Llamada" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_doctor_full_coverage(tmp_path, monkeypatch, mock_app, ctx):
+    """Cubre TODAS las ramas del comando /doctor de forma robusta."""
+    # Cambiamos al directorio temporal para que los Path("...") apunten aquí
+    monkeypatch.chdir(tmp_path)
+    mock_app.session_manager = MagicMock()
+    mock_app.session_manager.list_sessions.return_value = []
+
+    # --- Caso 1: Todo mal (FakeLLM, sin MCP, sin skills, sin permisos) ---
+    with patch("app.core.config.settings.LLM_PROVIDER", "fake"):
+        await handle_command("/doctor", ctx, {}, None, mock_app)
+        output = mock_app.write_to_chat.call_args[0][0]
+        assert "FakeLLM" in output
+        assert "No existe `mcp_config.json`" in output
+        assert "No existe el directorio" in output
+        assert "No hay permisos guardados" in output
+
+    # --- Caso 2: Cubrir ramas específicas (API Key vacía, MCP vacío, sin skills) ---
+    # Creamos un mcp_config.json VACÍO
+    (tmp_path / "mcp_config.json").write_text('{"mcpServers": {}}')
+    # Creamos la carpeta de skills pero sin SKILL.md dentro
+    skills_dir = tmp_path / ".agents" / "skills"
+    skills_dir.mkdir(parents=True)
+
+    with patch("app.core.config.settings.LLM_PROVIDER", "openai"):
+        with patch("app.core.config.settings.OPENAI_API_KEY", ""):
+            await handle_command("/doctor", ctx, {}, None, mock_app)
+            output = mock_app.write_to_chat.call_args[0][0]
+            assert "Falta `OPENAI_API_KEY`" in output
+            assert "No hay servidores MCP configurados" in output
+            assert "No hay skills instaladas" in output
+            assert "problema(s) crítico(s)" in output
+
+    # --- Caso 3: Todo bien (OpenAI, MCP configurado, skills, SQLite, permisos) ---
+    # Sobrescribimos el mcp_config con un servidor
+    (tmp_path /
+     "mcp_config.json").write_text('{"mcpServers": {"test": {"command": "uv"}}}')
+    # Creamos una skill real
+    real_skill = skills_dir / "test_skill"
+    real_skill.mkdir()
+    (real_skill / "SKILL.md").write_text("# Test")
+
+    # 🔥 Como hicimos monkeypatch.chdir(tmp_path), el permissions_file
+    # apuntará automáticamente a .harness/permissions.json dentro de tmp_path
+    (tmp_path / ".harness").mkdir(exist_ok=True)
+    (tmp_path / ".harness" / "permissions.json").write_text("{}")
+
+    with patch("app.core.config.settings.LLM_PROVIDER", "openai"):
+        with patch("app.core.config.settings.OPENAI_API_KEY", "sk-123"):
+            # 🔥 Ya NO parcheamos settings.permissions_file
+            await handle_command("/doctor", ctx, {}, None, mock_app)
+            output = mock_app.write_to_chat.call_args[0][0]
+            assert "LLM configurado" in output
+            assert "Todo en orden" in output
+
+
+@pytest.mark.asyncio
+async def test_cmd_trace_full_coverage(mock_app, ctx):
+    """Cubre TODAS las ramas del comando /trace."""
+    # Caso 1: Sin usage (retorno temprano)
+    mock_app.last_usage = None
+    await handle_command("/trace", ctx, {}, None, mock_app)
+    assert "No hay datos de uso" in mock_app.write_to_chat.call_args[0][0]
+
+    # Caso 2: Con usage y con cached tokens
+    mock_app.last_usage = {
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "total_tokens": 150,
+        "prompt_tokens_details": {"cached_tokens": 20}
+    }
+    mock_app.last_model = "gpt-4o"
+    await handle_command("/trace", ctx, {}, None, mock_app)
+    assert "Cached (Ahorro)" in mock_app.write_to_chat.call_args[0][0]
+    assert "Prompt Caching activo" in mock_app.write_to_chat.call_args[0][0]
+
+    # Caso 3: Con usage pero SIN cached tokens
+    mock_app.last_usage = {"prompt_tokens": 10,
+                           "completion_tokens": 5, "total_tokens": 15}
+    await handle_command("/trace", ctx, {}, None, mock_app)
+    assert "Consejo: Activa" in mock_app.write_to_chat.call_args[0][0]

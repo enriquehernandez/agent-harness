@@ -24,54 +24,6 @@ from app.tui.suggester import SkillSuggester, CombinedSuggester
 from app.core.logger import logger, get_debug_events
 from app.tui.debug_screen import DebugDetailScreen
 
-# # ==========================================
-# # SUGGESTER COMBINADO (COMANDOS + SKILLS)
-# # ==========================================
-
-
-# class SkillSuggester(Suggester):
-#     """Sugiere skills instaladas cuando el usuario escribe '@'."""
-
-#     def __init__(self, skills_dir: str = ".agents/skills"):
-#         super().__init__(case_sensitive=False)
-#         self.skills_dir = Path(skills_dir)
-#         self._skills = self._load_skills()
-
-#     def _load_skills(self) -> list[str]:
-#         if not self.skills_dir.exists():
-#             return []
-#         skills = []
-#         for d in self.skills_dir.iterdir():
-#             if d.is_dir() and (d / "SKILL.md").exists():
-#                 skills.append(f"@{d.name}")
-#         return sorted(skills)
-
-#     async def get_suggestion(self, value: str) -> str | None:
-#         if not value.startswith("@"):
-#             return None
-#         if value == "@":
-#             return self._skills[0] if self._skills else None
-#         for skill in self._skills:
-#             if skill.startswith(value):
-#                 return skill
-#         return None
-
-
-# class CombinedSuggester(Suggester):
-#     """Combina el autocompletado de comandos (/) y de skills (@)."""
-
-#     def __init__(self, commands: list[str]):
-#         super().__init__(case_sensitive=False)
-#         self.cmd_suggester = SuggestFromList(commands, case_sensitive=False)
-#         self.skill_suggester = SkillSuggester()
-
-#     async def get_suggestion(self, value: str) -> str | None:
-#         if value.startswith("@"):
-#             return await self.skill_suggester.get_suggestion(value)
-#         if value.startswith("/"):
-#             return await self.cmd_suggester.get_suggestion(value)
-#         return None
-
 # ==========================================
 # INPUT PERSONALIZADO (INTERCEPTA ARCHIVOS)
 # ==========================================
@@ -374,8 +326,15 @@ class AgentHarnessApp(App):
             messages = self.session_manager.load()
             if messages:
                 self.ctx.messages = messages
+
+                # 🔥 Recuperamos los contadores y los inyectamos en el loop
+                metadata = self.session_manager.load_metadata()
+                repair_counts = metadata.get("repair_counts", {})
+                if repair_counts and self.agent_loop:
+                    self.agent_loop.repair_counts = repair_counts
+
                 await self.write_to_chat(
-                    f"🔄 Sesión `{last_session['id']}` cargada ({last_session['message_count']} mensajes).",
+                    f"🔄 Sesión `{last_session['id']}` cargada ({len(messages)} mensajes, {len(repair_counts)} tools en reparación).",
                     type="system"
                 )
 
@@ -385,7 +344,7 @@ class AgentHarnessApp(App):
         available_commands = [
             "/help", "/shortcuts", "/model", "/provider", "/tools", "/subagents",
             "/skills", "/tokens", "/compact", "/verbose", "/clear", "/debug",
-            "/permissions", "/export", "/session", "/memory", "/quit"
+            "/permissions", "/export", "/session", "/memory", "/doctor", "/trace", "/quit"
         ]
 
         input_box = self.query_one("#input-box", FileAwareInput)
@@ -709,9 +668,21 @@ class AgentHarnessApp(App):
             return full_text
 
         if final_result:
-            # tokens = final_result.get("usage_total", {}).get("total_tokens", 0)
             tokens = (final_result.get("usage_total")
                       or {}).get("total_tokens", 0)
+            # 🔥 GUARDAMOS EL USAGE COMPLETO PARA /trace
+            self.last_usage = final_result.get("usage_total", {})
+
+            # 🔥 Protegemos contra agent_loop=None (ej. en tests)
+            if self.agent_loop and self.agent_loop.llm:
+                self.last_model = getattr(
+                    self.agent_loop.llm,
+                    'model_name',
+                    getattr(self.agent_loop.llm, 'model', 'Desconocido')
+                )
+            else:
+                self.last_model = "Desconocido"
+
             if tokens == 0:
                 tokens = len(full_text) // 4
 
@@ -791,7 +762,7 @@ class AgentHarnessApp(App):
 
     async def on_unmount(self) -> None:
         if self.ctx:
-            self.session_manager.save(self.ctx)
+            self.session_manager.save(self.ctx, self.agent_loop)
 
         for client in reversed(self.mcp_clients):
             try:

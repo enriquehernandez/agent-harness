@@ -27,12 +27,14 @@ class AgentLoop:
         tools: ToolRegistry,
         permissions: PermissionGate | None = None,
         max_iterations: int = 10,
+        repair_counts: dict[str, int] | None = None,
     ):
         self.llm = llm
         self.tools = tools
         self.permissions = permissions or PermissionGate()
         self.max_iterations = max_iterations
-        self.repair_counts: dict[str, int] = {}
+        # 🔥 Inicializamos desde el estado previo o vacío
+        self.repair_counts: dict[str, int] = repair_counts or {}
 
     async def run(
         self,

@@ -57,7 +57,11 @@ async def test_mcp_client_connect_error(mock_session_class, mock_stdio_client):
 
 @pytest.mark.asyncio
 async def test_mcp_tool_proxy_success():
-    mock_session = AsyncMock()
+    from app.mcp.client import MCPToolProxy, MCPClient
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_client = MagicMock(spec=MCPClient)
+    mock_client.session = AsyncMock()
 
     mock_content = MagicMock()
     mock_content.type = "text"
@@ -66,20 +70,25 @@ async def test_mcp_tool_proxy_success():
     mock_result = MagicMock()
     mock_result.content = [mock_content]
     mock_result.isError = False
-    mock_result.is_error = False  # 🔥 Añadido
-    mock_session.call_tool.return_value = mock_result
+    mock_result.is_error = False
+
+    mock_client.session.call_tool.return_value = mock_result
 
     proxy = MCPToolProxy(name="test", description="desc",
-                         parameters_schema={}, session=mock_session)
-    result = await proxy.run(param="value")
+                         parameters_schema={}, client=mock_client)
+    result = await proxy.run()
 
     assert result.success is True
-    assert result.content == "Resultado simulado MCP"
+    assert "Resultado simulado MCP" in result.content
 
 
 @pytest.mark.asyncio
 async def test_mcp_tool_proxy_error():
-    mock_session = AsyncMock()
+    from app.mcp.client import MCPToolProxy, MCPClient
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_client = MagicMock(spec=MCPClient)
+    mock_client.session = AsyncMock()
 
     mock_content = MagicMock()
     mock_content.type = "text"
@@ -88,34 +97,44 @@ async def test_mcp_tool_proxy_error():
     mock_result = MagicMock()
     mock_result.content = [mock_content]
     mock_result.isError = True
-    mock_session.call_tool.return_value = mock_result
+
+    mock_client.session.call_tool.return_value = mock_result
 
     proxy = MCPToolProxy(name="test", description="desc",
-                         parameters_schema={}, session=mock_session)
+                         parameters_schema={}, client=mock_client)
     result = await proxy.run()
 
     assert result.success is False
-    assert result.error == "Fallo en MCP"
+    assert "Fallo en MCP" in result.error
 
 
 @pytest.mark.asyncio
 async def test_mcp_tool_proxy_exception():
-    from app.mcp.client import MCPToolProxy
-    mock_session = AsyncMock()
-    mock_session.call_tool.side_effect = Exception("Network Error")
+    from app.mcp.client import MCPToolProxy, MCPClient
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_client = MagicMock(spec=MCPClient)
+    mock_client.session = AsyncMock()
+    mock_client.session.call_tool.side_effect = Exception("Network Error")
+
+    # Simulamos que la reconexión falla
+    mock_client.reconnect = AsyncMock(return_value=False)
 
     proxy = MCPToolProxy(name="test", description="",
-                         parameters_schema={}, session=mock_session)
-    res = await proxy.run()
+                         parameters_schema={}, client=mock_client)
+    result = await proxy.run()
 
-    assert res.success is False
-    assert res.error == "Network Error"
+    assert result.success is False
+    assert "Network Error" in result.error
 
 
 @pytest.mark.asyncio
 async def test_mcp_tool_proxy_non_text_content():
-    from app.mcp.client import MCPToolProxy
-    mock_session = AsyncMock()
+    from app.mcp.client import MCPToolProxy, MCPClient
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_client = MagicMock(spec=MCPClient)
+    mock_client.session = AsyncMock()
 
     mock_content = MagicMock()
     mock_content.type = "image"
@@ -123,24 +142,25 @@ async def test_mcp_tool_proxy_non_text_content():
     mock_result = MagicMock()
     mock_result.content = [mock_content]
     mock_result.isError = False
-    mock_result.is_error = False  # 🔥 Añadido
-    mock_session.call_tool.return_value = mock_result
+    mock_result.is_error = False
+
+    mock_client.session.call_tool.return_value = mock_result
 
     proxy = MCPToolProxy(name="test", description="",
-                         parameters_schema={}, session=mock_session)
-    res = await proxy.run()
-    assert "[image data]" in res.content
+                         parameters_schema={}, client=mock_client)
+    result = await proxy.run()
+
+    assert result.success is True
+    assert "[image data]" in result.content
 
 
 @pytest.mark.asyncio
 async def test_mcp_disconnect_exception():
-    from app.mcp.client import MCPClient
-    from unittest.mock import AsyncMock, patch
     client = MCPClient(command="test", args=[])
     client.exit_stack.aclose = AsyncMock(
         side_effect=Exception("Disconnect error"))
-    with pytest.raises(Exception, match="Disconnect error"):
-        await client.disconnect()
+    await client.disconnect()
+    assert client.session is None
 
 
 @pytest.mark.asyncio

@@ -21,6 +21,7 @@ dependencies = [
     "pathlib", # Es parte de la stdlib, pero lo listamos por claridad conceptual
     "textual>=8.2.8",
     "pyperclip>=1.11.0",
+    "tenacity>=9.2.1",
 ]
 
 [build-system]
@@ -51,7 +52,7 @@ filterwarnings = [
 [tool.tomlscript]
 # Scripts de desarrollo
 dev = "uv run python -m app.main" # Asumiendo que main.py lanza la TUI
-test = "uv run pytest tests/ --cov=app --cov-report=term-missing"
+test = "uv run pytest tests/ --cov=app --cov-report=term-missing --cache-clear"
 test-integration = "uv run pytest tests/integration/test_mcp_e2e.py -v -s"
 
 [tool.coverage.report]

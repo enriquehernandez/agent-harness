@@ -5,6 +5,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal, Center, VerticalScroll
 from textual.widgets import Input, Static, LoadingIndicator, Markdown, Button, ListView, ListItem, Label
+from app.tui.widgets import RichMessage
 from textual import work
 from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList, Suggester
@@ -431,7 +432,7 @@ class AgentHarnessApp(App):
             elif type == "system":
                 widget = Static(text, classes="message-system", markup=True)
             else:
-                widget = Markdown(text, classes="message-agent")
+                widget = RichMessage(text, classes="message-agent")
 
             await scroll.mount(widget)
             scroll.scroll_end(animate=False)

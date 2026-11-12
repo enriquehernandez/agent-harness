@@ -3,6 +3,7 @@ from app.core.harness.memory.base import MemoryStore
 from app.core.harness.memory.backends.session_files import SessionFilesStore
 from app.core.harness.memory.backends.sqlite import SQLiteStore
 from app.core.harness.memory.backends.in_memory import InMemoryRingStore
+from app.core.harness.memory.backends.vector import VectorStore
 
 
 def create_memory_store(backend: str = "sqlite") -> MemoryStore:
@@ -12,6 +13,8 @@ def create_memory_store(backend: str = "sqlite") -> MemoryStore:
         return SessionFilesStore()
     elif backend == "memory":
         return InMemoryRingStore()
+    elif backend == "vector":
+        return VectorStore()
     elif backend == "fanout":
         # Ejemplo: escribe en archivos Y en SQLite a la vez
         return FanoutStore(

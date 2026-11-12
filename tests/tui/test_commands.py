@@ -608,3 +608,61 @@ async def test_cmd_trace_full_coverage(mock_app, ctx):
                            "completion_tokens": 5, "total_tokens": 15}
     await handle_command("/trace", ctx, {}, None, mock_app)
     assert "Consejo: Activa" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_doctor_memory_branches(tmp_path, monkeypatch, mock_app, ctx):
+    """Cubre las ramas de memoria en /doctor (archivo existe y no existe)."""
+    monkeypatch.chdir(tmp_path)
+    mock_app.session_manager = MagicMock()
+    mock_app.session_manager.list_sessions.return_value = []
+
+    # 1. Simulamos que NO existen los archivos (para cubrir las líneas 122-123 y 134-135)
+    with patch("app.core.config.settings.LLM_PROVIDER", "fake"):  # Para que no falle por API Key
+        # SQLite no existe
+        with patch("app.core.config.settings.MEMORY_BACKEND", "sqlite"):
+            await handle_command("/doctor", ctx, {}, None, mock_app)
+            assert "La base de datos SQLite (FTS5) aún no se ha creado" in mock_app.write_to_chat.call_args[
+                0][0]
+
+        # Files no existe
+        with patch("app.core.config.settings.MEMORY_BACKEND", "files"):
+            await handle_command("/doctor", ctx, {}, None, mock_app)
+            assert "El directorio de archivos de memoria aún no se ha creado" in mock_app.write_to_chat.call_args[
+                0][0]
+
+    # 2. Simulamos que SÍ existen los archivos (para cubrir las líneas 124-125, 129-131, 136-137)
+    # Creamos los archivos/directorios reales en tmp_path
+    (tmp_path / ".harness").mkdir()
+    (tmp_path / ".harness" / "memory.db").touch()
+    (tmp_path / ".harness" / "vector.db").touch()
+    (tmp_path / ".harness" / "memory").mkdir()
+
+    with patch("app.core.config.settings.LLM_PROVIDER", "fake"):
+        with patch("pathlib.Path.exists", return_value=True):  # 🔥 Forzamos que existan
+            with patch("pathlib.Path.read_text", return_value='{"mcpServers": {"test": {}}}'):
+                # Mock de la skill
+                mock_skill = MagicMock()
+                mock_skill.name = "test_skill"
+                mock_skill.__truediv__.return_value.exists.return_value = True
+                with patch("pathlib.Path.iterdir", return_value=[mock_skill]):
+                    # SQLite existe
+                    with patch("app.core.config.settings.MEMORY_BACKEND", "sqlite"):
+                        await handle_command("/doctor", ctx, {}, None, mock_app)
+                        assert "Base de datos FTS5 en" in mock_app.write_to_chat.call_args[0][0]
+
+                    # Vector existe
+                    with patch("app.core.config.settings.MEMORY_BACKEND", "vector"):
+                        await handle_command("/doctor", ctx, {}, None, mock_app)
+                        assert "Base de datos vectorial en" in mock_app.write_to_chat.call_args[
+                            0][0]
+
+                    # Files existe
+                    with patch("app.core.config.settings.MEMORY_BACKEND", "files"):
+                        await handle_command("/doctor", ctx, {}, None, mock_app)
+                        assert "Archivos de memoria en" in mock_app.write_to_chat.call_args[0][0]
+
+                    # Memory (fallback)
+                    with patch("app.core.config.settings.MEMORY_BACKEND", "memory"):
+                        await handle_command("/doctor", ctx, {}, None, mock_app)
+                        assert "Almacenamiento en" in mock_app.write_to_chat.call_args[0][0]

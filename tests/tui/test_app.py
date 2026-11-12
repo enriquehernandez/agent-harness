@@ -903,3 +903,22 @@ async def test_app_stream_to_chat_with_agent_loop_and_llm():
 
             # Verificamos que se usó el modelo del LLM
             assert app.last_model == "gpt-4o"
+
+
+@pytest.mark.asyncio
+async def test_app_initialize_agent_with_memory_preamble():
+    """Cubre la línea 361 de app.py: cuando hay preamble en memoria."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient"):
+        # Mock del memory store para que devuelva un preamble
+        with patch("app.tui.app.create_memory_store") as mock_store:
+            mock_store.return_value.preamble.return_value = "Recuerdo: el color es azul"
+
+            with patch("app.tui.app.register_core_tools"):
+                async with app.run_test() as pilot:
+                    await app.initialize_agent()
+                    await pilot.pause()
+                    # Verificamos que el system_prompt incluye el preamble
+                    system_prompt = app.ctx.messages[0]["content"]
+                    assert "[Long-term memory]" in system_prompt
+                    assert "el color es azul" in system_prompt

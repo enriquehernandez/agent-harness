@@ -117,8 +117,25 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
         # 4. Memoria
         txt += "\n#### 💾 Memoria\n"
         txt += f"- Backend: `{settings.MEMORY_BACKEND}`\n"
-        if settings.MEMORY_BACKEND == "sqlite" and not settings.memory_db.exists():
-            txt += "- ⚠️ La base de datos SQLite aún no se ha creado (se creará al guardar).\n"
+
+        if settings.MEMORY_BACKEND == "sqlite":
+            if not settings.memory_db.exists():
+                txt += "- ⚠️ La base de datos SQLite (FTS5) aún no se ha creado.\n"
+            else:
+                txt += f"- ✅ Base de datos FTS5 en `{settings.memory_db}`.\n"
+
+        elif settings.MEMORY_BACKEND == "vector":
+            if not settings.vector_db.exists():
+                txt += "- ⚠️ La base de datos vectorial aún no se ha creado (se creará al guardar).\n"
+            else:
+                txt += f"- ✅ Base de datos vectorial en `{settings.vector_db}`.\n"
+
+        elif settings.MEMORY_BACKEND == "files":
+            if not settings.memory_files_dir.exists():
+                txt += "- ⚠️ El directorio de archivos de memoria aún no se ha creado.\n"
+            else:
+                txt += f"- ✅ Archivos de memoria en `{settings.memory_files_dir}`.\n"
+
         else:
             txt += f"- ✅ Almacenamiento en `{settings.DATA_DIR}`.\n"
 

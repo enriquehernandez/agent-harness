@@ -325,3 +325,53 @@ def test_factory_fanout():
     from app.core.harness.memory.backends.fanout import FanoutStore
     store = create_memory_store("fanout")
     assert isinstance(store, FanoutStore)
+
+
+@pytest.mark.asyncio
+async def test_vector_store_semantic_search(tmp_path):
+    """Verifica que la búsqueda semántica encuentra sinónimos."""
+    from app.core.harness.memory.backends.vector import VectorStore
+    from app.core.harness.memory.base import MemoryEntry
+    from datetime import datetime
+
+    store = VectorStore(db_path=tmp_path / "test_vec.db")
+
+    await store.save(MemoryEntry(
+        key="lenguaje",
+        value="El proyecto usa Python 3.11",
+        kind="fact",
+        timestamp=datetime.now()
+    ))
+
+    # Buscamos con un sinónimo ("lenguaje de programación")
+    results = await store.recall("lenguaje de programación")
+
+    assert len(results) > 0
+    assert results[0].key == "lenguaje"
+    assert "Python" in results[0].value
+
+
+@pytest.mark.asyncio
+async def test_vector_store_basic(tmp_path):
+    """Cubre la rama básica de VectorStore."""
+    from app.core.harness.memory.backends.vector import VectorStore
+    from app.core.harness.memory.base import MemoryEntry
+    from datetime import datetime
+
+    store = VectorStore(db_path=tmp_path / "vec.db")
+
+    # Guardar
+    await store.save(MemoryEntry(
+        key="k1", value="valor uno", kind="fact", timestamp=datetime.now()
+    ))
+    # Recall
+    results = await store.recall("valor uno")
+    assert len(results) > 0
+    # Get all
+    all_entries = await store.get_all()
+    assert len(all_entries) == 1
+    # Preamble
+    assert "valor uno" in store.preamble()
+    # Clear
+    await store.clear()
+    assert len(await store.get_all()) == 0

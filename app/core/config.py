@@ -32,6 +32,10 @@ class Settings(BaseSettings):
         return self.DATA_DIR / "memory.db"
 
     @property
+    def vector_db(self) -> Path:
+        return self.DATA_DIR / "vector.db"
+
+    @property
     def memory_files_dir(self) -> Path:
         return self.DATA_DIR / "memory"
 

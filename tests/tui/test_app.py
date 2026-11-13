@@ -919,3 +919,35 @@ async def test_app_initialize_agent_with_memory_preamble():
                     system_prompt = app.ctx.messages[0]["content"]
                     assert "[Long-term memory]" in system_prompt
                     assert "el color es azul" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_app_safe_request_permission_allowed():
+    """Cubre _safe_request_permission cuando ya está permitido."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            app.gate = MagicMock()
+            app.gate._is_allowed.return_value = True
+
+            result = await app._safe_request_permission("bash", "bash:ls", {"command": "ls"})
+            assert result == "y"
+
+
+@pytest.mark.asyncio
+async def test_app_safe_request_permission_fallback():
+    """Cubre el fallback de _safe_request_permission cuando la TUI no está activa."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            app.gate = MagicMock()
+            app.gate._is_allowed.return_value = False
+
+            # 🔥 En lugar de parchear is_running, forzamos que request_permission lance excepción
+            with patch.object(app, "request_permission", new_callable=AsyncMock) as mock_req:
+                mock_req.side_effect = Exception("TUI no disponible")
+
+                result = await app._safe_request_permission("bash", "bash:ls", {"command": "ls"})
+
+                # Debe caer al fallback y devolver "n"
+                assert result == "n"

@@ -9,7 +9,7 @@ An autonomous AI agent engine (Harness) built in Python with a Textual TUI, MCP 
 - **TUI:** `textual`, `rich`
 - **AI Integration:** `openai` SDK (compatible con OpenRouter, Groq, etc.)
 - **Tool Protocol:** `mcp` (Model Context Protocol)
-- **Orchestration:** Custom `AgentLoop` (ReAct pattern)
+- **Orchestration:** Custom `AgentLoop` (ReAct pattern) + A2A (Supervisor/Sequential)
 - **Testing:** `pytest`, `pytest-asyncio`, `pytest-cov` (100% coverage)
 - **Memory:** SQLite with FTS5 (default), vectors (`sqlite-vec` + `fastembed`), files, or in-memory.
 - **Pricing:** Provider API (`httpx`) with disk cache, JSON fallback.
@@ -91,3 +91,14 @@ An autonomous AI agent engine (Harness) built in Python with a Textual TUI, MCP 
     - `@skill-name` loads a skill.
     - `/session list` shows sessions.
     - `/memory clear` clears memory.
+
+## Agent-to-Agent (A2A)
+
+El Harness soporta orquestación multi-agente configurable via `.env`:
+
+- `A2A_STRATEGY`: `supervisor` (enrutamiento dinámico) o `sequential` (pipeline).
+- `A2A_SEQUENCE`: Lista de agentes para el pipeline (solo si sequential).
+- **AgentCard**: Define `name`, `description`, `system_prompt`, `tools` y `mode` (`fork`/`isolated`).
+- **OrchestratorTool**: Tool `delegate_task` que el LLM principal usa para delegar.
+- **Permisos**: Los subagentes heredan el `PermissionGate` del padre y leen `.harness/permissions.json`.
+- **Dashboard**: Muestra el coste total acumulado de la sesión.

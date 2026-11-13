@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     def pricing_config_path(self) -> Path:
         return Path(self.PRICING_CONFIG_FILE)
 
+    # A2A (Agent-to-Agent)
+    A2A_STRATEGY: str = "supervisor"  # supervisor | sequential
+    A2A_SEQUENCE: str = "analyst,writer,reviewer"  # Solo si strategy=sequential
+
     def ensure_dirs(self):
         """Crea los directorios necesarios al iniciar."""
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)

@@ -13,7 +13,7 @@ from rich.syntax import Syntax
 
 from app.core.llm import get_llm
 from app.core.harness import AgentLoop, ToolRegistry, ContextManager
-from app.core.harness.permissions import PermissionGate
+from app.core.harness.permissions import Decision, PermissionGate
 from app.core.harness.subagents import DelegateTool
 from app.core.harness.memory.factory import create_memory_store
 from app.core.harness.session import SessionManager
@@ -354,9 +354,7 @@ class AgentHarnessApp(App):
         input_box.focus()
 
     async def initialize_agent(self):
-        from app.core.pricing.registry import ensure_prices_loaded
-        await ensure_prices_loaded(self.state["provider"])
-
+        # 1. Configuración de memoria y contexto
         memory_store = create_memory_store(settings.MEMORY_BACKEND)
         self.memory_store = memory_store
         memory_context = ""
@@ -375,11 +373,13 @@ class AgentHarnessApp(App):
             )
         )
 
+        # 2. Registro de herramientas principales
         self.registry = ToolRegistry()
-        # register_core_tools(self.registry, memory_store=memory_store)
         register_core_tools(
-            self.registry, memory_store=memory_store, mcp_clients=self.mcp_clients)
+            self.registry, memory_store=memory_store, mcp_clients=self.mcp_clients
+        )
 
+        # 3. Conexión a servidores MCP
         config_path = Path("mcp_config.json")
         if config_path.exists():
             with open(config_path, "r") as f:
@@ -387,31 +387,84 @@ class AgentHarnessApp(App):
             for name, server_conf in config.get("mcpServers", {}).items():
                 try:
                     client = MCPClient(
-                        command=server_conf["command"], args=server_conf["args"], env=server_conf.get("env"))
+                        command=server_conf["command"],
+                        args=server_conf["args"],
+                        env=server_conf.get("env"),
+                    )
                     await client.connect()
                     await client.register_tools(self.registry, server_name=name)
                     self.mcp_clients.append(client)
                 except Exception as e:
                     await self.write_to_chat(f"❌ Error conectando MCP {name}: {e}", type="system")
 
+        # 4. Configuración del PermissionGate
+        self.gate = PermissionGate(ask_user=self.request_permission)
+
+        # 5. Subagente Reviewer (Legacy, se mantiene para compatibilidad)
         reviewer_tools = ToolRegistry()
         for tool_name in ["read_text_file", "list_directory", "bash"]:
+            self.gate.policies[tool_name] = Decision.ALLOW
             if tool_name in self.registry:
                 reviewer_tools.register(self.registry.get(tool_name))
 
         reviewer_tool = DelegateTool(
-            name="delegate_to_reviewer", description="Delega una tarea de revisión de código.",
-            llm=get_llm(self.state["provider"]), tools=reviewer_tools,
-            system_prompt="You are an expert code reviewer. Be concise."
+            name="delegate_to_reviewer",
+            description="Delega una tarea de revisión de código.",
+            llm=get_llm(self.state["provider"]),
+            tools=reviewer_tools,
+            system_prompt="You are an expert code reviewer. Be concise.",
         )
         self.registry.register(reviewer_tool)
 
-        self.gate = PermissionGate(ask_user=self.request_permission)
+        # 🔥 6. NUEVO: Integración del sistema Agent-to-Agent (A2A)
+        from app.core.harness.a2a import AgentCard, OrchestratorTool
+
+        # Tools base para los subagentes (para que no tengan acceso a todo)
+        a2a_base_tools = ToolRegistry()
+        for tool_name in ["read_text_file", "list_directory", "bash"]:
+            if tool_name in self.registry:
+                a2a_base_tools.register(self.registry.get(tool_name))
+
+        # Definición de los perfiles de agentes (Agent Cards)
+        a2a_agents = {
+            "analyst": AgentCard(
+                name="analyst",
+                description="Analiza código y datos, genera reportes técnicos.",
+                system_prompt="Eres un analista experto. Analiza a fondo y reporta hallazgos precisos.",
+                tools=a2a_base_tools,
+                mode="isolated",  # No arrastra contexto previo
+            ),
+            "writer": AgentCard(
+                name="writer",
+                description="Escribe documentación y código siguiendo un análisis previo.",
+                system_prompt="Eres un escritor técnico. Documenta con claridad y precisión.",
+                tools=a2a_base_tools,
+                mode="fork",  # Hereda el contexto del analyst
+            ),
+            "reviewer": AgentCard(
+                name="reviewer",
+                description="Revisa el trabajo de otros agentes de forma imparcial.",
+                system_prompt="Eres un revisor estricto. Señala errores y mejoras sin sesgos.",
+                tools=a2a_base_tools,
+                mode="isolated",  # No se contamina con el trabajo previo
+            ),
+        }
+
+        # Registramos la herramienta orquestadora en el registry principal
+        orchestrator = OrchestratorTool(
+            llm=get_llm(self.state["provider"]),
+            agents=a2a_agents,
+            permissions=self.gate,
+        )
+        self.registry.register(orchestrator)
+
+        # 7. Configuración final del AgentLoop principal
         self.agent_loop = AgentLoop(
             llm=get_llm(self.state["provider"]),
             tools=self.registry,
             permissions=self.gate,
-            provider_name=self.state["provider"])
+            provider_name=self.state["provider"],  # Para pricing
+        )
 
         self.update_dashboard("Listo")
 
@@ -514,6 +567,28 @@ class AgentHarnessApp(App):
 
         clean_input = re.sub(r'@[\w\-]+', '', user_input).strip()
         return f"{clean_input}\n\n{skills_context}"
+
+    async def _safe_request_permission(self, tool_name: str, signature: str, args: dict, diff_text: str | None = None) -> str:
+        """
+        Wrapper seguro para request_permission que garantiza que el modal
+        se lance en el contexto correcto de Textual, incluso desde subagentes.
+        """
+        # 1. Verificar si ya está permitido en session_allowed (persistido en JSON)
+        if self.gate and self.gate._is_allowed(signature):
+            return "y"  # Ya está permitido, no preguntar
+
+        # 2. Si estamos en el contexto de la TUI, usar el método normal
+        try:
+            # Verificamos que push_screen_wait esté disponible y funcione
+            if self.is_running and self._driver is not None:
+                return await self.request_permission(tool_name, signature, args, diff_text)
+        except Exception as e:
+            logger.warning(f"No se pudo usar el modal de la TUI: {e}")
+
+        # 3. Fallback: si la TUI no está disponible, denegar por seguridad
+        logger.warning(
+            f"Permiso denegado por falta de contexto de UI para: {tool_name}")
+        return "n"
 
     async def request_permission(self, tool_name: str, signature: str, args: dict, diff_text: str | None = None) -> str:
         args_str = ""

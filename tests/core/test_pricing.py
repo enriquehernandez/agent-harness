@@ -179,3 +179,18 @@ def test_get_pricing_no_config_file(tmp_path):
     with patch("pathlib.Path.exists", mock_exists):
         provider = get_pricing("openrouter")
         assert isinstance(provider.source, FakePricingSource)
+
+
+def test_ensure_prices_loaded(tmp_path, monkeypatch):
+    """Cubre ensure_prices_loaded."""
+    from app.core.pricing.registry import ensure_prices_loaded
+    from unittest.mock import patch, AsyncMock
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pricing_config.json").write_text(
+        '{"providers": {"openrouter": {"source": "api", "url": "http://test"}}}')
+
+    with patch("app.core.pricing.sources.api_source.APIPricingSource.get_prices", new_callable=AsyncMock) as mock_get:
+        import asyncio
+        asyncio.run(ensure_prices_loaded("openrouter"))
+        mock_get.assert_called_once()

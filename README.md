@@ -43,7 +43,6 @@ arquitectura, generar reportes HTML, etc.).
 🐚 > @improve-codebase-architecture ¿Cómo está la arquitectura de mi proyecto?
 ```
 
-### 💾 Memoria Persistente (SQLite)
 ### 💾 Memoria Persistente (SQLite + Vectores)
 
 El agente recuerda hechos importantes entre sesiones. Backends soportados:
@@ -103,6 +102,8 @@ graph TD
 - **Integración IA**: `openai` SDK (compatible con OpenRouter/Groq)
 - **Protocolo de Herramientas**: `mcp` (Model Context Protocol)
 - **Interfaz de Terminal**: `textual`, `rich`
+- **Memoria Vectorial**: `sqlite-vec`, `fastembed`
+- **Resiliencia**: `tenacity`
 - **Testing**: `pytest`, `pytest-asyncio`, `pytest-cov`
 - **Contenedores**: Docker, Docker Compose
 

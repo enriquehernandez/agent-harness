@@ -9,19 +9,16 @@ dependencies = [
     "python-dotenv",
     "pydantic-settings",
     "httpx",
-    # LLM Abstracto (usamos OpenAI SDK como base compatible con OpenRouter/Groq, etc.)
+    # LLM Abstracto (OpenAI SDK como base compatible con OpenRouter/Groq, etc.)
     "openai",
-    "langchain-openai", # Si decides usar LangChain para los LLMs, aunque el harness sea propio
     # MCP (Model Context Protocol) - Cliente
     "mcp",
     # TUI (Interfaz de Usuario en Terminal)
-    "prompt_toolkit",
     "rich",
-    # Herramientas locales (ej. para read_file/write_file)
-    "pathlib", # Es parte de la stdlib, pero lo listamos por claridad conceptual
     "textual>=8.2.8",
-    "pyperclip>=1.11.0",
+    # Resiliencia (MCP reconexión)
     "tenacity>=9.2.1",
+    # Memoria Vectorial (sqlite-vec + fastembed)
     "onnxruntime<1.24.1",
     "sqlite-vec>=0.1.9",
     "fastembed>=0.9.1",

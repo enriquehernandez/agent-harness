@@ -667,18 +667,15 @@ async def test_app_stream_to_chat_with_result():
             async def mock_stream():
                 yield "Texto"
                 yield {"type": "tool_call", "name": "add"}
-                yield {"type": "result", "final_answer": "Texto", "steps": 1, "tools_used": ["add"], "usage_total": {"total_tokens": 50}}
+                yield {"type": "result", "final_answer": "Texto", "steps": 1, "tools_used": ["add"], "usage_total": {"total_tokens": 50}, "cost_usd": 0.0005}
 
-            # En lugar de verificar write_to_chat (que no se llama en el flujo exitoso),
-            # verificamos que el dashboard se actualizó con los tokens correctos.
             full_text = await app.stream_to_chat(mock_stream())
 
             assert "Texto" in full_text
-            # Verificamos que el dashboard refleja el éxito y los tokens
             dashboard_text = str(app.query_one("#dashboard").render())
             assert "Listo" in dashboard_text
             assert "Tokens: 50" in dashboard_text
-            assert "Última tool: add" in dashboard_text
+            assert "Coste total: $0.0005" in dashboard_text
 
 
 @pytest.mark.asyncio

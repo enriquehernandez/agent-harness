@@ -14,22 +14,24 @@ graph TD
         Loop -->|2. Permisos| Gate[PermissionGate]
         Loop -->|3. Ejecución| Tools[ToolRegistry]
         Loop <-->|4. Memoria| Context[ContextManager]
+        Loop <-->|5. Coste| Pricing[PricingProvider]
         Context <-->|Compactación| Compactor[SummarizationStrategy]
-        Context <-->|Persistencia| MemoryFile[(summary.md)]
+        Pricing <-->|API / JSON| Prices[(pricing_cache.json / pricing.json)]
     end
     
     subgraph Adaptadores
         LLM -.->|Registry| Providers[OpenAI / OpenRouter / Groq]
-        Tools -.->|Local| LocalTools[Bash, File, Memory]
+        Tools -.->|Local| LocalTools[Bash, File, Memory, Skills]
         Tools -.->|MCP Client| MCP[Servidores MCP Externos]
         Tools -.->|Delegate| Subagent[Subagente Reviewer]
-        Subagent -.->|Nuevo Loop| Loop
+        Context <-->|Persistencia| Memory[(memory.db / vector.db)]
     end
     
     subgraph UI ["UI Components"]
         TUI --> DebugPanel[Debug Panel]
         TUI --> PermissionModal[Permission Modal]
-        TUI --> Chat[Chat con Streaming]
+        TUI --> RichMessage[RichMessage: Tablas, Árboles, Código]
+        TUI --> Dashboard[Dashboard: Tokens + Coste]
     end
 ```
 

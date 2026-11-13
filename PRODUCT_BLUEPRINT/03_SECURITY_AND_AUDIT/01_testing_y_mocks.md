@@ -81,3 +81,22 @@ uv run tom test-integration
 ```
 
 La cobertura mínima exigida es del **100%** para los módulos del núcleo (`app/core/`). Los archivos de la TUI (`app/tui/`) pueden tener pequeñas exclusiones visuales justificadas en `pyproject.toml`.
+
+## 10. Mocking de Pricing
+El `PricingProvider` se mockea fácilmente porque usa `PricingSource` (interfaz). Para tests:
+
+```python
+class MockSource(PricingSource):
+    async def get_prices(self):
+        return {"model1": {"input": 2.5e-6, "output": 1e-5}}
+```
+
+## 11. Mocking de Vectores
+El `VectorStore` usa `fastembed`, que descarga un modelo ONNX (~90MB). Para tests rápidos:
+
+- Usa `tmp_path` para la BD (`VectorStore(db_path=tmp_path / "test.db")`).
+- El modelo se cachea en `~/.cache/huggingface/` la primera vez, pero luego es rápido.
+- **No mockees** `fastembed`: los tests de integración lo usan real.
+
+## 12. PropertyMock en Pydantic
+Cuando necesites parchear una `@property` de `Settings` (ej. `pricing_config_path`), **no uses** `patch` **directamente**. Usa `patch("pathlib.Path.exists", return_value=False)` o `monkeypatch.chdir(tmp_path)` para evitar el error AttributeError: property has no setter.

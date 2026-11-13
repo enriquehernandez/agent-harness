@@ -51,6 +51,18 @@ class Settings(BaseSettings):
     def sessions_dir(self) -> Path:
         return self.DATA_DIR / "sessions"
 
+        # Pricing
+    PRICING_CACHE_TTL_DAYS: int = 1
+    PRICING_CONFIG_FILE: str = "pricing_config.json"
+
+    @property
+    def pricing_cache_file(self) -> Path:
+        return self.DATA_DIR / "pricing_cache.json"
+
+    @property
+    def pricing_config_path(self) -> Path:
+        return Path(self.PRICING_CONFIG_FILE)
+
     def ensure_dirs(self):
         """Crea los directorios necesarios al iniciar."""
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)

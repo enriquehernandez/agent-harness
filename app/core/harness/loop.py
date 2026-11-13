@@ -2,11 +2,14 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.core.logger import logger
+
 from ..llm.base import BaseLLM, LLMResponse
 from .tool import ToolRegistry
 from .permissions import PermissionGate, Decision
 from .context import ContextManager
 from app.core.config import settings
+from app.core.pricing import get_pricing
 
 
 @dataclass
@@ -28,6 +31,7 @@ class AgentLoop:
         permissions: PermissionGate | None = None,
         max_iterations: int = 10,
         repair_counts: dict[str, int] | None = None,
+        provider_name: str = "openrouter",
     ):
         self.llm = llm
         self.tools = tools
@@ -35,6 +39,7 @@ class AgentLoop:
         self.max_iterations = max_iterations
         # 🔥 Inicializamos desde el estado previo o vacío
         self.repair_counts: dict[str, int] = repair_counts or {}
+        self.pricing = get_pricing(provider_name)
 
     async def run(
         self,
@@ -168,6 +173,7 @@ class AgentLoop:
                         "steps": step,
                         "tools_used": tools_used,
                         "usage_total": usage_total,
+                        "cost_usd": await self._calculate_cost(usage_total),
                     }
                     return
 
@@ -229,4 +235,12 @@ class AgentLoop:
             "steps": self.max_iterations,
             "tools_used": tools_used,
             "usage_total": usage_total,
+            "cost_usd": await self._calculate_cost(usage_total),
         }
+
+    async def _calculate_cost(self, usage: dict[str, int]) -> float:
+        prompt = usage.get("prompt_tokens", 0)
+        completion = usage.get("completion_tokens", 0)
+        model = getattr(self.llm, "model_name", "unknown")
+        logger.debug(f"Calculando coste para modelo: '{model}'")
+        return await self.pricing.get_cost(model, prompt, completion)

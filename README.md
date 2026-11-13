@@ -24,6 +24,10 @@ Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible 
 - **🖼️ Multimodalidad:** Soporte para arrastrar y pegar imágenes (codificadas en Base64) que el LLM puede analizar.
 - **💻 TUI con Textual:** Una interfaz moderna con temas oscuros, autocompletado, *modales* interactivos, panel de debug (F1) y barra de adjuntos.
 - **🧪 100% de Cobertura:** Suite de tests robusta con `pytest` y `textual.pilot`.
+- **💰 Telemetría de Costes:** Calcula el coste real en USD de cada llamada usando la API del proveedor (OpenRouter) o un JSON manual (OpenAI/Groq). Caché configurable por `.env`.
+- **🔍 Búsqueda Semántica:** Backend de memoria vectorial (`sqlite-vec` + `fastembed`). Encuentra recuerdos por significado, no por palabra exacta.
+- **🎨 Renderizado Rico:** La TUI renderiza tablas, árboles y bloques de código con Rich, no solo Markdown.
+- **🛡️ MCP Resiliente:** Reconexión automática con backoff exponencial si un servidor MCP cae.
 
 ### 📦 Skills (Habilidades)
 El Harness puede cargar **skills** desde `.agents/skills/`. Son manuales en Markdown
@@ -40,19 +44,30 @@ arquitectura, generar reportes HTML, etc.).
 ```
 
 ### 💾 Memoria Persistente (SQLite)
-El agente recuerda hechos importantes entre sesiones usando **SQLite** con FTS5
-(búsqueda de texto completo). Los recuerdos se guardan en .`harness/memory.db`
-y se inyectan en el `system_prompt` al arrancar.
+### 💾 Memoria Persistente (SQLite + Vectores)
 
-Backends soportados: `sqlite` (por defecto), files (Markdown), `memory` (RAM).
+El agente recuerda hechos importantes entre sesiones. Backends soportados:
 
-Comandos: `/memory clear`, `/memory migrate sqlit`e.
+- **`sqlite`** (por defecto): FTS5 para búsqueda por palabras.
+- **`vector`**: Búsqueda semántica usando `sqlite-vec` + `fastembed`. Guarda en `.harness/vector.db`.
+- **`files`**: Archivos Markdown legibles por humanos.
+- **`memory`**: RAM (se pierde al reiniciar).
+- **`fanout`**: Escribe en archivos y SQLite a la vez.
 
 ### 📁 Sesiones Guardadas
 El Harness guarda el historial completo de cada conversación en `.harness/sessions/`
 como archivos JSON. Al reiniciar la TUI, **carga automáticamente la última sesión**.
 
 Comandos: `/session list`, `/session load <id>`, `/session save`, `/session delete <id>`.
+
+### 💰 Pricing y Costes
+
+El coste se calcula por llamada y se acumula en la sesión. Comandos:
+
+- `/cost`: Muestra el coste de la última llamada y el total acumulado.
+- `pricing_config.json`: Define qué fuente usa cada proveedor (API para OpenRouter, JSON para OpenAI/Groq).
+- `pricing.json`: Precios manuales para proveedores sin API pública.
+- `PRICING_CACHE_TTL_DAYS`: Días que dura la caché de precios (por defecto 1).
 
 ## 🏗️ Arquitectura
 

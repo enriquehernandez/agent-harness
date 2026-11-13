@@ -298,6 +298,7 @@ class AgentHarnessApp(App):
         self.debug_mode = False
         self.verbose_mode = False
         self.session_manager = SessionManager()
+        self.total_cost = 0.0
 
     def compose(self) -> ComposeResult:
         with Center(id="header-container"):
@@ -345,7 +346,7 @@ class AgentHarnessApp(App):
         available_commands = [
             "/help", "/shortcuts", "/model", "/provider", "/tools", "/subagents",
             "/skills", "/tokens", "/compact", "/verbose", "/clear", "/debug",
-            "/permissions", "/export", "/session", "/memory", "/doctor", "/trace", "/quit"
+            "/permissions", "/export", "/session", "/memory", "/doctor", "/trace", "/cost", "/quit"
         ]
 
         input_box = self.query_one("#input-box", FileAwareInput)
@@ -353,6 +354,9 @@ class AgentHarnessApp(App):
         input_box.focus()
 
     async def initialize_agent(self):
+        from app.core.pricing.registry import ensure_prices_loaded
+        await ensure_prices_loaded(self.state["provider"])
+
         memory_store = create_memory_store(settings.MEMORY_BACKEND)
         self.memory_store = memory_store
         memory_context = ""
@@ -403,8 +407,11 @@ class AgentHarnessApp(App):
         self.registry.register(reviewer_tool)
 
         self.gate = PermissionGate(ask_user=self.request_permission)
-        self.agent_loop = AgentLoop(llm=get_llm(
-            self.state["provider"]), tools=self.registry, permissions=self.gate)
+        self.agent_loop = AgentLoop(
+            llm=get_llm(self.state["provider"]),
+            tools=self.registry,
+            permissions=self.gate,
+            provider_name=self.state["provider"])
 
         self.update_dashboard("Listo")
 
@@ -417,10 +424,14 @@ class AgentHarnessApp(App):
             model_name = getattr(self.agent_loop.llm, 'model_name', getattr(
                 self.agent_loop.llm, 'model', 'Desconocido'))
 
+        # 🔥 Mostramos el coste total
+        cost_display = f"${self.total_cost:.4f}" if self.total_cost > 0 else "$0.0000"
+
         dash.update(
             f"⚡ [bold]{self.state['provider']}[/] ({model_name})  •  "
             f"Estado: [bold {color}]{status}[/]  •  "
-            f"Tokens: {tokens}  •  Última tool: {last_tool}"
+            f"Tokens: {tokens}  •  "
+            f"Coste total: [bold]{cost_display}[/]"
         )
 
     async def write_to_chat(self, text: str, type: str = "agent"):
@@ -671,6 +682,13 @@ class AgentHarnessApp(App):
         if final_result:
             tokens = (final_result.get("usage_total")
                       or {}).get("total_tokens", 0)
+
+            cost = final_result.get("cost_usd", 0.0)
+
+            # 🔥 Acumulamos el coste total
+            self.total_cost += cost
+            self.last_cost = cost
+
             # 🔥 GUARDAMOS EL USAGE COMPLETO PARA /trace
             self.last_usage = final_result.get("usage_total", {})
 
@@ -687,12 +705,12 @@ class AgentHarnessApp(App):
             if tokens == 0:
                 tokens = len(full_text) // 4
 
-            last_tool = final_result["tools_used"][-1] if final_result["tools_used"] else "Ninguna"
+            # last_tool = final_result["tools_used"][-1] if final_result["tools_used"] else "Ninguna"
 
             self.update_dashboard(
                 "Listo",
                 tokens=tokens,
-                last_tool=last_tool
+                # last_tool=last_tool
             )
 
         return full_text

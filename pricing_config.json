@@ -1,0 +1,26 @@
+{
+  "providers": {
+    "openrouter": {
+      "source": "api",
+      "url": "https://openrouter.ai/api/v1/models",
+      "model_field": "id",
+      "input_field": "pricing.prompt",
+      "output_field": "pricing.completion"
+    },
+    "openai": {
+      "source": "json",
+      "json_file": "pricing.json"
+    },
+    "groq": {
+      "source": "json",
+      "json_file": "pricing.json"
+    },
+    "anthropic": {
+      "source": "json",
+      "json_file": "pricing.json"
+    },
+    "fake": {
+      "source": "fake"
+    }
+  }
+}

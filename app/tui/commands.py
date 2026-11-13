@@ -32,6 +32,7 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `/subagents` | Lista los subagentes registrados |\n"
             "| `/skills` | Lista todas las habilidades (tools + subagents) |\n"
             "| `/tokens` | Muestra el uso estimado de tokens |\n"
+            "| `/cost` | 💰 Muestra el coste real (USD) de la última llamada |\n"
             "| `/compact [estrategia]` | Fuerza la compactación (sliding/summarize/none) |\n"
             "| `/verbose [on/off]` | Muestra/oculta los detalles de la compactación |\n"
             "| `/clear` | Limpia el historial de conversación |\n"
@@ -46,6 +47,9 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "\n### 💡 Skills\n\n"
             "Escribe `@` seguido del nombre de la skill para cargarla automáticamente.\n"
             "Ejemplo: `@improve-codebase-architecture ¿Cómo está mi proyecto?`\n"
+            "\n### 💵 Pricing\n\n"
+            "El coste se calcula usando `pricing_config.json` y `pricing.json`.\n"
+            "Puedes ajustar el TTL de la caché de precios en `.env` con `PRICING_CACHE_TTL_DAYS`.\n"
         )
 
         await app.write_to_chat(help_text, type="agent")
@@ -187,6 +191,48 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             txt += f"✨ *Prompt Caching activo: {cached} tokens leídos de caché.*\n"
         else:
             txt += "💡 *Consejo: Activa `ENABLE_PROMPT_CACHING=true` en .env para ahorrar costes en prompts largos.*\n"
+
+        await app.write_to_chat(txt, type="agent")
+        return True
+
+    elif cmd == "/cost":
+        usage = getattr(app, "last_usage", None)
+        cost = getattr(app, "last_cost", 0.0)
+        total_cost = getattr(app, "total_cost", 0.0)
+        model = getattr(app, "last_model", "Desconocido")
+
+        if not usage:
+            await app.write_to_chat("⚠️ No hay datos de coste. Envía un mensaje primero.", type="system")
+            return True
+
+        # 🔥 Comprobamos si el modelo está en el catálogo de precios
+        is_known_model = False
+        if app.agent_loop and app.agent_loop.pricing and app.agent_loop.pricing._prices:
+            is_known_model = model in app.agent_loop.pricing._prices
+
+        prompt = usage.get("prompt_tokens", 0)
+        completion = usage.get("completion_tokens", 0)
+        total = usage.get("total_tokens", 0)
+
+        txt = f"### 💰 Coste de la Última Llamada\n\n"
+        txt += f"**Modelo:** `{model}`\n\n"
+
+        if not is_known_model:
+            txt += "⚠️ **El modelo no se encuentra en el catálogo de precios.**\n"
+            txt += "💡 *Verifica que `pricing_config.json` apunta a la API correcta y que el caché se ha generado.*\n\n"
+
+        txt += "| Concepto | Tokens | Coste (USD) |\n"
+        txt += "| :--- | :--- | :--- |\n"
+        txt += f"| Entrada | `{prompt}` | `${(cost * (prompt / total) if total else 0):.6f}` |\n"
+        txt += f"| Salida | `{completion}` | `${(cost * (completion / total) if total else 0):.6f}` |\n"
+        txt += f"| **Total** | `{total}` | **`${cost:.6f}`** |\n"
+
+        txt += f"\n**Coste acumulado de la sesión:** `${total_cost:.6f}`\n"
+
+        if is_known_model and cost == 0.0:
+            txt += "✨ *Este modelo es **gratuito** en el proveedor actual.*\n"
+        elif not is_known_model:
+            txt += "❌ *No se pudo calcular el coste (modelo desconocido).*\n"
 
         await app.write_to_chat(txt, type="agent")
         return True

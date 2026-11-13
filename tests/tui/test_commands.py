@@ -666,3 +666,47 @@ async def test_cmd_doctor_memory_branches(tmp_path, monkeypatch, mock_app, ctx):
                     with patch("app.core.config.settings.MEMORY_BACKEND", "memory"):
                         await handle_command("/doctor", ctx, {}, None, mock_app)
                         assert "Almacenamiento en" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_cost(mock_app, ctx):
+    """Cubre el comando /cost."""
+    mock_app.agent_loop = MagicMock()
+    mock_app.agent_loop.pricing._prices = {
+        "nvidia/nemotron": {"input": 0.0, "output": 0.0}}
+    mock_app.last_usage = {"prompt_tokens": 100,
+                           "completion_tokens": 50, "total_tokens": 150}
+    mock_app.last_cost = 0.0
+    mock_app.total_cost = 0.0  # 🔥 Añadido
+    mock_app.last_model = "nvidia/nemotron"
+
+    await handle_command("/cost", ctx, {}, None, mock_app)
+    assert "Coste de la Última Llamada" in mock_app.write_to_chat.call_args[0][0]
+    assert "Este modelo es **gratuito**" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_cost_unknown_model(mock_app, ctx):
+    """Cubre el comando /cost con modelo no encontrado."""
+    mock_app.agent_loop = MagicMock()
+    mock_app.agent_loop.pricing._prices = {}
+    mock_app.last_usage = {"prompt_tokens": 100,
+                           "completion_tokens": 50, "total_tokens": 150}
+    mock_app.last_cost = 0.0
+    mock_app.total_cost = 0.0  # 🔥 Añadido
+    mock_app.last_model = "modelo_raro"
+
+    await handle_command("/cost", ctx, {}, None, mock_app)
+    assert "El modelo no se encuentra" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_cost_no_usage(mock_app, ctx):
+    """Cubre las líneas 203-205: /cost sin datos de uso."""
+    # Aseguramos que last_usage es None
+    mock_app.last_usage = None
+    mock_app.last_cost = 0.0
+    mock_app.last_model = "Desconocido"
+
+    await handle_command("/cost", ctx, {}, None, mock_app)
+    assert "No hay datos de coste" in mock_app.write_to_chat.call_args[0][0]

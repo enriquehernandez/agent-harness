@@ -429,10 +429,15 @@ class AgentHarnessApp(App):
         a2a_agents = {
             "analyst": AgentCard(
                 name="analyst",
-                description="Analiza código y datos, genera reportes técnicos.",
-                system_prompt="Eres un analista experto. Analiza a fondo y reporta hallazgos precisos.",
-                tools=a2a_base_tools,
-                mode="isolated",  # No arrastra contexto previo
+                description="Analiza código y genera reportes.",
+                system_prompt=(
+                    "Eres un analista experto. Usa la tool 'read_file' para leer el archivo "
+                    "y luego analízalo. Si la tool devuelve contenido, úsalo. "
+                    "NO digas que no puedes leer el archivo si la tool te dio contenido. "
+                    "Termina SIEMPRE con 'HANDOFF: writer'."
+                ),
+                tools=base_tools,
+                mode="isolated",
             ),
             "writer": AgentCard(
                 name="writer",

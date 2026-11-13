@@ -194,9 +194,17 @@
       "name": "delegate_to_reviewer",
       "description": "Delega una tarea de revisión de código.",
       "origin": "Local"
+    },
+    {
+      "name": "delegate_task",
+      "description": "Delega una tarea compleja a un sistema de subagentes expertos. Usa esto cuando la tarea requiera múltiples pasos o especialización.",
+      "origin": "Local"
     }
   ],
   "skills": [
+    {
+      "name": "rich-formatting"
+    },
     {
       "name": "improve-codebase-architecture"
     },

@@ -339,3 +339,128 @@ async def test_supervisor_loads_persisted_permissions(tmp_path, monkeypatch, moc
         sub_gate = called_args.kwargs["permissions"]
         assert "read_text_file:test.txt" in sub_gate.session_allowed
         assert "bash:ls" in sub_gate.session_allowed
+
+
+@pytest.mark.asyncio
+async def test_parallel_strategy(mock_llm, mock_registry):
+    """Verifica que parallel lanza agentes en paralelo."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.parallel import ParallelStrategy
+
+    gate = PermissionGate(ask_user=None)
+    strategy = ParallelStrategy(
+        mock_llm, mock_registry, permissions=gate,
+        agents_to_run=["analyst", "writer"]
+    )
+
+    with patch("app.core.harness.a2a.strategies.parallel.AgentLoop") as MockLoop:
+        mock_instance = MagicMock()
+        # Cada agente devuelve algo distinto
+        mock_instance.run = AsyncMock(side_effect=[
+            MagicMock(final_answer="Análisis"),
+            MagicMock(final_answer="Documentación")
+        ])
+        MockLoop.return_value = mock_instance
+
+        result = await strategy.execute("Tarea")
+
+        assert result.success is True
+        assert "analyst" in result.content
+        assert "writer" in result.content
+        assert mock_instance.run.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_parallel_no_valid_agents(mock_llm, mock_registry):
+    """Cubre el caso de parallel sin agentes válidos."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.parallel import ParallelStrategy
+
+    gate = PermissionGate(ask_user=None)
+    strategy = ParallelStrategy(
+        mock_llm, mock_registry, permissions=gate,
+        agents_to_run=["ghost_agent"]
+    )
+
+    result = await strategy.execute("Tarea")
+    assert result.success is False
+    assert "Ningún agente válido" in result.error
+
+
+@pytest.mark.asyncio
+async def test_swarm_strategy_no_handoff(mock_llm, mock_registry):
+    """Verifica que swarm termina cuando no hay handoff."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.swarm import SwarmStrategy
+
+    gate = PermissionGate(ask_user=None)
+    strategy = SwarmStrategy(
+        mock_llm, mock_registry, permissions=gate,
+        start_agent="analyst"
+    )
+
+    with patch("app.core.harness.a2a.strategies.swarm.AgentLoop") as MockLoop:
+        mock_instance = MagicMock()
+        mock_instance.run = AsyncMock(
+            return_value=MagicMock(final_answer="Análisis completado"))
+        MockLoop.return_value = mock_instance
+
+        result = await strategy.execute("Tarea")
+
+        assert result.success is True
+        assert "analyst" in result.content
+        assert "Análisis completado" in result.content
+
+
+@pytest.mark.asyncio
+async def test_swarm_strategy_with_handoff(mock_llm, mock_registry):
+    """Verifica que swarm hace handoff correctamente."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.swarm import SwarmStrategy
+
+    gate = PermissionGate(ask_user=None)
+    strategy = SwarmStrategy(
+        mock_llm, mock_registry, permissions=gate,
+        start_agent="analyst"
+    )
+
+    with patch("app.core.harness.a2a.strategies.swarm.AgentLoop") as MockLoop:
+        mock_instance = MagicMock()
+        # Analista pide handoff al writer, writer termina
+        mock_instance.run = AsyncMock(side_effect=[
+            MagicMock(final_answer="HANDOFF: writer\nAnálisis listo"),
+            MagicMock(final_answer="Documentación completa")
+        ])
+        MockLoop.return_value = mock_instance
+
+        result = await strategy.execute("Tarea")
+
+        assert result.success is True
+        assert "analyst" in result.content
+        assert "writer" in result.content
+        assert mock_instance.run.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_swarm_max_hops(mock_llm, mock_registry):
+    """Cubre el límite de saltos del swarm."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.swarm import SwarmStrategy
+
+    gate = PermissionGate(ask_user=None)
+    strategy = SwarmStrategy(
+        mock_llm, mock_registry, permissions=gate,
+        start_agent="analyst"
+    )
+
+    with patch("app.core.harness.a2a.strategies.swarm.AgentLoop") as MockLoop:
+        mock_instance = MagicMock()
+        # Siempre hace handoff (simulando un bucle)
+        mock_instance.run = AsyncMock(return_value=MagicMock(
+            final_answer="HANDOFF: analyst\nSigo"))
+        MockLoop.return_value = mock_instance
+
+        result = await strategy.execute("Tarea")
+
+        assert result.success is True
+        assert "Límite de 5 saltos" in result.content

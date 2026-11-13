@@ -97,14 +97,21 @@ class AgentLoop:
                 result = await tool.run(**args)
                 tools_used.append(tool_name)
 
+                logger.debug(
+                    f"Tool '{tool_name}' ejecutada. success={result.success}, error={result.error}")
+
                 if result.success:
                     # Reseteamos el contador
                     self.repair_counts.pop(tool_name, None)
                 else:
                     attempts = self.repair_counts.get(tool_name, 0) + 1
                     self.repair_counts[tool_name] = attempts
+                    logger.warning(
+                        f"Tool '{tool_name}' falló ({attempts}/3): {result.error}")
 
                     if attempts >= 3:
+                        logger.error(
+                            f"Tool '{tool_name}' falló 3 veces. Deteniendo.")
                         error_msg = f"[SISTEMA: La herramienta {tool_name} falló {attempts} veces. Detente y pide ayuda al usuario.]"
                         ctx.add_tool_result(tool_call_id, error_msg)
                     else:
@@ -206,6 +213,9 @@ class AgentLoop:
                     else:
                         attempts = repair_counts.get(tool_name, 0) + 1
                         repair_counts[tool_name] = attempts
+                        logger.warning(
+                            # 🔥 LOG
+                            f"⚠️ Tool '{tool_name}' falló ({attempts}/3): {result.error}")
 
                         if attempts >= 3:
                             ctx.add_tool_result(

@@ -66,6 +66,10 @@ class SupervisorStrategy(A2AStrategy):
         #    que lee los permisos persistidos + hereda el ask_user del padre
         sub_gate = PermissionGate(ask_user=self.permissions.ask_user)
 
+        # 🔥 HEREDAMOS LAS POLÍTICAS DEL PADRE (esto faltaba)
+        if self.permissions and hasattr(self.permissions, 'policies'):
+            sub_gate.policies = self.permissions.policies.copy()
+
         # 🔥 Leemos los permisos persistidos de .harness/permissions.json
         persisted = self._load_persisted_permissions()
         for pattern in persisted:

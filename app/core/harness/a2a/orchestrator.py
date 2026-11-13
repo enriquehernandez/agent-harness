@@ -3,6 +3,8 @@ from app.core.harness.tool import BaseTool, ToolResult
 from app.core.harness.a2a.base import AgentCard
 from app.core.harness.a2a.strategies.supervisor import SupervisorStrategy
 from app.core.harness.a2a.strategies.sequential import SequentialStrategy
+from app.core.harness.a2a.strategies.parallel import ParallelStrategy
+from app.core.harness.a2a.strategies.swarm import SwarmStrategy
 from app.core.config import settings
 from app.core.logger import logger
 
@@ -42,6 +44,16 @@ class OrchestratorTool(BaseTool):
                             for s in settings.A2A_SEQUENCE.split(",") if s.strip()]
                 strategy = SequentialStrategy(
                     self.llm, self.agents, self.permissions, sequence)
+            elif strategy_name == "parallel":
+                agents_to_run = [
+                    s.strip() for s in settings.A2A_PARALLEL_AGENTS.split(",") if s.strip()]
+                strategy = ParallelStrategy(
+                    self.llm, self.agents, self.permissions, agents_to_run)
+            elif strategy_name == "swarm":
+                strategy = SwarmStrategy(
+                    self.llm, self.agents, self.permissions,
+                    start_agent=settings.A2A_SWARM_START
+                )
             else:
                 return ToolResult(
                     success=False, content="",

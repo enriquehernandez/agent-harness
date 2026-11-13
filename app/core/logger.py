@@ -71,6 +71,13 @@ debug_collector = DebugEventCollector()
 logger.addHandler(debug_collector)
 
 
+# Handler para stdout (útil para scripts)
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(logging.Formatter(
+    '[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
+logger.addHandler(stream_handler)
+
+
 def get_debug_events():
     """Returns the list of captured debug events."""
     return debug_collector.events

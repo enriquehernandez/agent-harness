@@ -64,8 +64,10 @@ class Settings(BaseSettings):
         return Path(self.PRICING_CONFIG_FILE)
 
     # A2A (Agent-to-Agent)
-    A2A_STRATEGY: str = "supervisor"  # supervisor | sequential
+    A2A_STRATEGY: str = "supervisor"  # supervisor | sequential | parallel | swarm
     A2A_SEQUENCE: str = "analyst,writer,reviewer"  # Solo si strategy=sequential
+    A2A_PARALLEL_AGENTS: str = "analyst,reviewer"  # Para estrategia parallel
+    A2A_SWARM_START: str = "analyst"  # Para estrategia swarm
 
     def ensure_dirs(self):
         """Crea los directorios necesarios al iniciar."""

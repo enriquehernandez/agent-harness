@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agent-harness/skills/token-budget-guard/report.schema.json",
+  "title": "Token Budget Report",
+  "type": "object",
+  "required": [
+    "session_id",
+    "model",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "cost_usd",
+    "budget_usd",
+    "status"
+  ],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "The ID of the session being analyzed."
+    },
+    "model": {
+      "type": "string",
+      "description": "The model used in the session."
+    },
+    "prompt_tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "completion_tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "total_tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cost_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "The calculated cost in USD."
+    },
+    "budget_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "The budget limit defined by the user."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["within_budget", "exceeded_budget"],
+      "description": "Whether the cost is within the defined budget."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "pricing_source": {
+      "type": "string",
+      "enum": ["api_cache", "api_fresh", "fallback_default"],
+      "description": "Where the pricing data came from."
+    }
+  }
+}

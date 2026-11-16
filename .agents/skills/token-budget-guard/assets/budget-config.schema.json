@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agent-harness/skills/token-budget-guard/budget-config.schema.json",
+  "title": "Budget Configuration",
+  "type": "object",
+  "properties": {
+    "default_budget_usd": {
+      "type": "number",
+      "default": 5.0,
+      "description": "The default budget for any session or task."
+    },
+    "alert_threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.8,
+      "description": "Percentage of the budget that triggers a warning (e.g., 0.8 = 80%)."
+    },
+    "model_overrides": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "budget_usd": { "type": "number" }
+        }
+      },
+      "description": "Specific budgets per model (e.g., a higher budget for GPT-4o, lower for GPT-4o-mini)."
+    }
+  }
+}

@@ -100,3 +100,15 @@ El `VectorStore` usa `fastembed`, que descarga un modelo ONNX (~90MB). Para test
 
 ## 12. PropertyMock en Pydantic
 Cuando necesites parchear una `@property` de `Settings` (ej. `pricing_config_path`), **no uses** `patch` **directamente**. Usa `patch("pathlib.Path.exists", return_value=False)` o `monkeypatch.chdir(tmp_path)` para evitar el error AttributeError: property has no setter.
+
+## 13. Mocking de A2A
+Para testear las estrategias A2A:
+- Mockea `AgentLoop` con `patch(...)`.
+- Mockea `get_llm` para evitar dependencias de red.
+- Para cubrir el `log_agent_flow`, parchea `debug_collector.agent_flow` con eventos falsos.
+
+## 14. Cobertura de Ramas en A2A
+Las estrategias tienen ramas de error (agente no encontrado, límite de saltos, handoff inválido). Para cubrirlas:
+- Usa `AgentCard` con nombres falsos (`ghost_agent`).
+- Fuerza el `max_hops` con un agente que siempre devuelva `HANDOFF: <otro>`.
+- Parchea `get_llm` para simular modelos específicos.

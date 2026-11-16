@@ -4,7 +4,7 @@ from app.core.harness.loop import AgentLoop
 from app.core.harness.tool import ToolResult
 from app.core.harness.context import ContextManager
 from app.core.harness.permissions import PermissionGate
-from app.core.logger import logger
+from app.core.logger import logger, log_agent_flow
 from app.core.llm import get_llm
 
 
@@ -30,7 +30,6 @@ class ParallelStrategy(A2AStrategy):
             sub_gate.policies = self.permissions.policies.copy()
 
         # Resolvemos el LLM (específico del agente o el del padre)
-        # agent_llm = get_llm(agent.model) if agent.model else self.llm
         if agent.model:
             # Usamos el mismo proveedor, pero con el modelo específico del agente
             from app.core.config import settings
@@ -39,12 +38,19 @@ class ParallelStrategy(A2AStrategy):
         else:
             agent_llm = self.llm
 
+        # 🔥 Log para el árbol de agentes
+        log_agent_flow(agent.name, "start")
+
         loop = AgentLoop(
             llm=agent_llm,
             tools=agent.tools,
             permissions=sub_gate,
         )
         result = await loop.run(task, context=agent_ctx)
+
+        # 🔥 Log para el árbol de agentes
+        log_agent_flow(agent.name, "end")
+
         return agent.name, result.final_answer
 
     async def execute(self, task: str, context: ContextManager = None) -> ToolResult:

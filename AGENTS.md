@@ -6,10 +6,10 @@ An autonomous AI agent engine (Harness) built in Python with a Textual TUI, MCP 
 
 - **Language:** Python 3.11+
 - **Package Manager:** `uv`
-- **TUI:** `textual`, `rich`
+- **TUI:** `textual`, `rich`, `textual-image`
 - **AI Integration:** `openai` SDK (compatible con OpenRouter, Groq, etc.)
 - **Tool Protocol:** `mcp` (Model Context Protocol)
-- **Orchestration:** Custom `AgentLoop` (ReAct pattern) + A2A (Supervisor/Sequential)
+- **Orchestration:** Custom `AgentLoop` (ReAct pattern) + **A2A** (Supervisor, Sequential, Parallel, Swarm)
 - **Testing:** `pytest`, `pytest-asyncio`, `pytest-cov` (100% coverage)
 - **Memory:** SQLite with FTS5 (default), vectors (`sqlite-vec` + `fastembed`), files, or in-memory.
 - **Pricing:** Provider API (`httpx`) with disk cache, JSON fallback.
@@ -18,15 +18,15 @@ An autonomous AI agent engine (Harness) built in Python with a Textual TUI, MCP 
 - **Skills:** Markdown files in `.agents/skills/`.
 
 **Folder Structure:**
-- `app/core/`: Core logic (LLM, Harness, Permissions, Memory, Pricing, Subagents, Sessions).
+- `app/core/`: Core logic (LLM, Harness, Permissions, Memory, Pricing, Subagents, A2A, Sessions).
 - `app/tui/`: User Interface (Textual, widgets, modals, dashboard, suggester).
 - `app/tools/`: Local tools (bash, filesystem, memory, skills).
 - `app/mcp/`: Client for external MCP servers.
 - `app/core/pricing/`: Pricing registry, sources (API, JSON, Fake).
 - `tests/`: Unit and integration test suite.
 - `scripts/`: Auxiliary scripts (local MCP servers, diagnostics).
-- `.agents/skills/`: Installed skills (external, e.g., `agent-harness-explorer`, `rich-formatting`).
-- `.harness/`: Persistent data (memory, sessions, permissions, logs, pricing cache).
+- `.agents/skills/`: Installed skills.
+- `.harness/`: Persistent data (memory, sessions, permissions, logs, pricing cache, agent_flow).
 - `pricing_config.json`: Provider pricing configuration.
 - `pricing.json`: Manual prices (OpenAI, Groq).
 
@@ -65,6 +65,11 @@ An autonomous AI agent engine (Harness) built in Python with a Textual TUI, MCP 
 - **MCP Resilience:** `MCPClient` usa backoff exponencial (3 intentos) con `asyncio.sleep`. Si una tool falla en ejecución, `MCPToolProxy` reconecta automáticamente y reintenta una vez.
 - **Rich Rendering:** `RichMessage` parsea bloques ```table, ```tree y ```json (listas de dicts) y los renderiza con Rich (Table, Tree, Syntax). El dashboard muestra el coste total acumulado.
 - **Vector Memory:** Backend `vector` usa `sqlite-vec` + `fastembed` (BAAI/bge-small-en-v1.5). Se guarda en `.harness/vector.db`. Busca por similitud semántica, no por palabras exactas.
+- **Agent-to-Agent (A2A):** El sistema A2A permite orquestar subagentes con 4 estrategias (`supervisor`, `sequential`, `parallel`, `swarm`). Se configura en `.env` (`A2A_STRATEGY`, `A2A_SEQUENCE`, etc.). Los agentes se definen con `AgentCard` (name, description, system_prompt, tools, mode, model).
+- **Modelo por Agente:** Cada `AgentCard` puede tener un modelo específico (`model`). Si no se define, usa el modelo del padre. Se configura en `.env` (`A2A_ANALYST_MODEL`, etc.).
+- **Flujo de Agentes:** El panel de debug (F1) muestra un `Tree` con el flujo de agentes en tiempo real (`start`, `end`, `handoff`). Se emite con `log_agent_flow()` en `logger.py`.
+- **Renderizado de Imágenes:** La TUI usa `textual-image` para mostrar imágenes pegadas/arrastradas. El fallback es mostrar el nombre del archivo.
+
 
 ## Working Style
 

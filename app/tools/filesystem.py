@@ -20,7 +20,8 @@ class ReadFileTool(BaseTool):
         }
         self.base_dir = Path(base_dir).resolve()
 
-    async def run(self, path: str) -> ToolResult:
+    async def run(self, path: str, **kwargs) -> ToolResult:
+        # Ignoramos 'timeout' y cualquier otro argumento extra que envíe el LLM con (**kwargs)
         try:
             target = (self.base_dir / path).resolve()
             if not str(target).startswith(str(self.base_dir)):

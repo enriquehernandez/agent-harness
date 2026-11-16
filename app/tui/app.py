@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal, Center, VerticalScroll
-from textual.widgets import Input, Static, LoadingIndicator, Markdown, Button, ListView, ListItem, Label
+from textual.widgets import Input, Static, LoadingIndicator, Markdown, Button, ListView, ListItem, Label, Tree
 from app.tui.widgets import RichMessage
+from textual_image.widget import Image as TerminalImage
 from textual import work
 from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList, Suggester
@@ -217,6 +218,14 @@ class AgentHarnessApp(App):
         margin-bottom: 1;
     }
 
+    .message-image {
+        width: 60%;      /* Ajusta el tamaño de la imagen */
+        height: auto;
+        margin: 1 2;
+        border: solid #30363d;
+        padding: 1;
+    }
+
     #loading-indicator {
         height: 3;
         display: none;
@@ -244,6 +253,13 @@ class AgentHarnessApp(App):
     #debug-list {
         height: 1fr;
         background: transparent;
+    }
+
+    #agent-flow-tree {
+        height: 30%;
+        background: transparent;
+        border-top: solid #30363d;
+        padding: 1;
     }
 
     .debug-item {
@@ -313,6 +329,7 @@ class AgentHarnessApp(App):
             with Vertical(id="debug-panel"):
                 yield Label("🪲 Panel de Debug", id="debug-header")
                 yield ListView(id="debug-list")
+                yield Tree("🤖 Flujo de Agentes", id="agent-flow-tree")
 
         with Vertical(id="input-container"):
             yield Static("", id="attachments-bar")
@@ -535,6 +552,18 @@ class AgentHarnessApp(App):
         p = Path(path)
 
         if p.suffix.lower() in [".png", ".jpg", ".jpeg", ".gif", ".webp"]:
+            # 🔥 1. Mostrar la imagen en el chat
+            try:
+                scroll = self.query_one("#chat-scroll", VerticalScroll)
+                img_widget = TerminalImage(p, classes="message-image")
+                await scroll.mount(img_widget)
+                scroll.scroll_end(animate=False)
+            except Exception as e:
+                logger.warning(f"No se pudo renderizar la imagen: {e}")
+                # Fallback: al menos mostrar el nombre
+                await self.write_to_chat(f"🖼️ **Imagen adjunta:** `{p.name}` (vista previa no disponible)", type="system")
+
+            # 🔥 2. Guardar en Base64 para el LLM (código existente)
             with open(p, "rb") as f:
                 img_data = base64.b64encode(f.read()).decode("utf-8")
 
@@ -548,7 +577,10 @@ class AgentHarnessApp(App):
 
             b64_url = f"data:{mime};base64,{img_data}"
             self.attached_images.append(b64_url)
-            await self.write_to_chat(f"🖼️ **Imagen adjunta:** `{p.name}`", type="system")
+
+            # Si el renderizado falló, ya mostramos el mensaje de sistema arriba.
+            # Si funcionó, no mostramos el mensaje de texto para no duplicar.
+            # (Puedes elegir mostrar siempre el mensaje de sistema si prefieres)
         else:
             if str(p) not in self.attached_files:
                 self.attached_files.append(str(p))
@@ -668,17 +700,58 @@ class AgentHarnessApp(App):
             asyncio.create_task(self._refresh_debug_list())
 
     async def _refresh_debug_list(self):
+        # 1. Actualizar el ListView de eventos generales
         list_view = self.query_one("#debug-list", ListView)
         await list_view.clear()
 
         events = get_debug_events()
         if not events:
             list_view.append(ListItem(Label("No hay eventos aún.")))
+        else:
+            for idx, log in enumerate(events):
+                summary = f"#{idx+1} {log['timestamp']} • {log['type']} • {log['summary'][:50]}..."
+                list_view.append(ListItem(Label(summary), id=f"log-{idx}"))
+
+        # 🔥 2. Actualizar el Tree de flujo de agentes
+        from app.core.logger import get_agent_flow
+        tree = self.query_one("#agent-flow-tree", Tree)
+        tree.clear()
+
+        flow = get_agent_flow()
+        if not flow:
+            tree.root.add("No hay actividad de agentes aún.")
             return
 
-        for idx, log in enumerate(events):
-            summary = f"#{idx+1} {log['timestamp']} • {log['type']} • {log['summary'][:50]}..."
-            list_view.append(ListItem(Label(summary), id=f"log-{idx}"))
+        # Agrupar el flujo en un árbol
+        # Estructura: Root -> [por cada agente, un nodo con sus eventos]
+        root = tree.root
+
+        # Diccionario para agrupar los eventos por agente (manteniendo el orden)
+        agent_nodes = {}
+
+        for entry in flow:
+            agent = entry["agent"]
+            action = entry["action"]
+            timestamp = entry["timestamp"]
+
+            # Si el agente no tiene nodo, lo creamos en la raíz
+            if agent not in agent_nodes:
+                agent_nodes[agent] = root.add(f"🤖 {agent}")
+
+            # Añadimos el evento como hijo del agente
+            if action == "start":
+                agent_nodes[agent].add(f"▶️ start ({timestamp})")
+            elif action == "end":
+                agent_nodes[agent].add(f"✅ end ({timestamp})")
+            elif action == "handoff":
+                agent_nodes[agent].add(f"🔄 handoff ({timestamp})")
+            else:
+                agent_nodes[agent].add(f"❓ {action} ({timestamp})")
+
+        # Expandimos todo el árbol para que sea visible
+        tree.root.expand()
+        for node in agent_nodes.values():
+            node.expand()
 
     async def on_list_view_selected(self, event: ListView.Selected) -> None:
         if not event.item.id or not event.item.id.startswith("log-"):
@@ -729,31 +802,38 @@ class AgentHarnessApp(App):
     async def stream_to_chat(self, stream_generator):
         """Renderiza el streaming en el chat y actualiza el dashboard al final."""
         scroll = self.query_one("#chat-scroll", VerticalScroll)
-        markdown_widget = Markdown("", classes="message-agent")
-        await scroll.mount(markdown_widget)
-        scroll.scroll_end(animate=False)
+        markdown_widget = None  # 🔥 Se crea al primer chunk
+        loading = self.query_one("#loading-indicator", LoadingIndicator)
 
         full_text = ""
         final_result = None
         start_time = asyncio.get_event_loop().time()
-        # 🔥 Nuevo timeout: 300s (5 minutos)
         TIMEOUT_SECONDS = settings.LLM_STREAM_TIMEOUT
 
         try:
             async for chunk in stream_generator:
-                # 🔥 Verificamos el timeout en cada chunk
                 if asyncio.get_event_loop().time() - start_time > TIMEOUT_SECONDS:
                     raise asyncio.TimeoutError()
 
                 if isinstance(chunk, str):
                     full_text += chunk
-                    await markdown_widget.update(full_text)
+
+                    # 🔥 Creamos el Markdown al primer chunk y ocultamos el loading
+                    if markdown_widget is None:
+                        markdown_widget = Markdown(
+                            full_text, classes="message-agent")
+                        await scroll.mount(markdown_widget)
+                        loading.display = False  # 🔥 Ocultamos el loading principal
+                    else:
+                        await markdown_widget.update(full_text)
+
                     scroll.scroll_end(animate=False)
                 elif isinstance(chunk, dict) and chunk.get("type") == "result":
                     final_result = chunk
                     break
         except asyncio.TimeoutError:
             self.update_dashboard("Error")
+            loading.display = False
             await self.write_to_chat(
                 f"⏳ **Timeout:** El agente tardó más de {TIMEOUT_SECONDS}s. "
                 f"El modelo `nemotron` es lento generando reportes largos. "
@@ -763,8 +843,11 @@ class AgentHarnessApp(App):
             return full_text
         except Exception as e:
             self.update_dashboard("Error")
+            loading.display = False
             await self.write_to_chat(f"❌ **Error del LLM:** {e}", type="system")
             return full_text
+        finally:
+            loading.display = False  # 🔥 Aseguramos que se oculte al terminar
 
         if final_result:
             tokens = (final_result.get("usage_total")

@@ -28,7 +28,9 @@ class BashTool(BaseTool):
         self.export_observations = export_observations
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else settings.TOOL_TIMEOUT
 
-    async def run(self, command: str) -> ToolResult:
+    async def run(self, command: str, **kwargs) -> ToolResult:
+        # Ignoramos 'timeout' y cualquier otro argumento extra que envíe el LLM con (**kwargs)
+
         try:
             # logger.info(
             #     f"BashTool: ejecutando '{command}' en cwd='{Path.cwd()}'")

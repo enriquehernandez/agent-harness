@@ -28,6 +28,11 @@ Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible 
 - **🔍 Búsqueda Semántica:** Backend de memoria vectorial (`sqlite-vec` + `fastembed`). Encuentra recuerdos por significado, no por palabra exacta.
 - **🎨 Renderizado Rico:** La TUI renderiza tablas, árboles y bloques de código con Rich, no solo Markdown.
 - **🛡️ MCP Resiliente:** Reconexión automática con backoff exponencial si un servidor MCP cae.
+- **🤖 Agent-to-Agent (A2A):** Orquestación multi-agente con 4 estrategias (supervisor, sequential, parallel, swarm) configurable via `.env`.
+- **🎨 Renderizado Rico:** La TUI renderiza tablas, árboles y bloques de código con Rich, no solo Markdown.
+- **🖼️ Renderizado de Imágenes:** Las imágenes pegadas/arrastradas se muestran en el chat con `textual-image`.
+- **💰 Telemetría de Costes:** Calcula el coste real en USD de cada llamada usando la API del proveedor (OpenRouter) o un JSON manual (OpenAI/Groq). Caché configurable por `.env`.
+
 
 ### 📦 Skills (Habilidades)
 El Harness puede cargar **skills** desde `.agents/skills/`. Son manuales en Markdown
@@ -101,7 +106,8 @@ graph TD
 - **Gestión de paquetes**: `uv` (ultrarrápido y reproducible)
 - **Integración IA**: `openai` SDK (compatible con OpenRouter/Groq)
 - **Protocolo de Herramientas**: `mcp` (Model Context Protocol)
-- **Interfaz de Terminal**: `textual`, `rich`
+- **Interfaz de Terminal**: `textual`, `rich`, `textual-image`
+- **Orquestación**: `AgentLoop` + A2A (Supervisor, Sequential, Parallel, Swarm)
 - **Memoria Vectorial**: `sqlite-vec`, `fastembed`
 - **Resiliencia**: `tenacity`
 - **Testing**: `pytest`, `pytest-asyncio`, `pytest-cov`

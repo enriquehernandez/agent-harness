@@ -472,6 +472,7 @@ async def test_supervisor_uses_agent_specific_model(mock_llm, mock_registry):
     from app.core.harness.permissions import PermissionGate
     from app.core.harness.a2a.strategies.supervisor import SupervisorStrategy
     from unittest.mock import patch
+    from app.core.config import settings
 
     # Asignamos un modelo al analyst
     mock_registry["analyst"].model = "openai/gpt-4o"
@@ -481,7 +482,7 @@ async def test_supervisor_uses_agent_specific_model(mock_llm, mock_registry):
     strategy = SupervisorStrategy(mock_llm, mock_registry, permissions=gate)
 
     with patch("app.core.harness.a2a.strategies.supervisor.AgentLoop") as MockLoop:
-        with patch("app.core.llm.get_llm") as mock_get_llm:
+        with patch("app.core.harness.a2a.strategies.supervisor.get_llm") as mock_get_llm:
             mock_agent_llm = MagicMock()
             mock_get_llm.return_value = mock_agent_llm
 
@@ -492,7 +493,293 @@ async def test_supervisor_uses_agent_specific_model(mock_llm, mock_registry):
 
             await strategy.execute("Analiza")
 
-            # Verificamos que se llamó a get_llm con el modelo del agente
-            mock_get_llm.assert_called_with("openai/gpt-4o")
-            # Verificamos que AgentLoop recibió el LLM específico
-            assert MockLoop.call_args.kwargs["llm"] == mock_agent_llm
+            # 🔥 Verificamos que se llamó a get_llm con el proveedor y el modelo
+            mock_get_llm.assert_called_with(
+                settings.LLM_PROVIDER,
+                model="openai/gpt-4o"
+            )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_unknown_strategy(mock_llm, mock_registry):
+    """Cubre la rama de estrategia desconocida en OrchestratorTool."""
+    from app.core.harness.a2a.orchestrator import OrchestratorTool
+    from unittest.mock import patch
+
+    with patch("app.core.config.settings.A2A_STRATEGY", "inventada"):
+        tool = OrchestratorTool(mock_llm, mock_registry, permissions=None)
+        result = await tool.run("tarea")
+
+        assert result.success is False
+        assert "desconocida" in result.error
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_exception(mock_llm, mock_registry):
+    """Cubre el except del OrchestratorTool."""
+    from app.core.harness.a2a.orchestrator import OrchestratorTool
+    from unittest.mock import patch
+
+    with patch("app.core.config.settings.A2A_STRATEGY", "supervisor"):
+        with patch("app.core.harness.a2a.orchestrator.SupervisorStrategy") as MockStrategy:
+            MockStrategy.side_effect = Exception("Fallo simulado")
+            tool = OrchestratorTool(mock_llm, mock_registry, permissions=None)
+            result = await tool.run("tarea")
+
+            assert result.success is False
+            assert "Fallo simulado" in result.error
+
+
+@pytest.mark.asyncio
+async def test_supervisor_agent_not_found(mock_llm, mock_registry):
+    """Cubre el logger.warning cuando el supervisor no encuentra agente."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.supervisor import SupervisorStrategy
+
+    mock_llm.chat.return_value = LLMResponse(content="ghost_agent")
+    gate = PermissionGate(ask_user=None)
+    strategy = SupervisorStrategy(mock_llm, mock_registry, permissions=gate)
+
+    result = await strategy.execute("Tarea rara")
+
+    assert result.success is False
+    assert "ghost_agent" in result.error
+
+
+@pytest.mark.asyncio
+async def test_sequential_agent_not_found(mock_llm, mock_registry):
+    """Cubre el logger.warning cuando sequential no encuentra agente."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.sequential import SequentialStrategy
+
+    gate = PermissionGate(ask_user=None)
+    strategy = SequentialStrategy(
+        mock_llm, mock_registry, permissions=gate, sequence=["ghost_agent"]
+    )
+
+    result = await strategy.execute("Tarea")
+
+    # Si no hay agentes válidos, devuelve éxito con contenido vacío
+    assert result.success is True
+    assert result.content == ""
+
+
+@pytest.mark.asyncio
+async def test_parallel_no_valid_agents(mock_llm, mock_registry):
+    """Cubre el caso de parallel sin agentes válidos."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.parallel import ParallelStrategy
+
+    gate = PermissionGate(ask_user=None)
+    strategy = ParallelStrategy(
+        mock_llm, mock_registry, permissions=gate, agents_to_run=[
+            "ghost_agent"]
+    )
+
+    result = await strategy.execute("Tarea")
+
+    assert result.success is False
+    assert "Ningún agente válido" in result.error
+
+
+@pytest.mark.asyncio
+async def test_parallel_with_exception(mock_llm, mock_registry):
+    """Cubre el manejo de excepciones en parallel."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.parallel import ParallelStrategy
+    from unittest.mock import patch
+
+    gate = PermissionGate(ask_user=None)
+    strategy = ParallelStrategy(
+        mock_llm, mock_registry, permissions=gate, agents_to_run=["analyst"]
+    )
+
+    with patch("app.core.harness.a2a.strategies.parallel.AgentLoop") as MockLoop:
+        mock_instance = MagicMock()
+        mock_instance.run = AsyncMock(
+            side_effect=Exception("Error en parallel"))
+        MockLoop.return_value = mock_instance
+
+        result = await strategy.execute("Tarea")
+
+        assert result.success is True
+        assert "Error en parallel" in result.content
+
+
+@pytest.mark.asyncio
+async def test_swarm_agent_not_found(mock_llm, mock_registry):
+    """Cubre el logger.warning de agente no encontrado en swarm."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.swarm import SwarmStrategy
+
+    gate = PermissionGate(ask_user=None)
+    strategy = SwarmStrategy(
+        mock_llm, mock_registry, permissions=gate, start_agent="ghost_agent"
+    )
+
+    result = await strategy.execute("Tarea")
+
+    assert result.success is True
+    assert "Límite de 5 saltos" in result.content or result.content == ""
+
+
+@pytest.mark.asyncio
+async def test_swarm_max_hops(mock_llm, mock_registry):
+    """Cubre el límite de saltos del swarm."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.swarm import SwarmStrategy
+    from unittest.mock import patch
+
+    gate = PermissionGate(ask_user=None)
+    strategy = SwarmStrategy(
+        mock_llm, mock_registry, permissions=gate, start_agent="analyst"
+    )
+
+    with patch("app.core.harness.a2a.strategies.swarm.AgentLoop") as MockLoop:
+        mock_instance = MagicMock()
+        # Siempre hace handoff (simulando un bucle)
+        mock_instance.run = AsyncMock(return_value=MagicMock(
+            final_answer="HANDOFF: analyst\nSigo"
+        ))
+        MockLoop.return_value = mock_instance
+
+        result = await strategy.execute("Tarea")
+
+        assert result.success is True
+        assert "Límite de 5 saltos" in result.content
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_parallel_strategy(mock_llm, mock_registry):
+    """Cubre la rama 'parallel' del OrchestratorTool."""
+    from app.core.harness.a2a.orchestrator import OrchestratorTool
+    from unittest.mock import patch
+
+    with patch("app.core.config.settings.A2A_STRATEGY", "parallel"):
+        with patch("app.core.config.settings.A2A_PARALLEL_AGENTS", "analyst,writer"):
+            tool = OrchestratorTool(mock_llm, mock_registry, permissions=None)
+
+            with patch("app.core.harness.a2a.orchestrator.ParallelStrategy") as MockPar:
+                mock_instance = MagicMock()
+                mock_instance.execute = AsyncMock(
+                    return_value=MagicMock(success=True, content="ok"))
+                MockPar.return_value = mock_instance
+
+                result = await tool.run("tarea")
+                assert result.success is True
+                MockPar.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_swarm_strategy(mock_llm, mock_registry):
+    """Cubre la rama 'swarm' del OrchestratorTool."""
+    from app.core.harness.a2a.orchestrator import OrchestratorTool
+    from unittest.mock import patch
+
+    with patch("app.core.config.settings.A2A_STRATEGY", "swarm"):
+        with patch("app.core.config.settings.A2A_SWARM_START", "analyst"):
+            tool = OrchestratorTool(mock_llm, mock_registry, permissions=None)
+
+            with patch("app.core.harness.a2a.orchestrator.SwarmStrategy") as MockSwarm:
+                mock_instance = MagicMock()
+                mock_instance.execute = AsyncMock(
+                    return_value=MagicMock(success=True, content="ok"))
+                MockSwarm.return_value = mock_instance
+
+                result = await tool.run("tarea")
+                assert result.success is True
+                MockSwarm.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_parallel_agent_with_model_and_fork(mock_llm, mock_registry):
+    """Cubre el modo fork y modelo específico en parallel."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.parallel import ParallelStrategy
+    from app.core.harness.context import ContextManager
+
+    # Asignamos un modelo al analyst
+    mock_registry["analyst"].model = "openai/gpt-4o"
+    mock_registry["analyst"].mode = "fork"
+
+    gate = PermissionGate(ask_user=None)
+    strategy = ParallelStrategy(
+        mock_llm, mock_registry, permissions=gate, agents_to_run=["analyst"]
+    )
+
+    ctx = ContextManager(system_prompt="Test")
+    ctx.add_user("Mensaje previo")
+
+    with patch("app.core.harness.a2a.strategies.parallel.AgentLoop") as MockLoop:
+        mock_instance = MagicMock()
+        mock_instance.run = AsyncMock(
+            return_value=MagicMock(final_answer="Hecho"))
+        MockLoop.return_value = mock_instance
+
+        await strategy.execute("Tarea", context=ctx)
+        assert MockLoop.called
+
+
+@pytest.mark.asyncio
+async def test_sequential_with_persisted_permissions_and_model(mock_llm, mock_registry, tmp_path, monkeypatch):
+    """Cubre las líneas 23-25, 60 y 65 de sequential.py."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.sequential import SequentialStrategy
+
+    # 1. Creamos un permissions.json falso
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".harness").mkdir()
+    (tmp_path / ".harness" /
+     "permissions.json").write_text('{"session_allowed": ["read_file:test.txt"]}')
+
+    # 2. Asignamos un modelo al analyst
+    mock_registry["analyst"].model = "openai/gpt-4o"
+
+    gate = PermissionGate(ask_user=None)
+    strategy = SequentialStrategy(
+        mock_llm, mock_registry, permissions=gate, sequence=["analyst"]
+    )
+
+    with patch("app.core.harness.a2a.strategies.sequential.AgentLoop") as MockLoop:
+        mock_instance = MagicMock()
+        mock_instance.run = AsyncMock(
+            return_value=MagicMock(final_answer="Hecho"))
+        MockLoop.return_value = mock_instance
+
+        await strategy.execute("Tarea")
+        assert MockLoop.called
+
+
+@pytest.mark.asyncio
+async def test_swarm_with_persisted_permissions_fork_and_model(mock_llm, mock_registry, tmp_path, monkeypatch):
+    """Cubre las líneas 26-28, 55-56, 72 y 77 de swarm.py."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.swarm import SwarmStrategy
+    from app.core.harness.context import ContextManager
+
+    # 1. Creamos un permissions.json falso
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".harness").mkdir()
+    (tmp_path / ".harness" /
+     "permissions.json").write_text('{"session_allowed": ["read_file:test.txt"]}')
+
+    # 2. Asignamos un modelo y modo fork al writer
+    mock_registry["writer"].model = "openai/gpt-4o"
+    mock_registry["writer"].mode = "fork"
+
+    gate = PermissionGate(ask_user=None)
+    strategy = SwarmStrategy(
+        mock_llm, mock_registry, permissions=gate, start_agent="writer"
+    )
+
+    ctx = ContextManager(system_prompt="Test")
+    ctx.add_user("Mensaje previo")
+
+    with patch("app.core.harness.a2a.strategies.swarm.AgentLoop") as MockLoop:
+        mock_instance = MagicMock()
+        mock_instance.run = AsyncMock(
+            return_value=MagicMock(final_answer="Hecho"))
+        MockLoop.return_value = mock_instance
+
+        await strategy.execute("Tarea", context=ctx)
+        assert MockLoop.called

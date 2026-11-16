@@ -2,7 +2,7 @@ import asyncio
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from app.tui.app import AgentHarnessApp, FileAwareInput
-from textual.widgets import Input, Static, ListView
+from textual.widgets import Input, Static, ListView, Tree
 from textual.worker import NoActiveWorker
 from app.core.harness.loop import LoopResult
 from pathlib import Path
@@ -951,3 +951,130 @@ async def test_app_safe_request_permission_fallback():
 
                 # Debe caer al fallback y devolver "n"
                 assert result == "n"
+
+
+@pytest.mark.asyncio
+async def test_app_handle_file_paste_exception(tmp_path):
+    """Cubre el except de handle_file_paste (líneas 558-560)."""
+    app = AgentHarnessApp()
+    fake_img = tmp_path / "test.png"
+    fake_img.write_text("fake image")
+
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            # 1. Parcheamos TerminalImage para que no falle al instanciarse
+            with patch("app.tui.app.TerminalImage") as MockImage:
+                MockImage.return_value = MagicMock()
+
+                # 2. Parcheamos query_one para devolver un scroll mockeado
+                with patch.object(app, "query_one") as mock_query:
+                    mock_scroll = MagicMock()
+                    # 🔥 mount funciona (no lanza excepción)
+                    mock_scroll.mount = AsyncMock(return_value=None)
+                    # 🔥 scroll_end falla (lanza la excepción)
+                    mock_scroll.scroll_end = MagicMock(
+                        side_effect=Exception("Error visual"))
+                    mock_query.return_value = mock_scroll
+
+                    await app.handle_file_paste(str(fake_img))
+                    # No debe lanzar excepción porque el except lo captura
+
+
+@pytest.mark.asyncio
+async def test_app_refresh_debug_list_no_agent_flow():
+    """Cubre el caso de agent_flow vacío en _refresh_debug_list (línea 721)."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            # Limpiamos el agent_flow
+            from app.core.logger import debug_collector
+            debug_collector.agent_flow.clear()
+
+            await app._refresh_debug_list()
+            # Debe mostrar "No hay actividad de agentes aún."
+
+
+@pytest.mark.asyncio
+async def test_app_write_to_chat_exception():
+    """Cubre el except de write_to_chat (línea 827)."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            # Forzamos un error en query_one
+            with patch.object(app, "query_one", side_effect=Exception("Error visual")):
+                await app.write_to_chat("Test", type="agent")
+                # No debe lanzar excepción
+
+
+@pytest.mark.asyncio
+async def test_stream_to_chat_with_exception():
+    """Cubre el except genérico de stream_to_chat."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def error_stream():
+                yield "Texto"
+                raise Exception("Error genérico")
+
+            result = await app.stream_to_chat(error_stream())
+            assert "Texto" in result
+
+
+@pytest.mark.asyncio
+async def test_app_refresh_debug_list_unknown_action():
+    """Cubre el else de _refresh_debug_list (acción desconocida)."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            from app.core.logger import debug_collector
+            # Inyectamos un evento con una acción que no es start/end/handoff
+            debug_collector.agent_flow.clear()
+            debug_collector.agent_flow.append({
+                "timestamp": "12:00:00",
+                "agent": "test_agent",
+                "action": "unknown_action"
+            })
+
+            await app._refresh_debug_list()
+            # Debe mostrar "❓ unknown_action"
+
+
+@pytest.mark.asyncio
+async def test_stream_to_chat_update_existing_markdown():
+    """Cubre el else de stream_to_chat (actualización del Markdown existente)."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def mock_stream():
+                yield "Texto 1"
+                # Esto fuerza el else (markdown_widget ya existe)
+                yield "Texto 2"
+                yield {"type": "result", "final_answer": "Texto 2", "steps": 1, "tools_used": [], "usage_total": {}}
+
+            await app.stream_to_chat(mock_stream())
+
+
+@pytest.mark.asyncio
+async def test_app_refresh_debug_list_with_actions():
+    """Cubre el tree de agentes con acciones start, end, handoff y desconocidas."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            from app.core.logger import debug_collector
+            debug_collector.agent_flow.clear()
+
+            # Inyectamos eventos con todas las acciones
+            debug_collector.agent_flow.append(
+                {"timestamp": "12:00:00", "agent": "analyst", "action": "start"})
+            debug_collector.agent_flow.append(
+                {"timestamp": "12:00:01", "agent": "analyst", "action": "end"})
+            debug_collector.agent_flow.append(
+                {"timestamp": "12:00:02", "agent": "writer", "action": "handoff"})
+            debug_collector.agent_flow.append(
+                {"timestamp": "12:00:03", "agent": "writer", "action": "unknown"})
+
+            await app._refresh_debug_list()
+
+            # Verificamos que el Tree se ha poblado
+            tree = app.query_one("#agent-flow-tree", Tree)
+            assert len(tree.root.children) > 0

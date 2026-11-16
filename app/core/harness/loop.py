@@ -94,7 +94,22 @@ class AgentLoop:
                         tool_call_id, f"Tool '{tool_name}' not found.")
                     continue
 
-                result = await tool.run(**args)
+                # 🔥 PROTECCIÓN CONTRA ARGUMENTOS INVÁLIDOS (ej. timeout)
+                try:
+                    result = await tool.run(**args)
+                except TypeError as e:
+                    result = ToolResult(
+                        success=False,
+                        content="",
+                        error=f"Argumentos inválidos para '{tool_name}': {e}"
+                    )
+                except Exception as e:
+                    result = ToolResult(
+                        success=False,
+                        content="",
+                        error=f"Error inesperado en '{tool_name}': {e}"
+                    )
+
                 tools_used.append(tool_name)
 
                 logger.debug(
@@ -203,7 +218,22 @@ class AgentLoop:
                             tool_call_id, f"Tool '{tool_name}' not found.")
                         continue
 
-                    result = await tool.run(**args)
+                    # 🔥 PROTECCIÓN CONTRA ARGUMENTOS INVÁLIDOS (ej. timeout)
+                    try:
+                        result = await tool.run(**args)
+                    except TypeError as e:
+                        result = ToolResult(
+                            success=False,
+                            content="",
+                            error=f"Argumentos inválidos para '{tool_name}': {e}"
+                        )
+                    except Exception as e:
+                        result = ToolResult(
+                            success=False,
+                            content="",
+                            error=f"Error inesperado en '{tool_name}': {e}"
+                        )
+
                     tools_used.append(tool_name)
 
                     # 🔥 Lógica de repair_counts inyectada

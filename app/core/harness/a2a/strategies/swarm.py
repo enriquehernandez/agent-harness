@@ -4,7 +4,7 @@ from app.core.harness.loop import AgentLoop
 from app.core.harness.tool import ToolResult
 from app.core.harness.context import ContextManager
 from app.core.harness.permissions import PermissionGate
-from app.core.logger import logger
+from app.core.logger import logger, log_agent_flow
 from app.core.config import settings
 from app.core.llm import get_llm
 
@@ -37,8 +37,6 @@ class SwarmStrategy(A2AStrategy):
         max_hops = 5
         persisted = self._load_persisted_permissions()
 
-        # logger.info(f"Swarm: iniciando con agente '{current_agent_name}'")
-
         for hop in range(max_hops):
             agent = self.agents.get(current_agent_name)
             if not agent:
@@ -48,6 +46,9 @@ class SwarmStrategy(A2AStrategy):
 
             logger.info(
                 f"Swarm [hop {hop + 1}/{max_hops}]: ejecutando '{current_agent_name}' (model={agent.model or 'default'})")
+
+            # 🔥 Log para el árbol de agentes
+            log_agent_flow(current_agent_name, "start")
 
             # Preparamos el contexto
             if agent.mode == "fork" and context:
@@ -71,10 +72,8 @@ class SwarmStrategy(A2AStrategy):
                 sub_gate.session_allowed.add(pattern)
 
             # Resolvemos el LLM (específico del agente o el del padre)
-            # agent_llm = get_llm(agent.model) if agent.model else self.llm
             if agent.model:
                 # Usamos el mismo proveedor, pero con el modelo específico del agente
-                from app.core.config import settings
                 agent_llm = get_llm(settings.LLM_PROVIDER,
                                     model=agent.model)
             else:
@@ -92,6 +91,9 @@ class SwarmStrategy(A2AStrategy):
             logger.debug(
                 f"Swarm: '{current_agent_name}' respondió: {output[:100]}...")
 
+            # 🔥 Log para el árbol de agentes
+            log_agent_flow(current_agent_name, "end")
+
             history.append(f"{current_agent_name}: {output}")
             visited.add(current_agent_name)
 
@@ -106,6 +108,10 @@ class SwarmStrategy(A2AStrategy):
                 if handoff_target in self.agents and handoff_target not in visited:
                     logger.info(
                         f"Swarm: handoff de {current_agent_name} -> {handoff_target}")
+
+                    # 🔥 Log para el árbol de agentes
+                    log_agent_flow(handoff_target, "handoff")
+
                     current_agent_name = handoff_target
                     current_input = output
                     continue

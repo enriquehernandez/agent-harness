@@ -5,7 +5,7 @@ from app.core.harness.loop import AgentLoop
 from app.core.harness.tool import ToolResult
 from app.core.harness.context import ContextManager
 from app.core.harness.permissions import PermissionGate, Decision
-from app.core.logger import logger
+from app.core.logger import logger, log_agent_flow
 from app.core.config import settings
 from app.core.llm import get_llm
 
@@ -55,6 +55,9 @@ class SupervisorStrategy(A2AStrategy):
         logger.debug(
             f"Supervisor delegando a: {chosen_agent.name} (model={chosen_agent.model or 'default'})")
 
+        # 🔥 Log para el árbol de agentes
+        log_agent_flow(chosen_agent.name, "start")
+
         # Preparamos el contexto según el modo del agente
         if chosen_agent.mode == "fork" and context:
             agent_ctx = ContextManager(
@@ -78,12 +81,8 @@ class SupervisorStrategy(A2AStrategy):
             sub_gate.session_allowed.add(pattern)
 
         # 5. Resolvemos el LLM (específico del agente o el del padre)
-        # agent_llm = get_llm(
-        #     chosen_agent.model) if chosen_agent.model else self.llm
-
         if chosen_agent.model:
             # Usamos el mismo proveedor, pero con el modelo específico del agente
-            from app.core.config import settings
             agent_llm = get_llm(settings.LLM_PROVIDER,
                                 model=chosen_agent.model)
         else:
@@ -96,6 +95,9 @@ class SupervisorStrategy(A2AStrategy):
             permissions=sub_gate,
         )
         result = await loop.run(task, context=agent_ctx)
+
+        # 🔥 Log para el árbol de agentes
+        log_agent_flow(chosen_agent.name, "end")
 
         return ToolResult(
             success=True,

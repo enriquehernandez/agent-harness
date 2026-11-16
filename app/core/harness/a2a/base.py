@@ -13,6 +13,7 @@ class AgentCard:
     tools: ToolRegistry
     # 🔥 Modo de contexto: "fork" (hereda historial) o "isolated" (limpio)
     mode: str = "isolated"
+    model: str | None = None
 
 
 class A2AStrategy(ABC):

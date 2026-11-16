@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     A2A_PARALLEL_AGENTS: str = "analyst,reviewer"  # Para estrategia parallel
     A2A_SWARM_START: str = "analyst"  # Para estrategia swarm
 
+    # Modelos por agente A2A (opcionales, si se dejan vacíos usan el modelo por defecto)
+    A2A_ANALYST_MODEL: str = ""
+    A2A_WRITER_MODEL: str = ""
+    A2A_REVIEWER_MODEL: str = ""
+
     def ensure_dirs(self):
         """Crea los directorios necesarios al iniciar."""
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)

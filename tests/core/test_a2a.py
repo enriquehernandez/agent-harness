@@ -464,3 +464,35 @@ async def test_swarm_max_hops(mock_llm, mock_registry):
 
         assert result.success is True
         assert "Límite de 5 saltos" in result.content
+
+
+@pytest.mark.asyncio
+async def test_supervisor_uses_agent_specific_model(mock_llm, mock_registry):
+    """Verifica que el supervisor usa el modelo específico del agente."""
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.a2a.strategies.supervisor import SupervisorStrategy
+    from unittest.mock import patch
+
+    # Asignamos un modelo al analyst
+    mock_registry["analyst"].model = "openai/gpt-4o"
+    mock_llm.chat.return_value = LLMResponse(content="analyst")
+
+    gate = PermissionGate(ask_user=None)
+    strategy = SupervisorStrategy(mock_llm, mock_registry, permissions=gate)
+
+    with patch("app.core.harness.a2a.strategies.supervisor.AgentLoop") as MockLoop:
+        with patch("app.core.llm.get_llm") as mock_get_llm:
+            mock_agent_llm = MagicMock()
+            mock_get_llm.return_value = mock_agent_llm
+
+            mock_instance = MagicMock()
+            mock_instance.run = AsyncMock(
+                return_value=MagicMock(final_answer="Hecho"))
+            MockLoop.return_value = mock_instance
+
+            await strategy.execute("Analiza")
+
+            # Verificamos que se llamó a get_llm con el modelo del agente
+            mock_get_llm.assert_called_with("openai/gpt-4o")
+            # Verificamos que AgentLoop recibió el LLM específico
+            assert MockLoop.call_args.kwargs["llm"] == mock_agent_llm

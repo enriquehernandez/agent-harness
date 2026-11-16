@@ -74,7 +74,7 @@ async def main():
         "bash": Decision.ALLOW,
         "write_file": Decision.ALLOW,
     }
-    logger.info(f"CheckA2A: gate policies={gate.policies}")  # 🔥 LOG
+    logger.debug(f"CheckA2A: gate policies={gate.policies}")  # 🔥 LOG
 
     # 3. Crear registry de tools para los agentes
     base_tools = ToolRegistry()
@@ -83,48 +83,59 @@ async def main():
     base_tools.register(ReadFileTool())
     base_tools.register(BashTool())
 
+    # Leemos los modelos del .env (vacío = usar el modelo por defecto)
+    analyst_model = settings.A2A_ANALYST_MODEL or None
+    writer_model = settings.A2A_WRITER_MODEL or None
+    reviewer_model = settings.A2A_REVIEWER_MODEL or None
     # 4. Definir los agentes (los mismos que en app.py)
     a2a_agents = {
-        # "analyst": AgentCard(
-        #     name="analyst",
-        #     description="Analiza código y genera reportes.",
-        #     system_prompt=(
-        #         "Eres un analista experto. Analiza el código y reporta hallazgos. "
-        #         "SIEMPRE debes terminar tu respuesta con 'HANDOFF: writer' para que el writer documente tu análisis."
-        #     ),
-        #     tools=base_tools,
-        #     mode="isolated",
-        # ),
         "analyst": AgentCard(
             name="analyst",
-            description="Analiza código y genera reportes.",
-            system_prompt="Eres un analista experto. Analiza el código y reporta hallazgos.",
+            description="Analiza código y datos, genera reportes técnicos.",
+            # system_prompt=(
+            #     "Eres un analista experto. Responde SIEMPRE en el idioma que se te pregunta. "
+            #     "Usa la tool 'read_file' para leer el archivo que se te pide. "
+            #     "NO resuelvas problemas de programación genéricos. "
+            #     "Analiza el archivo y reporta hallazgos. "
+            #     "Termina SIEMPRE tu respuesta con la línea exacta 'HANDOFF: writer'."
+            # ),
+            system_prompt=(
+                "Eres un analista experto. Lee el archivo que se te pide con la tool 'read_file' "
+                "y reporta su contenido en español. "
+                "Termina SIEMPRE tu respuesta con 'HANDOFF: writer'."
+            ),
             tools=base_tools,
             mode="isolated",
+            model=analyst_model,  # 🔥 None si está vacío en .env
         ),
         "writer": AgentCard(
             name="writer",
-            description="Escribe documentación siguiendo un análisis.",
-            system_prompt="Eres un escritor técnico. Documenta con claridad.",
+            description="Escribe documentación y código siguiendo un análisis previo.",
+            system_prompt="Eres un escritor técnico. Documenta con claridad y precisión.",
             tools=base_tools,
             mode="fork",
+            model=writer_model,
         ),
         "reviewer": AgentCard(
             name="reviewer",
-            description="Revisa el trabajo de otros agentes.",
-            system_prompt="Eres un revisor estricto. Señala errores.",
+            description="Revisa el trabajo de otros agentes de forma imparcial.",
+            system_prompt="Eres un revisor estricto. Señala errores y mejoras sin sesgos.",
             tools=base_tools,
             mode="isolated",
+            model=reviewer_model,
         ),
     }
+    logger.debug(a2a_agents)
 
     console.print("\n[bold]2. Agentes registrados:[/bold]")
     table = Table()
     table.add_column("Nombre", style="cyan")
     table.add_column("Modo", style="green")
+    table.add_column("Modelo", style="magenta")
     table.add_column("Descripción", style="yellow")
     for name, card in a2a_agents.items():
-        table.add_row(name, card.mode, card.description)
+        model = card.model or settings.OPENROUTER_MODEL
+        table.add_row(name, card.mode, model, card.description)
     console.print(table)
 
     # 5. Crear el Orquestador

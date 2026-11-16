@@ -1,11 +1,12 @@
+import json
 from app.core.harness.a2a.base import A2AStrategy, AgentCard
 from app.core.harness.loop import AgentLoop
 from app.core.harness.tool import ToolResult
 from app.core.harness.context import ContextManager
 from app.core.harness.permissions import PermissionGate
 from app.core.logger import logger
-import json
 from app.core.config import settings
+from app.core.llm import get_llm
 
 
 class SwarmStrategy(A2AStrategy):
@@ -36,8 +37,7 @@ class SwarmStrategy(A2AStrategy):
         max_hops = 5
         persisted = self._load_persisted_permissions()
 
-        logger.info(f"Swarm: iniciando con agente '{current_agent_name}'")
-        logger.info(f"Swarm: permisos persistidos cargados: {persisted}")
+        # logger.info(f"Swarm: iniciando con agente '{current_agent_name}'")
 
         for hop in range(max_hops):
             agent = self.agents.get(current_agent_name)
@@ -47,17 +47,14 @@ class SwarmStrategy(A2AStrategy):
                 break
 
             logger.info(
-                f"Swarm [hop {hop + 1}/{max_hops}]: ejecutando '{current_agent_name}'")
+                f"Swarm [hop {hop + 1}/{max_hops}]: ejecutando '{current_agent_name}' (model={agent.model or 'default'})")
 
             # Preparamos el contexto
             if agent.mode == "fork" and context:
                 agent_ctx = ContextManager(system_prompt=agent.system_prompt)
                 agent_ctx.messages = context.messages.copy()
-                logger.info(
-                    f"Swarm: contexto fork heredado ({len(agent_ctx.messages)} mensajes)")
             else:
                 agent_ctx = ContextManager(system_prompt=agent.system_prompt)
-                logger.info(f"Swarm: contexto isolated (limpio)")
 
             # Inyectamos el historial previo
             if history:
@@ -68,39 +65,32 @@ class SwarmStrategy(A2AStrategy):
             # Creamos un PermissionGate específico para este subagente
             sub_gate = PermissionGate(
                 ask_user=self.permissions.ask_user if self.permissions else None)
-
             if self.permissions and hasattr(self.permissions, "policies"):
                 sub_gate.policies = self.permissions.policies.copy()
-                logger.info(f"Swarm: políticas heredadas: {sub_gate.policies}")
-            else:
-                logger.warning(
-                    "Swarm: no se pudieron heredar las políticas del padre")
-
             for pattern in persisted:
                 sub_gate.session_allowed.add(pattern)
 
-            logger.info(
-                f"Swarm: sub_gate permisos: policies={sub_gate.policies}, session_allowed={sub_gate.session_allowed}")
+            # Resolvemos el LLM (específico del agente o el del padre)
+            # agent_llm = get_llm(agent.model) if agent.model else self.llm
+            if agent.model:
+                # Usamos el mismo proveedor, pero con el modelo específico del agente
+                from app.core.config import settings
+                agent_llm = get_llm(settings.LLM_PROVIDER,
+                                    model=agent.model)
+            else:
+                agent_llm = self.llm
 
             # Ejecutamos el agente con el sub_gate
             loop = AgentLoop(
-                llm=self.llm,
+                llm=agent_llm,
                 tools=agent.tools,
                 permissions=sub_gate,
-                provider_name="openrouter"
-                max_iterations=3,  # 🔥 Reducir para evitar alucinaciones
             )
-
-            logger.info(
-                f"Swarm: lanzando AgentLoop para '{current_agent_name}' con {len(agent.tools.names())} tools")
-
             result = await loop.run(current_input, context=agent_ctx)
             output = result.final_answer
 
-            logger.info(
+            logger.debug(
                 f"Swarm: '{current_agent_name}' respondió: {output[:100]}...")
-            logger.info(f"Swarm: tools usadas: {result.tools_used}")
-            logger.info(f"Swarm: steps: {result.steps}")
 
             history.append(f"{current_agent_name}: {output}")
             visited.add(current_agent_name)

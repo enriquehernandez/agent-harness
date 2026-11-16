@@ -30,8 +30,8 @@ class BashTool(BaseTool):
 
     async def run(self, command: str) -> ToolResult:
         try:
-            logger.info(
-                f"BashTool: ejecutando '{command}' en cwd='{Path.cwd()}'")
+            # logger.info(
+            #     f"BashTool: ejecutando '{command}' en cwd='{Path.cwd()}'")
 
             # 🔥 Hook: si el comando usa capture_snapshot.py, generar observations.json
             # y añadir el flag --tools automáticamente.
@@ -79,7 +79,7 @@ class BashTool(BaseTool):
                 error_msg = err_str or out_str or f"Exit code {process.returncode}"
                 return ToolResult(success=False, content="", error=error_msg)
 
-            logger.info(f"BashTool: output={out_str[:100]}...")
+            # logger.info(f"BashTool: output={out_str[:100]}...")
             return ToolResult(success=True, content=out_str or "Comando ejecutado sin salida.")
 
         except Exception as e:

@@ -7,6 +7,7 @@ from app.core.harness.context import ContextManager
 from app.core.harness.permissions import PermissionGate, Decision
 from app.core.logger import logger
 from app.core.config import settings
+from app.core.llm import get_llm
 
 
 class SupervisorStrategy(A2AStrategy):
@@ -51,7 +52,8 @@ class SupervisorStrategy(A2AStrategy):
             return ToolResult(success=False, content="", error=f"Agente '{agent_name}' no encontrado.")
 
         # 3. Delegamos al agente elegido
-        logger.info(f"Supervisor delegando a: {chosen_agent.name}")
+        logger.debug(
+            f"Supervisor delegando a: {chosen_agent.name} (model={chosen_agent.model or 'default'})")
 
         # Preparamos el contexto según el modo del agente
         if chosen_agent.mode == "fork" and context:
@@ -63,26 +65,35 @@ class SupervisorStrategy(A2AStrategy):
                 system_prompt=chosen_agent.system_prompt)
 
         # 4. Creamos un PermissionGate específico para el subagente
-        #    que lee los permisos persistidos + hereda el ask_user del padre
-        sub_gate = PermissionGate(ask_user=self.permissions.ask_user)
+        sub_gate = PermissionGate(
+            ask_user=self.permissions.ask_user if self.permissions else None)
 
-        # 🔥 HEREDAMOS LAS POLÍTICAS DEL PADRE (esto faltaba)
-        if self.permissions and hasattr(self.permissions, 'policies'):
+        # Heredamos las políticas del padre
+        if self.permissions and hasattr(self.permissions, "policies"):
             sub_gate.policies = self.permissions.policies.copy()
 
-        # 🔥 Leemos los permisos persistidos de .harness/permissions.json
+        # Leemos los permisos persistidos
         persisted = self._load_persisted_permissions()
         for pattern in persisted:
             sub_gate.session_allowed.add(pattern)
 
-        # 🔥 Heredamos también las políticas del padre
-        sub_gate.policies = self.permissions.policies.copy()
+        # 5. Resolvemos el LLM (específico del agente o el del padre)
+        # agent_llm = get_llm(
+        #     chosen_agent.model) if chosen_agent.model else self.llm
 
-        # 5. Ejecutamos el AgentLoop con el sub_gate
+        if chosen_agent.model:
+            # Usamos el mismo proveedor, pero con el modelo específico del agente
+            from app.core.config import settings
+            agent_llm = get_llm(settings.LLM_PROVIDER,
+                                model=chosen_agent.model)
+        else:
+            agent_llm = self.llm
+
+        # 6. Ejecutamos el AgentLoop
         loop = AgentLoop(
-            llm=self.llm,
+            llm=agent_llm,
             tools=chosen_agent.tools,
-            permissions=sub_gate
+            permissions=sub_gate,
         )
         result = await loop.run(task, context=agent_ctx)
 

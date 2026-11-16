@@ -29,10 +29,10 @@ class ReadFileTool(BaseTool):
             if not target.is_file():
                 return ToolResult(success=False, content="", error=f"File '{path}' does not exist.")
 
-            logger.info(
-                f"ReadFileTool: leyendo '{path}' desde cwd='{Path.cwd()}'")
+            # logger.info(
+            #     f"ReadFileTool: leyendo '{path}' desde cwd='{Path.cwd()}'")
             content = target.read_text(encoding="utf-8")
-            logger.info(f"ReadFileTool: leídos {len(content)} caracteres")
+            # logger.info(f"ReadFileTool: leídos {len(content)} caracteres")
             if len(content) > 10000:
                 content = content[:10000] + "\n\n... [TRUNCATED]"
 

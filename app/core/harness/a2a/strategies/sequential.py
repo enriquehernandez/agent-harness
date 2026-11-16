@@ -1,11 +1,12 @@
+import json
 from app.core.harness.a2a.base import A2AStrategy, AgentCard
 from app.core.harness.loop import AgentLoop
 from app.core.harness.tool import ToolResult
 from app.core.harness.context import ContextManager
 from app.core.harness.permissions import PermissionGate
 from app.core.logger import logger
-import json
 from app.core.config import settings
+from app.core.llm import get_llm
 
 
 class SequentialStrategy(A2AStrategy):
@@ -16,7 +17,6 @@ class SequentialStrategy(A2AStrategy):
         self.sequence = sequence
 
     def _load_persisted_permissions(self) -> set[str]:
-        """Lee los permisos persistidos de .harness/permissions.json."""
         perm_file = settings.permissions_file
         if not perm_file.exists():
             return set()
@@ -29,8 +29,6 @@ class SequentialStrategy(A2AStrategy):
     async def execute(self, task: str, context: ContextManager = None) -> ToolResult:
         current_input = task
         history = []
-
-        # 🔥 Cargamos los permisos persistidos UNA VEZ para todos los agentes
         persisted = self._load_persisted_permissions()
 
         for agent_name in self.sequence:
@@ -40,35 +38,42 @@ class SequentialStrategy(A2AStrategy):
                     f"Sequential: agente '{agent_name}' no encontrado.")
                 continue
 
-            logger.info(f"Sequential ejecutando: {agent_name}")
+            logger.debug(
+                f"Sequential ejecutando: {agent_name} (model={agent.model or 'default'})")
 
-            # Preparamos el contexto según el modo del agente
+            # Preparamos el contexto
             if agent.mode == "fork" and context:
                 agent_ctx = ContextManager(system_prompt=agent.system_prompt)
                 agent_ctx.messages = context.messages.copy()
             else:
                 agent_ctx = ContextManager(system_prompt=agent.system_prompt)
 
-            # 🔥 Creamos un PermissionGate específico para este subagente
-            sub_gate = PermissionGate(ask_user=self.permissions.ask_user)
-
-            # 🔥 HEREDAMOS LAS POLÍTICAS DEL PADRE (esto es lo que faltaba)
+            # Creamos un PermissionGate específico para este subagente
+            sub_gate = PermissionGate(
+                ask_user=self.permissions.ask_user if self.permissions else None)
             if self.permissions and hasattr(self.permissions, "policies"):
                 sub_gate.policies = self.permissions.policies.copy()
-
-            # 🔥 Inyectamos los permisos persistidos (del JSON)
             for pattern in persisted:
                 sub_gate.session_allowed.add(pattern)
 
+            # Resolvemos el LLM (específico del agente o el del padre)
+            # agent_llm = get_llm(agent.model) if agent.model else self.llm
+            if agent.model:
+                # Usamos el mismo proveedor, pero con el modelo específico del agente
+                from app.core.config import settings
+                agent_llm = get_llm(settings.LLM_PROVIDER,
+                                    model=agent.model)
+            else:
+                agent_llm = self.llm
+
             # Ejecutamos el agente
             loop = AgentLoop(
-                llm=self.llm,
+                llm=agent_llm,
                 tools=agent.tools,
                 permissions=sub_gate,
             )
             result = await loop.run(current_input, context=agent_ctx)
 
-            # El output del agente actual se convierte en el input del siguiente
             history.append(f"## {agent_name}\n{result.final_answer}")
             current_input = result.final_answer
 

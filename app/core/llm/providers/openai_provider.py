@@ -51,7 +51,7 @@ class OpenAICompatibleProvider(BaseLLM):
             "messages": messages,
             "tools": tools,
         }
-        logger.debug(json.dumps(payload, indent=2, ensure_ascii=False))
+        # logger.debug(json.dumps(payload, indent=2, ensure_ascii=False))
 
         # response = await self.client.chat.completions.create(
         #     model=self.model,
@@ -120,7 +120,7 @@ class OpenAICompatibleProvider(BaseLLM):
             "messages": messages,
             "tools": tools,
         }
-        logger.debug(json.dumps(payload, indent=2, ensure_ascii=False))
+        # logger.debug(json.dumps(payload, indent=2, ensure_ascii=False))
 
         # stream = await self.client.chat.completions.create(
         #     model=self.model,

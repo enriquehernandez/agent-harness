@@ -5,6 +5,7 @@ from app.core.config import settings
 
 logger = logging.getLogger("agent_harness")
 logger.setLevel(settings.LOG_LEVEL)
+logger.propagate = False  # 🔥 Evita que se propague al root logger (y a stderr)
 
 # 1. File handler (always saves everything)
 log_file = settings.logs_dir / "harness_debug.log"  # 🔥 Ruta centralizada

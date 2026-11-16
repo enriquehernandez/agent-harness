@@ -106,8 +106,8 @@ class AgentLoop:
                 else:
                     attempts = self.repair_counts.get(tool_name, 0) + 1
                     self.repair_counts[tool_name] = attempts
-                    logger.warning(
-                        f"Tool '{tool_name}' falló ({attempts}/3): {result.error}")
+                    # logger.warning(
+                    #     f"Tool '{tool_name}' falló ({attempts}/3): {result.error}")
 
                     if attempts >= 3:
                         logger.error(
@@ -252,5 +252,5 @@ class AgentLoop:
         prompt = usage.get("prompt_tokens", 0)
         completion = usage.get("completion_tokens", 0)
         model = getattr(self.llm, "model_name", "unknown")
-        logger.debug(f"Calculando coste para modelo: '{model}'")
+        # logger.debug(f"Calculando coste para modelo: '{model}'")
         return await self.pricing.get_cost(model, prompt, completion)

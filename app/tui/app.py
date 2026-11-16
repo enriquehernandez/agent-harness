@@ -425,35 +425,42 @@ class AgentHarnessApp(App):
             if tool_name in self.registry:
                 a2a_base_tools.register(self.registry.get(tool_name))
 
+        # Leemos los modelos del .env (vacío = usar el modelo por defecto)
+        analyst_model = settings.A2A_ANALYST_MODEL or None
+        writer_model = settings.A2A_WRITER_MODEL or None
+        reviewer_model = settings.A2A_REVIEWER_MODEL or None
+
         # Definición de los perfiles de agentes (Agent Cards)
         a2a_agents = {
             "analyst": AgentCard(
                 name="analyst",
-                description="Analiza código y genera reportes.",
+                description="Analiza código y datos, genera reportes técnicos.",
                 system_prompt=(
                     "Eres un analista experto. Usa la tool 'read_file' para leer el archivo "
-                    "y luego analízalo. Si la tool devuelve contenido, úsalo. "
-                    "NO digas que no puedes leer el archivo si la tool te dio contenido. "
-                    "Termina SIEMPRE con 'HANDOFF: writer'."
+                    "y luego analízalo en profundidad. Termina SIEMPRE con 'HANDOFF: writer'."
                 ),
-                tools=base_tools,
+                tools=a2a_base_tools,
                 mode="isolated",
+                model=analyst_model,  # 🔥 None si está vacío en .env
             ),
             "writer": AgentCard(
                 name="writer",
                 description="Escribe documentación y código siguiendo un análisis previo.",
                 system_prompt="Eres un escritor técnico. Documenta con claridad y precisión.",
                 tools=a2a_base_tools,
-                mode="fork",  # Hereda el contexto del analyst
+                mode="fork",
+                model=writer_model,
             ),
             "reviewer": AgentCard(
                 name="reviewer",
                 description="Revisa el trabajo de otros agentes de forma imparcial.",
                 system_prompt="Eres un revisor estricto. Señala errores y mejoras sin sesgos.",
                 tools=a2a_base_tools,
-                mode="isolated",  # No se contamina con el trabajo previo
+                mode="isolated",
+                model=reviewer_model,
             ),
         }
+        logger.debug(a2a_agents)
 
         # Registramos la herramienta orquestadora en el registry principal
         orchestrator = OrchestratorTool(
@@ -605,7 +612,7 @@ class AgentHarnessApp(App):
             else:
                 args_str += f"- `{k}`: {v}\n"
 
-        self.query_one("#loading-indicator", LoadingIndicator).display = False
+        # self.query_one("#loading-indicator", LoadingIndicator).display = False
 
         # 🔥 Truncamos el diff si es muy largo (ej. más de 50 líneas)
         if diff_text:

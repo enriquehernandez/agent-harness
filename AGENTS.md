@@ -96,9 +96,11 @@ An autonomous AI agent engine (Harness) built in Python with a Textual TUI, MCP 
 
 El Harness soporta orquestación multi-agente configurable via `.env`:
 
-- `A2A_STRATEGY`: `supervisor` (enrutamiento dinámico) o `sequential` (pipeline).
-- `A2A_SEQUENCE`: Lista de agentes para el pipeline (solo si sequential).
-- **AgentCard**: Define `name`, `description`, `system_prompt`, `tools` y `mode` (`fork`/`isolated`).
-- **OrchestratorTool**: Tool `delegate_task` que el LLM principal usa para delegar.
+- `A2A_STRATEGY`: `supervisor` (dinámico), `sequential` (pipeline), `parallel` (fan-out), `swarm` (handoff).
+- `A2A_SEQUENCE`: Lista de agentes para sequential.
+- `A2A_PARALLEL_AGENTS`: Agentes para parallel.
+- `A2A_SWARM_START`: Agente inicial para swarm.
+- **AgentCard**: Define `name`, `description`, `system_prompt`, `tools`, `mode` (`fork`/`isolated`) y `model` (opcional).
+- **Modelo por agente**: Si `A2A_<AGENT>_MODEL` está definido en `.env`, el subagente usa ese modelo. Si no, usa el modelo del padre.
+- **OrchestratorTool**: Tool `delegate_task` que el LLM principal usa para invocar el sistema A2A.
 - **Permisos**: Los subagentes heredan el `PermissionGate` del padre y leen `.harness/permissions.json`.
-- **Dashboard**: Muestra el coste total acumulado de la sesión.

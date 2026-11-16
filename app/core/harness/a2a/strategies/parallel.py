@@ -3,7 +3,9 @@ from app.core.harness.a2a.base import A2AStrategy, AgentCard
 from app.core.harness.loop import AgentLoop
 from app.core.harness.tool import ToolResult
 from app.core.harness.context import ContextManager
+from app.core.harness.permissions import PermissionGate
 from app.core.logger import logger
+from app.core.llm import get_llm
 
 
 class ParallelStrategy(A2AStrategy):
@@ -21,11 +23,26 @@ class ParallelStrategy(A2AStrategy):
         else:
             agent_ctx = ContextManager(system_prompt=agent.system_prompt)
 
+        # Creamos un PermissionGate específico para este subagente
+        sub_gate = PermissionGate(
+            ask_user=self.permissions.ask_user if self.permissions else None)
+        if self.permissions and hasattr(self.permissions, "policies"):
+            sub_gate.policies = self.permissions.policies.copy()
+
+        # Resolvemos el LLM (específico del agente o el del padre)
+        # agent_llm = get_llm(agent.model) if agent.model else self.llm
+        if agent.model:
+            # Usamos el mismo proveedor, pero con el modelo específico del agente
+            from app.core.config import settings
+            agent_llm = get_llm(settings.LLM_PROVIDER,
+                                model=agent.model)
+        else:
+            agent_llm = self.llm
+
         loop = AgentLoop(
-            llm=self.llm,
+            llm=agent_llm,
             tools=agent.tools,
-            permissions=self.permissions,
-            provider_name="openrouter"  # Heredado del padre
+            permissions=sub_gate,
         )
         result = await loop.run(task, context=agent_ctx)
         return agent.name, result.final_answer
@@ -42,13 +59,12 @@ class ParallelStrategy(A2AStrategy):
         if not tasks:
             return ToolResult(success=False, content="", error="Ningún agente válido encontrado.")
 
-        logger.info(
+        logger.debug(
             f"Parallel lanzando {len(tasks)} agentes: {self.agents_to_run}")
 
-        # 🔥 Lanzamos todos en paralelo con asyncio.gather
+        # Lanzamos todos en paralelo con asyncio.gather
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Consolidamos
         combined = []
         for res in results:
             if isinstance(res, Exception):

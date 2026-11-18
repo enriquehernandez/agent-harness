@@ -5,9 +5,12 @@ from app.core.config import settings
 
 logger = logging.getLogger("agent_harness")
 logger.setLevel(settings.LOG_LEVEL)
+logger.propagate = False  # 🔥 Evita que se propague al root logger (y a stderr)
 
 # 1. File handler (always saves everything)
-file_handler = logging.FileHandler("harness_debug.log", encoding="utf-8")
+log_file = settings.logs_dir / "harness_debug.log"  # 🔥 Ruta centralizada
+
+file_handler = logging.FileHandler(log_file, encoding="utf-8")
 file_handler.setFormatter(logging.Formatter(
     '[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
 logger.addHandler(file_handler)
@@ -19,8 +22,20 @@ class DebugEventCollector(logging.Handler):
     def __init__(self):
         super().__init__()
         self.events = []
+        self.agent_flow = []  # 🔥 Nueva lista para el flujo de agentes
 
     def emit(self, record):
+        # 🔥 Detectar eventos especiales de A2A
+        if record.name == "agent_flow":
+            self.agent_flow.append({
+                "timestamp": datetime.fromtimestamp(record.created).strftime("%H:%M:%S"),
+                "agent": getattr(record, "agent_name", "unknown"),
+                "action": getattr(record, "action", "unknown"),
+            })
+            if len(self.agent_flow) > 50:
+                self.agent_flow.pop(0)
+            return
+
         if record.levelno >= logging.DEBUG:
             msg = record.getMessage()
             payload = msg
@@ -31,7 +46,22 @@ class DebugEventCollector(logging.Handler):
                 if msg.strip().startswith("{"):
                     parsed = json.loads(msg)
                     if "model" in parsed and "messages" in parsed:
-                        summary = f"LLM Request ({parsed['model']})"
+                        # 🔥 Extraemos el último mensaje del usuario
+                        user_msg = ""
+                        for m in reversed(parsed["messages"]):
+                            if m["role"] == "user":
+                                content = m.get("content", "")
+                                if isinstance(content, list):
+                                    # Multimodal: buscamos el texto
+                                    for c in content:
+                                        if c.get("type") == "text":
+                                            user_msg = c.get("text", "")
+                                            break
+                                else:
+                                    user_msg = content
+                                break
+
+                        summary = f"LLM Request ({parsed['model']}): {user_msg[:60]}..."
                     else:
                         summary = "JSON Payload"
                     payload = json.dumps(parsed, indent=2, ensure_ascii=False)
@@ -54,6 +84,34 @@ debug_collector = DebugEventCollector()
 logger.addHandler(debug_collector)
 
 
+# # Handler para stdout (útil para scripts)
+# stream_handler = logging.StreamHandler()
+# stream_handler.setFormatter(logging.Formatter(
+#     '[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
+# logger.addHandler(stream_handler)
+
+
 def get_debug_events():
     """Returns the list of captured debug events."""
     return debug_collector.events
+
+
+def log_agent_flow(agent_name: str, action: str):
+    """Emite un evento de flujo de agente al collector para el diagrama."""
+    record = logging.LogRecord(
+        name="agent_flow",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=0,
+        msg=f"{agent_name}:{action}",
+        args=(),
+        exc_info=None,
+    )
+    record.agent_name = agent_name
+    record.action = action
+    debug_collector.emit(record)
+
+
+def get_agent_flow():
+    """Devuelve el flujo de agentes para el panel de debug."""
+    return debug_collector.agent_flow

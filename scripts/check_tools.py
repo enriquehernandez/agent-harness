@@ -1,4 +1,5 @@
 import asyncio
+from app.core.harness.permissions import Decision, PermissionGate
 from app.core.llm import get_llm
 from app.core.llm.base import LLMResponse
 from app.core.harness import AgentLoop, ToolRegistry
@@ -37,8 +38,14 @@ async def main():
         ),
     ])
 
+    gate = PermissionGate()
+    gate.policies = {
+        "read_file": Decision.ALLOW,
+        "bash": Decision.ALLOW,
+    }
+
     # 3. Ejecutamos el bucle
-    loop = AgentLoop(llm=fake, tools=registry)
+    loop = AgentLoop(llm=fake, tools=registry, permissions=gate)
     result = await loop.run("Revisa la configuración del proyecto.")
 
     print("=== Resultado del AgentLoop con Herramientas Locales ===")

@@ -2,7 +2,8 @@ import json
 import logging
 from pathlib import Path
 
-from app.core.logger import logger, get_debug_events
+from app.core.config import settings
+from app.core.logger import logger
 from app.core.harness.context import ContextManager
 from app.core.llm.registry import list_providers
 from app.core.llm.base import BaseLLM
@@ -29,14 +30,28 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `/provider [nombre]` | Muestra o cambia el proveedor (openai/openrouter/etc) |\n"
             "| `/tools` | Lista las herramientas disponibles en el Registry |\n"
             "| `/subagents` | Lista los subagentes registrados |\n"
+            "| `/skills` | Lista todas las habilidades (tools + subagents) |\n"
             "| `/tokens` | Muestra el uso estimado de tokens |\n"
+            "| `/cost` | 💰 Muestra el coste real (USD) de la última llamada |\n"
             "| `/compact [estrategia]` | Fuerza la compactación (sliding/summarize/none) |\n"
             "| `/verbose [on/off]` | Muestra/oculta los detalles de la compactación |\n"
             "| `/clear` | Limpia el historial de conversación |\n"
             "| `/debug [on/off/clear]` | Controla el panel de debug |\n"
             "| `/permissions` | Gestiona permisos guardados |\n"
+            "| `/export [formato]` | Exporta la conversación (markdown/json) |\n"
+            "| `/memory [clear/migrate]` | Gestiona la memoria persistente |\n"
+            "| `/session [list/load/delete/save]` | Gestiona las sesiones guardadas |\n"
+            "| `/doctor` | 🩺 Diagnóstico del estado del sistema |\n"
+            "| `/trace` | 📊 Muestra el uso de tokens real de la última llamada |\n"
             "| `/quit` | Sale del programa |\n"
+            "\n### 💡 Skills\n\n"
+            "Escribe `@` seguido del nombre de la skill para cargarla automáticamente.\n"
+            "Ejemplo: `@improve-codebase-architecture ¿Cómo está mi proyecto?`\n"
+            "\n### 💵 Pricing\n\n"
+            "El coste se calcula usando `pricing_config.json` y `pricing.json`.\n"
+            "Puedes ajustar el TTL de la caché de precios en `.env` con `PRICING_CACHE_TTL_DAYS`.\n"
         )
+
         await app.write_to_chat(help_text, type="agent")
         return True
 
@@ -49,10 +64,177 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `Ctrl + L` | Limpiar todo el historial del chat |\n"
             "| `Ctrl + Q` | Salir de la aplicación |\n"
             "| `F1` | Alternar panel de debug |\n"
-            "| `Tab` | Navegar por los eventos (si el debug está abierto) |\n"
             "| `Enter` | Enviar el mensaje o comando |\n"
         )
         await app.write_to_chat(shortcuts, type="agent")
+        return True
+
+    elif cmd == "/doctor":
+
+        txt = "### 🩺 Diagnóstico del Sistema\n\n"
+        issues = 0
+
+        # 1. LLM Config
+        txt += "#### ⚙️ Configuración del LLM\n"
+        if settings.LLM_PROVIDER == "fake":
+            txt += "- ⚠️ Usando `FakeLLM` (no hay conexión real a IA).\n"
+        else:
+            api_key = getattr(
+                settings, f"{settings.LLM_PROVIDER.upper()}_API_KEY", "")
+            if not api_key or "..." in api_key:
+                txt += f"- ❌ Falta `{settings.LLM_PROVIDER.upper()}_API_KEY` válida en .env.\n"
+                issues += 1
+            else:
+                txt += f"- ✅ LLM configurado: `{settings.LLM_PROVIDER}`.\n"
+
+        # 2. MCP Config
+        txt += "\n#### 🔌 Servidores MCP\n"
+        config_path = Path("mcp_config.json")
+        if not config_path.exists():
+            txt += "- ⚠️ No existe `mcp_config.json`. El agente no tendrá tools remotas.\n"
+        else:
+            try:
+                config = json.loads(config_path.read_text())
+                servers = config.get("mcpServers", {})
+                if not servers:
+                    txt += "- ⚠️ No hay servidores MCP configurados.\n"
+                for name, conf in servers.items():
+                    cmd = conf.get("command", "")
+                    txt += f"- ✅ `{name}` (`{cmd}`)\n"
+            except Exception as e:
+                txt += f"- ❌ Error parseando `mcp_config.json`: {e}\n"
+                issues += 1
+
+        # 3. Skills
+        txt += "\n#### 🧠 Skills\n"
+        skills_dir = Path(".agents/skills")
+        if not skills_dir.exists():
+            txt += "- ⚠️ No existe el directorio `.agents/skills/`.\n"
+        else:
+            installed = [d.name for d in skills_dir.iterdir() if (
+                d / "SKILL.md").exists()]
+            if not installed:
+                txt += "- ⚠️ No hay skills instaladas.\n"
+            else:
+                txt += f"- ✅ {len(installed)} skill(s) detectada(s): `{', '.join(installed)}`\n"
+
+        # 4. Memoria
+        txt += "\n#### 💾 Memoria\n"
+        txt += f"- Backend: `{settings.MEMORY_BACKEND}`\n"
+
+        if settings.MEMORY_BACKEND == "sqlite":
+            if not settings.memory_db.exists():
+                txt += "- ⚠️ La base de datos SQLite (FTS5) aún no se ha creado.\n"
+            else:
+                txt += f"- ✅ Base de datos FTS5 en `{settings.memory_db}`.\n"
+
+        elif settings.MEMORY_BACKEND == "vector":
+            if not settings.vector_db.exists():
+                txt += "- ⚠️ La base de datos vectorial aún no se ha creado (se creará al guardar).\n"
+            else:
+                txt += f"- ✅ Base de datos vectorial en `{settings.vector_db}`.\n"
+
+        elif settings.MEMORY_BACKEND == "files":
+            if not settings.memory_files_dir.exists():
+                txt += "- ⚠️ El directorio de archivos de memoria aún no se ha creado.\n"
+            else:
+                txt += f"- ✅ Archivos de memoria en `{settings.memory_files_dir}`.\n"
+
+        else:
+            txt += f"- ✅ Almacenamiento en `{settings.DATA_DIR}`.\n"
+
+        # 5. Sesiones y Permisos
+        txt += "\n#### 🔐 Seguridad y Sesiones\n"
+        if settings.permissions_file.exists():
+            txt += "- ✅ Archivo de permisos persistentes existe.\n"
+        else:
+            txt += "- ⚠️ No hay permisos guardados (todo pedirá confirmación).\n"
+
+        sessions = app.session_manager.list_sessions(
+        ) if hasattr(app, "session_manager") else []
+        txt += f"- Sesiones guardadas: `{len(sessions)}`\n"
+
+        # Resultado final
+        if issues == 0:
+            txt += "\n**✨ Todo en orden. Listo para trabajar.**"
+        else:
+            txt += f"\n**⚠️ Se encontraron {issues} problema(s) crítico(s).**"
+
+        await app.write_to_chat(txt, type="agent")
+        return True
+
+    elif cmd == "/trace":
+        usage = getattr(app, "last_usage", None)
+        model = getattr(app, "last_model", "Desconocido")
+
+        if not usage:
+            await app.write_to_chat("⚠️ No hay datos de uso recientes. Envía un mensaje primero.", type="system")
+            return True
+
+        prompt = usage.get("prompt_tokens", 0)
+        completion = usage.get("completion_tokens", 0)
+        cached = usage.get("prompt_tokens_details", {}).get(
+            "cached_tokens", 0) if isinstance(usage.get("prompt_tokens_details"), dict) else 0
+        total = usage.get("total_tokens", 0)
+
+        txt = f"### 📊 Traza de la Última Llamada\n\n"
+        txt += f"**Modelo:** `{model}`\n\n"
+        txt += "| Métrica | Tokens |\n"
+        txt += "| :--- | :--- |\n"
+        txt += f"| Prompt (Entrada) | `{prompt}` |\n"
+        txt += f"| Completion (Salida) | `{completion}` |\n"
+        if cached:
+            txt += f"| 🎯 Cached (Ahorro) | `{cached}` |\n"
+        txt += f"| **Total** | `{total}` |\n\n"
+
+        if cached > 0:
+            txt += f"✨ *Prompt Caching activo: {cached} tokens leídos de caché.*\n"
+        else:
+            txt += "💡 *Consejo: Activa `ENABLE_PROMPT_CACHING=true` en .env para ahorrar costes en prompts largos.*\n"
+
+        await app.write_to_chat(txt, type="agent")
+        return True
+
+    elif cmd == "/cost":
+        usage = getattr(app, "last_usage", None)
+        cost = getattr(app, "last_cost", 0.0)
+        total_cost = getattr(app, "total_cost", 0.0)
+        model = getattr(app, "last_model", "Desconocido")
+
+        if not usage:
+            await app.write_to_chat("⚠️ No hay datos de coste. Envía un mensaje primero.", type="system")
+            return True
+
+        # 🔥 Comprobamos si el modelo está en el catálogo de precios
+        is_known_model = False
+        if app.agent_loop and app.agent_loop.pricing and app.agent_loop.pricing._prices:
+            is_known_model = model in app.agent_loop.pricing._prices
+
+        prompt = usage.get("prompt_tokens", 0)
+        completion = usage.get("completion_tokens", 0)
+        total = usage.get("total_tokens", 0)
+
+        txt = f"### 💰 Coste de la Última Llamada\n\n"
+        txt += f"**Modelo:** `{model}`\n\n"
+
+        if not is_known_model:
+            txt += "⚠️ **El modelo no se encuentra en el catálogo de precios.**\n"
+            txt += "💡 *Verifica que `pricing_config.json` apunta a la API correcta y que el caché se ha generado.*\n\n"
+
+        txt += "| Concepto | Tokens | Coste (USD) |\n"
+        txt += "| :--- | :--- | :--- |\n"
+        txt += f"| Entrada | `{prompt}` | `${(cost * (prompt / total) if total else 0):.6f}` |\n"
+        txt += f"| Salida | `{completion}` | `${(cost * (completion / total) if total else 0):.6f}` |\n"
+        txt += f"| **Total** | `{total}` | **`${cost:.6f}`** |\n"
+
+        txt += f"\n**Coste acumulado de la sesión:** `${total_cost:.6f}`\n"
+
+        if is_known_model and cost == 0.0:
+            txt += "✨ *Este modelo es **gratuito** en el proveedor actual.*\n"
+        elif not is_known_model:
+            txt += "❌ *No se pudo calcular el coste (modelo desconocido).*\n"
+
+        await app.write_to_chat(txt, type="agent")
         return True
 
     elif cmd == "/tools":
@@ -96,6 +278,73 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             txt += f"| `{name}` | {tool.description[:80]}... |\n"
 
         await app.write_to_chat(txt, type="agent")
+        return True
+
+    elif cmd == "/skills":
+        if not app.registry:
+            await app.write_to_chat("❌ El Registry no está inicializado.", type="system")
+            return True
+
+        # Tools del registry
+        tools = app.registry.names()
+        subagents = [name for name in tools if name.startswith("delegate_")]
+        regular_tools = [
+            name for name in tools if not name.startswith("delegate_")]
+
+        # Skills instaladas en .agents/skills/
+        from app.tools.skills import LoadSkillTool
+        skill_tool = LoadSkillTool()
+        installed_skills = skill_tool.discover_skills()
+
+        txt = "### 🧠 Skills Disponibles\n\n"
+
+        txt += "#### 🛠️ Herramientas Locales\n"
+        for name in regular_tools:
+            tool = app.registry.get(name)
+            origin = "MCP" if "[MCP]" in tool.description else "Local"
+            txt += f"- `{name}` ({origin}): {tool.description[:60]}...\n"
+
+        if subagents:
+            txt += "\n#### 🤖 Subagentes\n"
+            for name in subagents:
+                tool = app.registry.get(name)
+                txt += f"- `{name}`: {tool.description[:60]}...\n"
+
+        if installed_skills:
+            txt += "\n#### 📦 Skills Instaladas (usa `@nombre` para cargarlas)\n"
+            for name in installed_skills:
+                txt += f"- `@{name}`\n"
+        else:
+            txt += "\n_No hay skills instaladas en `.agents/skills/`._\n"
+
+        await app.write_to_chat(txt, type="agent")
+        return True
+
+    elif cmd == "/reload-skills":
+        from app.tools.skills import LoadSkillTool
+        from app.tui.suggester import SkillSuggester
+
+        skill_tool = LoadSkillTool()
+        skills = skill_tool.discover_skills()
+
+        # Actualizamos el system_prompt del contexto
+        skills_list = ", ".join(
+            [f"'{s}'" for s in skills]) if skills else "ninguna"
+        current_prompt = app.ctx.messages[0]["content"]
+        # Buscamos la línea de "Available skills:" y la actualizamos
+        import re
+        new_prompt = re.sub(
+            r"Available skills:.*?\. ",
+            f"Available skills: {skills_list}. ",
+            current_prompt
+        )
+        app.ctx.messages[0]["content"] = new_prompt
+
+        # Actualizamos el SkillSuggester
+        input_box = app.query_one("#input-box")
+        # (El SkillSuggester se recrea en el próximo on_mount, pero podemos forzar)
+
+        await app.write_to_chat(f"✅ Skills recargadas: {', '.join(skills)}", type="system")
         return True
 
     elif cmd == "/tokens":
@@ -221,9 +470,10 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
         return True
 
     elif cmd == "/permissions":
-        perm_file = Path(".harness_permissions.json")
+        perm_file = settings.permissions_file
         if not perm_file.exists():
-            await app.write_to_chat("No hay permisos guardados en `.harness_permissions.json`.", type="system")
+            await app.write_to_chat(
+                f"No hay permisos guardados en `{perm_file}`.", type="system")
             return True
 
         data = json.loads(perm_file.read_text())
@@ -253,6 +503,105 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             await app.write_to_chat(f"✅ Exportado a `{file_path}` en formato `{fmt}`.", type="system")
         else:
             await app.write_to_chat(f"```\n{text}\n```", type="agent")
+        return True
+
+    elif cmd == "/memory":
+        if len(parts) > 1:
+            subcmd = parts[1].lower()
+            if subcmd == "clear":
+                if getattr(app, "memory_store", None) is not None:
+                    await app.memory_store.clear()
+                    await app.write_to_chat("🧹 Memoria limpiada.", type="system")
+                else:
+                    await app.write_to_chat("❌ Store no inicializado.", type="system")
+            elif subcmd == "migrate":
+                if getattr(app, "memory_store", None) is None:
+                    await app.write_to_chat("❌ Store no inicializado.", type="system")
+                    return True
+                target = parts[2].lower() if len(parts) > 2 else "sqlite"
+                from app.core.harness.memory.factory import create_memory_store
+                from app.tools.memory import MemorySaveTool, MemoryRecallTool  # 🔥 Importamos tools
+
+                new_store = create_memory_store(target)
+                old_entries = await app.memory_store.get_all()
+                for entry in old_entries:
+                    await new_store.save(entry)
+
+                app.memory_store = new_store
+                # 🔥 Re-registramos las tools con el nuevo store
+                app.registry.register(MemorySaveTool(store=new_store))
+                app.registry.register(MemoryRecallTool(store=new_store))
+
+                await app.write_to_chat(f"✅ Memoria migrada a `{target}` y herramientas actualizadas.", type="system")
+            else:
+                await app.write_to_chat("Uso: `/memory clear` o `/memory migrate sqlite`", type="system")
+        return True
+
+    elif cmd == "/session":
+        if len(parts) > 1:
+            subcmd = parts[1].lower()
+            if subcmd == "list":
+                from app.core.harness.session import SessionManager
+                sessions = SessionManager.list_sessions()
+                if not sessions:
+                    await app.write_to_chat("No hay sesiones guardadas.", type="system")
+                    return True
+
+                txt = "### 📁 Sesiones Guardadas\n\n"
+                txt += "| ID | Fecha | Mensajes |\n"
+                txt += "| :--- | :--- | :--- |\n"
+                for s in sessions:
+                    txt += f"| `{s['id']}` | {s['timestamp'][:19]} | {s['message_count']} |\n"
+
+                await app.write_to_chat(txt, type="agent")
+                return True
+
+            elif subcmd == "load":
+                if len(parts) > 2:
+                    session_id = parts[2]
+                    from app.core.harness.session import SessionManager
+                    sm = SessionManager(session_id)
+                    messages = sm.load()
+                    if messages:
+                        app.ctx.messages = messages
+                        app.session_manager = sm
+                        await app.write_to_chat(f"✅ Sesión `{session_id}` cargada ({len(messages)} mensajes).", type="system")
+                    else:
+                        await app.write_to_chat(f"❌ Sesión `{session_id}` no encontrada.", type="system")
+                else:
+                    await app.write_to_chat("Uso: `/session load <id>`", type="system")
+
+            elif subcmd == "delete":
+                if len(parts) > 2:
+                    session_id = parts[2]
+                    from app.core.harness.session import SessionManager
+                    if SessionManager.delete_session(session_id):
+                        await app.write_to_chat(f"✅ Sesión `{session_id}` eliminada.", type="system")
+                    else:
+                        await app.write_to_chat(f"❌ Sesión `{session_id}` no encontrada.", type="system")
+                else:
+                    await app.write_to_chat("Uso: `/session delete <id>`", type="system")
+
+            elif subcmd == "save":
+                if getattr(app, "session_manager", None) and app.ctx:
+                    # 🔥 Pasamos app.agent_loop
+                    file_path = app.session_manager.save(
+                        app.ctx, getattr(app, "agent_loop", None))
+                    await app.write_to_chat(f"✅ Sesión guardada en `{file_path}`.", type="system")
+                else:
+                    await app.write_to_chat("❌ No hay sesión activa.", type="system")
+
+            else:
+                await app.write_to_chat("Uso: `/session [list|load|delete|save] [id]`", type="system")
+        else:
+            await app.write_to_chat(
+                "### 💾 Comandos de Sesión\n\n"
+                "- `/session list` → Lista todas las sesiones guardadas\n"
+                "- `/session load <id>` → Carga una sesión\n"
+                "- `/session delete <id>` → Elimina una sesión\n"
+                "- `/session save` → Guarda la sesión actual",
+                type="agent"
+            )
         return True
 
     else:

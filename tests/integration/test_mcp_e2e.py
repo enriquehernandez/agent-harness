@@ -5,6 +5,8 @@ from app.core.harness.loop import AgentLoop
 from app.core.harness.permissions import PermissionGate, Decision
 from app.core.llm.providers.fake import FakeLLM
 from app.core.llm.base import LLMResponse
+import os
+os.environ["HARNESS_E2E"] = "1"
 
 
 @pytest.mark.asyncio

@@ -2,18 +2,11 @@
   "mcpServers": {
     "git": {
       "command": "uvx",
-      "args": [
-        "mcp-server-git",
-        "--repository",
-        "/Users/enriquehernandezleiva/Proyectos/ehl/llm-github/agent-harness"
-      ]
+      "args": ["mcp-server-git", "--repository", "."]
     },
     "filesystem": {
       "command": "bash",
-      "args": [
-        "scripts/filesystem_mcp_wrapper.sh",
-        "/Users/enriquehernandezleiva/Proyectos/ehl/llm-github/agent-harness"
-      ]
+      "args": ["scripts/filesystem_mcp_wrapper.sh", "."]
     },
     "fetch": {
       "command": "uvx",

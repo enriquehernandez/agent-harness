@@ -21,10 +21,29 @@ class FakeLLM(BaseLLM):
             return resp
         return LLMResponse(content="Simulated response by FakeLLM.")
 
-    async def stream_chat(self, messages, tools=None, **kwargs) -> AsyncIterator[str]:
+    async def stream_chat(self, messages, tools=None, **kwargs) -> AsyncIterator:
         resp = await self.chat(messages, tools, **kwargs)
+
+        # 1. Emitimos el texto si lo hay
         if resp.content:
             yield resp.content
+
+        # 2. Emitimos los tool_calls si los hay
+        if resp.tool_calls:
+            for tc in resp.tool_calls:
+                yield {
+                    "type": "tool_call",
+                    "id": tc["id"],
+                    "name": tc["name"],
+                    "arguments": tc["arguments"]
+                }
+
+        # 3. Emitimos el usage si lo hay
+        if resp.usage:
+            yield {
+                "type": "usage",
+                "usage": resp.usage
+            }
 
     def count_tokens(self, text: str) -> int:
         return len(text) // 4

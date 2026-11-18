@@ -1,5 +1,6 @@
 ## Descripción
 <!-- Explica brevemente qué cambios introduce este PR -->
+<!-- git log origin/main..HEAD --oneline -->
 
 ## Issue relacionado
 <!-- Cierra el issue con: Closes #123 -->

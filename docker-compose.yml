@@ -13,7 +13,6 @@ services:
       - .:/app
       # Montamos los archivos locales de configuración
       - ./mcp_config.json:/app/mcp_config.json:ro
-      - ~/.harness_memory:/app/.harness_memory
-      - ~/.harness_permissions.json:/app/.harness_permissions.json
+      - ./.harness:/app/.harness # 🔥 Persistimos toda la carpeta de datos
     working_dir: /app
     command: uv run python -m app.main

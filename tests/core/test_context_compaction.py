@@ -433,3 +433,63 @@ async def test_compaction_line_37_hardcoded(fake_llm):
             mock.return_value = messages
             result = await strategy.compact(messages, fake_llm)
             assert len(result) == 4
+
+
+@pytest.mark.asyncio
+async def test_add_user_with_image_empty():
+    """Cubre el early return de add_user_with_image."""
+    from app.core.harness.context import ContextManager
+    ctx = ContextManager()
+    initial_len = len(ctx.messages)
+
+    # Sin texto y sin imágenes
+    ctx.add_user_with_image("", [])
+    assert len(ctx.messages) == initial_len  # No añadió nada
+
+
+@pytest.mark.asyncio
+async def test_add_user_with_image_no_text():
+    """Cubre el else de context.py línea 99 (sin texto pero con imagen)."""
+    from app.core.harness.context import ContextManager
+    ctx = ContextManager()
+    ctx.add_user_with_image("", ["data:image/png;base64,fake"])
+
+    assert len(ctx.messages) == 1
+    assert ctx.messages[0]["content"][0]["text"] == "[Imagen adjunta]"
+
+
+@pytest.mark.asyncio
+async def test_compaction_edge_cases_all(fake_llm):
+    """Cubre las líneas 31, 37 y 69 de compaction.py."""
+    from app.core.harness.compaction import SummarizationStrategy, SlidingWindowStrategy
+    from unittest.mock import patch
+
+    # 1. Forzar línea 31: safe_split <= start_idx
+    strategy = SummarizationStrategy(keep_last_n=10)
+    messages = [
+        {"role": "system", "content": "System"},
+        {"role": "user", "content": "A" * 100},
+    ]
+    result = await strategy.compact(messages, fake_llm)
+    assert len(result) == 2
+
+    # 2. Forzar línea 37: old_msgs vacío (usando mock)
+    strategy2 = SummarizationStrategy(keep_last_n=2)
+    messages2 = [
+        {"role": "system", "content": "System"},
+        {"role": "user", "content": "Msg 1"},
+        {"role": "user", "content": "Msg 2"},
+        {"role": "user", "content": "Msg 3"},
+    ]
+    with patch.object(strategy2, "_find_safe_split_index", return_value=1):
+        result2 = await strategy2.compact(messages2, fake_llm)
+        assert len(result2) == 4
+
+    # 3. Forzar línea 69: SlidingWindow con menos mensajes que keep_last_n
+    sliding = SlidingWindowStrategy(keep_last_n=5)
+    messages3 = [
+        {"role": "system", "content": "System"},
+        {"role": "user", "content": "Msg 1"},
+    ]
+    result3 = await sliding.compact(messages3, fake_llm)
+    assert len(result3) == 2

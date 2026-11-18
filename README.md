@@ -5,7 +5,8 @@
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white) ![Textual](https://img.shields.io/badge/Textual-TUI-FF4B4B?style=for-the-badge&logo=textual&logoColor=white) 
 ![OpenRouter](https://img.shields.io/badge/OpenRouter-Provider--Agnostic-6467F2?style=for-the-badge) 
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)
-![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=for-the-badge)
+![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=for-the-badge) ![Skills](https://img.shields.io/badge/Skills-Markdown-blue?style=for-the-badge)
+![Memory](https://img.shields.io/badge/Memory-SQLite-green?style=for-the-badge)
 
 Un **Agent Harness** de nivel producción construido desde cero. Este proyecto no es solo un "chatbot con herramientas"; es un motor de ejecución que gestiona el ciclo de vida completo de un agente autónomo: razonamiento, ejecución de herramientas locales y remotas (**MCP**), delegación a **subagentes**, multimodalidad (**imágenes**), gestión de permisos con **diff-first**, streaming en tiempo real y una interfaz de terminal (**TUI**) moderna construida con Textual.
 
@@ -23,6 +24,55 @@ Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible 
 - **🖼️ Multimodalidad:** Soporte para arrastrar y pegar imágenes (codificadas en Base64) que el LLM puede analizar.
 - **💻 TUI con Textual:** Una interfaz moderna con temas oscuros, autocompletado, *modales* interactivos, panel de debug (F1) y barra de adjuntos.
 - **🧪 100% de Cobertura:** Suite de tests robusta con `pytest` y `textual.pilot`.
+- **💰 Telemetría de Costes:** Calcula el coste real en USD de cada llamada usando la API del proveedor (OpenRouter) o un JSON manual (OpenAI/Groq). Caché configurable por `.env`.
+- **🔍 Búsqueda Semántica:** Backend de memoria vectorial (`sqlite-vec` + `fastembed`). Encuentra recuerdos por significado, no por palabra exacta.
+- **🎨 Renderizado Rico:** La TUI renderiza tablas, árboles y bloques de código con Rich, no solo Markdown.
+- **🛡️ MCP Resiliente:** Reconexión automática con backoff exponencial si un servidor MCP cae.
+- **🤖 Agent-to-Agent (A2A):** Orquestación multi-agente con 4 estrategias (supervisor, sequential, parallel, swarm) configurable via `.env`.
+- **🎨 Renderizado Rico:** La TUI renderiza tablas, árboles y bloques de código con Rich, no solo Markdown.
+- **🖼️ Renderizado de Imágenes:** Las imágenes pegadas/arrastradas se muestran en el chat con `textual-image`.
+- **💰 Telemetría de Costes:** Calcula el coste real en USD de cada llamada usando la API del proveedor (OpenRouter) o un JSON manual (OpenAI/Groq). Caché configurable por `.env`.
+- **📄 Lectura de Documentos:** El agente puede leer y resumir PDFs, Word, Excel y PowerPoint usando la tool `read_document`.
+
+
+### 📦 Skills (Habilidades)
+El Harness puede cargar **skills** desde `.agents/skills/`. Son manuales en Markdown
+(`SKILL.md`) que le enseñan al agente a realizar tareas complejas (ej. auditar la
+arquitectura, generar reportes HTML, etc.).
+
+- **Descubrimiento automático:** El agente detecta las skills al arrancar.
+- **Carga con `@`:** Escribe `@nombre-de-skill` en el input para cargarla.
+- **Autocompletado:** Presiona `Tab` después de `@` para ver las skills disponibles.
+
+**Ejemplo:**
+```text
+🐚 > @improve-codebase-architecture ¿Cómo está la arquitectura de mi proyecto?
+```
+
+### 💾 Memoria Persistente (SQLite + Vectores)
+
+El agente recuerda hechos importantes entre sesiones. Backends soportados:
+
+- **`sqlite`** (por defecto): FTS5 para búsqueda por palabras.
+- **`vector`**: Búsqueda semántica usando `sqlite-vec` + `fastembed`. Guarda en `.harness/vector.db`.
+- **`files`**: Archivos Markdown legibles por humanos.
+- **`memory`**: RAM (se pierde al reiniciar).
+- **`fanout`**: Escribe en archivos y SQLite a la vez.
+
+### 📁 Sesiones Guardadas
+El Harness guarda el historial completo de cada conversación en `.harness/sessions/`
+como archivos JSON. Al reiniciar la TUI, **carga automáticamente la última sesión**.
+
+Comandos: `/session list`, `/session load <id>`, `/session save`, `/session delete <id>`.
+
+### 💰 Pricing y Costes
+
+El coste se calcula por llamada y se acumula en la sesión. Comandos:
+
+- `/cost`: Muestra el coste de la última llamada y el total acumulado.
+- `pricing_config.json`: Define qué fuente usa cada proveedor (API para OpenRouter, JSON para OpenAI/Groq).
+- `pricing.json`: Precios manuales para proveedores sin API pública.
+- `PRICING_CACHE_TTL_DAYS`: Días que dura la caché de precios (por defecto 1).
 
 ## 🏗️ Arquitectura
 
@@ -57,9 +107,13 @@ graph TD
 - **Gestión de paquetes**: `uv` (ultrarrápido y reproducible)
 - **Integración IA**: `openai` SDK (compatible con OpenRouter/Groq)
 - **Protocolo de Herramientas**: `mcp` (Model Context Protocol)
-- **Interfaz de Terminal**: `textual`, `rich`
+- **Interfaz de Terminal**: `textual`, `rich`, `textual-image`
+- **Orquestación**: `AgentLoop` + A2A (Supervisor, Sequential, Parallel, Swarm)
+- **Memoria Vectorial**: `sqlite-vec`, `fastembed`
+- **Resiliencia**: `tenacity`
 - **Testing**: `pytest`, `pytest-asyncio`, `pytest-cov`
 - **Contenedores**: Docker, Docker Compose
+- **Document Parsing**: `pypdf`, `python-docx`, `openpyxl`, `python-pptx`
 
 ## 🚀 Quick Start
 

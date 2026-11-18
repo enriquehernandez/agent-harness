@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any
 from app.core.harness.tool import BaseTool, ToolResult
+from app.core.logger import logger
 
 
 class ReadFileTool(BaseTool):
@@ -19,7 +20,8 @@ class ReadFileTool(BaseTool):
         }
         self.base_dir = Path(base_dir).resolve()
 
-    async def run(self, path: str) -> ToolResult:
+    async def run(self, path: str, **kwargs) -> ToolResult:
+        # Ignoramos 'timeout' y cualquier otro argumento extra que envíe el LLM con (**kwargs)
         try:
             target = (self.base_dir / path).resolve()
             if not str(target).startswith(str(self.base_dir)):
@@ -28,12 +30,16 @@ class ReadFileTool(BaseTool):
             if not target.is_file():
                 return ToolResult(success=False, content="", error=f"File '{path}' does not exist.")
 
+            # logger.info(
+            #     f"ReadFileTool: leyendo '{path}' desde cwd='{Path.cwd()}'")
             content = target.read_text(encoding="utf-8")
+            # logger.info(f"ReadFileTool: leídos {len(content)} caracteres")
             if len(content) > 10000:
                 content = content[:10000] + "\n\n... [TRUNCATED]"
 
             return ToolResult(success=True, content=content)
         except Exception as e:
+            logger.error(f"ReadFileTool: error leyendo '{path}': {e}")
             return ToolResult(success=False, content="", error=str(e))
 
 

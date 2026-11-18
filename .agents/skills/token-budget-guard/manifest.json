@@ -1,0 +1,12 @@
+{
+  "name": "token-budget-guard",
+  "version": "1.0.1",
+  "description": "Monitors LLM token usage, applies configurable budgets, and alerts when limits are exceeded. Suggests cheaper models or prompt caching.",
+  "author": "Enrique Hernández",
+  "license": "MIT",
+  "entrypoint": "SKILL.md",
+  "permissions": ["read_file", "bash"],
+  "dependencies": ["httpx"],
+  "tags": ["cost-control", "llm-ops", "budgeting"],
+  "category": "Development / Efficiency"
+}

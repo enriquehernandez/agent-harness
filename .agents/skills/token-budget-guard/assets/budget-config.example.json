@@ -1,0 +1,8 @@
+{
+  "default_budget_usd": 5.0,
+  "alert_threshold": 0.8,
+  "model_overrides": {
+    "openai/gpt-5": { "budget_usd": 10.0 },
+    "openai/gpt-5-mini": { "budget_usd": 2.0 }
+  }
+}

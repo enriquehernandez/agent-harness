@@ -46,8 +46,14 @@ def test_analyze_session_success(tmp_path, mock_pricing):
     assert result["completion_tokens"] == 500
     assert result["total_tokens"] == 1500
 
-    # Cálculo esperado: (1000 * 2.5e-6) + (500 * 1e-5) = 0.0025 + 0.005 = 0.0075
+    # Desglose por concepto: 1000 * 2.5e-6 = 0.0025 | 500 * 1e-5 = 0.005
+    assert result["prompt_cost_usd"] == 0.0025
+    assert result["completion_cost_usd"] == 0.005
+    # Cálculo esperado: 0.0025 + 0.005 = 0.0075
     assert result["cost_usd"] == 0.0075
+    # El desglose debe sumar el total (coherencia interna)
+    assert result["prompt_cost_usd"] + \
+        result["completion_cost_usd"] == result["cost_usd"]
 
 
 def test_analyze_session_empty_usage(tmp_path, mock_pricing):
@@ -57,6 +63,7 @@ def test_analyze_session_empty_usage(tmp_path, mock_pricing):
         "session_id": "session_empty",
         "usage_total": {}
     }
+
     session_file.write_text(json.dumps(session_data))
 
     result = analyze_session(session_file, model_name="openai/gpt-4o")

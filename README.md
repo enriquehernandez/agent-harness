@@ -32,6 +32,7 @@ Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible 
 - **🎨 Renderizado Rico:** La TUI renderiza tablas, árboles y bloques de código con Rich, no solo Markdown.
 - **🖼️ Renderizado de Imágenes:** Las imágenes pegadas/arrastradas se muestran en el chat con `textual-image`.
 - **💰 Telemetría de Costes:** Calcula el coste real en USD de cada llamada usando la API del proveedor (OpenRouter) o un JSON manual (OpenAI/Groq). Caché configurable por `.env`.
+- **📄 Lectura de Documentos:** El agente puede leer y resumir PDFs, Word, Excel y PowerPoint usando la tool `read_document`.
 
 
 ### 📦 Skills (Habilidades)
@@ -112,6 +113,7 @@ graph TD
 - **Resiliencia**: `tenacity`
 - **Testing**: `pytest`, `pytest-asyncio`, `pytest-cov`
 - **Contenedores**: Docker, Docker Compose
+- **Document Parsing**: `pypdf`, `python-docx`, `openpyxl`, `python-pptx`
 
 ## 🚀 Quick Start
 

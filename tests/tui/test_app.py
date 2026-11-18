@@ -611,6 +611,9 @@ async def test_file_aware_input_paste():
                 # Llamamos directamente al método
                 await input_box._on_paste(mock_event)
 
+                # 🔥 Esperamos a que el batch timer (200ms) se ejecute
+                await pilot.pause(0.3)
+
                 # Verificamos que se procesó el archivo
                 assert len(app.attached_files) > 0
             finally:
@@ -708,7 +711,8 @@ async def test_file_aware_input_watch_value_reentry(tmp_path):
             # Forzamos el watcher simulando que el texto es la ruta
             with patch.object(app, "handle_file_paste", new_callable=AsyncMock) as mock_paste:
                 input_box.value = str(test_file)
-                await pilot.pause()  # Deja que el call_later se ejecute
+                # 🔥 Esperamos a que el batch timer (200ms) se ejecute
+                await pilot.pause(0.3)
 
                 # Verificamos que se llamó al handler
                 mock_paste.assert_called_once()
@@ -1078,3 +1082,35 @@ async def test_app_refresh_debug_list_with_actions():
             # Verificamos que el Tree se ha poblado
             tree = app.query_one("#agent-flow-tree", Tree)
             assert len(tree.root.children) > 0
+
+
+@pytest.mark.asyncio
+async def test_file_aware_input_concurrent_pastes(tmp_path):
+    """Cubre la línea 82 de app.py: cancelar el timer de un lote anterior."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            input_box = app.query_one("#input-box", FileAwareInput)
+
+            file1 = tmp_path / "test1.txt"
+            file1.write_text("A")
+            file2 = tmp_path / "test2.txt"
+            file2.write_text("B")
+
+            # Simulamos dos pastes rápidos (el segundo debe cancelar el timer del primero)
+            mock_event1 = MagicMock()
+            mock_event1.text = str(file1)
+            mock_event1.prevent_default = MagicMock()
+            mock_event1.stop = MagicMock()
+
+            mock_event2 = MagicMock()
+            mock_event2.text = str(file2)
+            mock_event2.prevent_default = MagicMock()
+            mock_event2.stop = MagicMock()
+
+            await input_box._on_paste(mock_event1)
+            await input_box._on_paste(mock_event2)  # Esto dispara el cancel()
+
+            await pilot.pause(0.3)  # Esperamos a que el batch procese ambos
+
+            assert len(app.attached_files) == 2

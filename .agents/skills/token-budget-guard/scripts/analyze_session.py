@@ -4,7 +4,7 @@ from pathlib import Path
 from fetch_pricing import get_pricing
 
 
-def analyze_session(session_file: Path, model_name: str = "openai/gpt-4o"):
+def analyze_session(session_file: Path, model_name: str = "openai/gpt-5"):
     if not session_file.exists():
         return None
 
@@ -16,7 +16,9 @@ def analyze_session(session_file: Path, model_name: str = "openai/gpt-4o"):
     total = usage.get("total_tokens", prompt + completion)
 
     pricing = get_pricing(model_name)
-    cost = (prompt * pricing["input"]) + (completion * pricing["output"])
+    prompt_cost = prompt * pricing["input"]
+    completion_cost = completion * pricing["output"]
+    cost = prompt_cost + completion_cost
 
     return {
         "session_id": data.get("session_id", "unknown"),
@@ -24,14 +26,17 @@ def analyze_session(session_file: Path, model_name: str = "openai/gpt-4o"):
         "prompt_tokens": prompt,
         "completion_tokens": completion,
         "total_tokens": total,
+        "prompt_cost_usd": round(prompt_cost, 6),
+        "completion_cost_usd": round(completion_cost, 6),
         "cost_usd": round(cost, 6),
+        "pricing_used": pricing,
     }
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--session", required=True)
-    parser.add_argument("--model", default="openai/gpt-4o")
+    parser.add_argument("--model", default="openai/gpt-5")
     args = parser.parse_args()
 
     session_file = Path(f".harness/sessions/{args.session}.json")

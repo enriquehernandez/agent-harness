@@ -20,7 +20,7 @@ An autonomous AI agent engine (Harness) built in Python with a Textual TUI, MCP 
 **Folder Structure:**
 - `app/core/`: Core logic (LLM, Harness, Permissions, Memory, Pricing, Subagents, A2A, Sessions).
 - `app/tui/`: User Interface (Textual, widgets, modals, dashboard, suggester).
-- `app/tools/`: Local tools (bash, filesystem, memory, skills).
+- `app/tools/`: Local tools (bash, filesystem, memory, skills, **documents**).
 - `app/mcp/`: Client for external MCP servers.
 - `app/core/pricing/`: Pricing registry, sources (API, JSON, Fake).
 - `tests/`: Unit and integration test suite.
@@ -69,6 +69,8 @@ An autonomous AI agent engine (Harness) built in Python with a Textual TUI, MCP 
 - **Modelo por Agente:** Cada `AgentCard` puede tener un modelo específico (`model`). Si no se define, usa el modelo del padre. Se configura en `.env` (`A2A_ANALYST_MODEL`, etc.).
 - **Flujo de Agentes:** El panel de debug (F1) muestra un `Tree` con el flujo de agentes en tiempo real (`start`, `end`, `handoff`). Se emite con `log_agent_flow()` en `logger.py`.
 - **Renderizado de Imágenes:** La TUI usa `textual-image` para mostrar imágenes pegadas/arrastradas. El fallback es mostrar el nombre del archivo.
+- **Document Reading:** La tool `read_document` extrae texto de PDFs, DOCX, XLSX y PPTX. El agente debe usarla cuando el usuario adjunte un documento binario. No se pasan como Base64 (eso solo para imágenes).
+- **File Attachments:** El `FileAwareInput` limpia los escapes de la terminal (barras invertidas) y copia los archivos externos a `.harness/temp_attachments/` antes de pasárselos al agente. Para múltiples archivos, usa un debounce de 200ms.
 
 
 ## Working Style

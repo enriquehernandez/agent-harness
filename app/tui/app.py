@@ -1,7 +1,9 @@
+import re
 import asyncio
 import base64
 import json
 from pathlib import Path
+import shutil
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal, Center, VerticalScroll
 from textual.widgets import Input, Static, LoadingIndicator, Markdown, Button, ListView, ListItem, Label, Tree
@@ -32,40 +34,79 @@ from app.tui.debug_screen import DebugDetailScreen
 
 
 class FileAwareInput(Input):
-    """Input que detecta si el texto es una ruta de archivo y lo intercepta."""
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._processing_paste = False
+        self._pending_files = []
+        self._batch_timer = None
+
+    def _clean_path(self, text: str) -> str:
+        text = text.strip().strip("'\"")
+        text = text.replace("\\", "")
+        return text
+
+    async def _process_batch(self) -> None:
+        """Procesa todos los archivos acumulados en un solo lote."""
+        await asyncio.sleep(0.2)  # Esperar a que terminen de llegar
+
+        files_to_process = self._pending_files.copy()
+        self._pending_files.clear()
+
+        for path_str in files_to_process:
+            await self._process_single_file(path_str)
+
+    async def _process_single_file(self, path_str: str) -> None:
+        try:
+            p = Path(path_str).expanduser()
+            if p.exists() and p.is_file():
+                project_root = Path.cwd()
+
+                if not p.resolve().is_relative_to(project_root):
+                    temp_dir = project_root / ".harness" / "temp_attachments"
+                    temp_dir.mkdir(parents=True, exist_ok=True)
+                    dest = temp_dir / p.name
+                    shutil.copy2(p, dest)
+                    p = dest
+                    await self.app.write_to_chat(f"📎 Archivo copiado a `{dest.relative_to(project_root)}` para poder leerlo.", type="system")
+
+                await self.app.handle_file_paste(str(p))
+        except Exception as e:
+            logger.error(
+                f"FileAwareInput: error procesando archivo: {e}", exc_info=True)
 
     async def _on_paste(self, event) -> None:
-        text = event.text.strip().strip("'\"")
-        clean_path = text.replace(
-            "file://", "") if text.startswith("file://") else text
-
-        try:
-            p = Path(clean_path).expanduser()
-            if p.exists() and p.is_file():
-                await self.app.handle_file_paste(str(p))
-                event.prevent_default()
-                event.stop()
-                return
-        except Exception:
-            pass
+        clean_path = self._clean_path(event.text)
+        if clean_path:
+            self._pending_files.append(clean_path)
+            if self._batch_timer:
+                self._batch_timer.cancel()
+            self._batch_timer = asyncio.create_task(self._process_batch())
+            event.prevent_default()
+            event.stop()
 
     def watch_value(self, value: str) -> None:
-        """Watcher: si el texto se cuela, lo limpiamos."""
         if self._processing_paste:
             self._processing_paste = False
             return
 
-        if value and value.startswith("/") and " " not in value.strip():
-            p = Path(value.strip().strip("'\""))
+        clean_path = self._clean_path(value)
+        allowed_exts = [
+            ".pdf", ".txt", ".md", ".py", ".csv", ".json",
+            ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt",
+            ".png", ".jpg", ".jpeg", ".gif", ".webp"
+        ]
+
+        if clean_path.startswith("/") and any(clean_path.endswith(ext) for ext in allowed_exts):
+            p = Path(clean_path)
             if p.exists() and p.is_file():
-                self._processing_paste = True  # 🔥 Evita el re-disparo
+                self._pending_files.append(clean_path)
+                self._processing_paste = True
                 self.value = ""
-                self.app.call_later(self.app.handle_file_paste, str(p))
-                return
+
+                if self._batch_timer:
+                    self._batch_timer.cancel()
+                self._batch_timer = asyncio.create_task(self._process_batch())
+
 
 # ==========================================
 # PERMISSION MODAL
@@ -549,6 +590,7 @@ class AgentHarnessApp(App):
             bar.display = False
 
     async def handle_file_paste(self, path: str):
+        logger.info(f"App: handle_file_paste recibido: '{path}'")
         p = Path(path)
 
         if p.suffix.lower() in [".png", ".jpg", ".jpeg", ".gif", ".webp"]:
@@ -582,6 +624,7 @@ class AgentHarnessApp(App):
             # Si funcionó, no mostramos el mensaje de texto para no duplicar.
             # (Puedes elegir mostrar siempre el mensaje de sistema si prefieres)
         else:
+            logger.info(f"App: añadiendo archivo adjunto: '{str(p)}'")
             if str(p) not in self.attached_files:
                 self.attached_files.append(str(p))
                 await self.write_to_chat(f"📎 **Archivo adjunto:** `{p.name}`", type="system")

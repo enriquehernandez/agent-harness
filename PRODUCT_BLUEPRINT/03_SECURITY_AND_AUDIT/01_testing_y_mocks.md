@@ -112,3 +112,6 @@ Las estrategias tienen ramas de error (agente no encontrado, límite de saltos, 
 - Usa `AgentCard` con nombres falsos (`ghost_agent`).
 - Fuerza el `max_hops` con un agente que siempre devuelva `HANDOFF: <otro>`.
 - Parchea `get_llm` para simular modelos específicos.
+
+## 15. Mocking de Document Parsers
+Para testear `read_document`, mockea las librerías de extracción (`PdfReader`, `Document`, `load_workbook`, `Presentation`) para evitar depender de archivos reales y mantener los tests rápidos.

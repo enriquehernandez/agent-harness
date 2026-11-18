@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     ENABLE_PROMPT_CACHING: bool = True
 
+    # LIMITS
+    MAX_DOCUMENT_CHARS: int = 15000
+
     # 🔥 MEMORIA
     MEMORY_BACKEND: str = "sqlite"  # sqlite | files | memory | fanout
 

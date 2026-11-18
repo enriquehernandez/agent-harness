@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from app.core.harness.tool import FunctionTool, ToolResult
@@ -286,3 +286,161 @@ async def test_observations_tool(tmp_path):
     data = json.loads(out_file.read_text())
     assert len(data["tools"]) == 1
     assert data["mcp_servers"][0]["name"] == "uv"
+
+
+@pytest.mark.asyncio
+async def test_read_document_tool(tmp_path):
+    """Cubre ReadDocumentTool para todos los formatos."""
+    from app.tools.documents import ReadDocumentTool
+    from unittest.mock import patch
+
+    tool = ReadDocumentTool(base_dir=str(tmp_path))
+
+    # 1. Archivo no existe
+    res = await tool.run("no_existe.pdf")
+    assert res.success is False
+    assert "not found" in res.error
+
+    # 2. Archivo fuera del base_dir
+    res = await tool.run("../test.pdf")
+    assert res.success is False
+    assert "Access denied" in res.error
+
+    # 3. PDF
+    fake_pdf = tmp_path / "test.pdf"
+    fake_pdf.write_text("fake")
+    with patch("app.tools.documents.PdfReader") as mock_reader:
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = "Texto del PDF"
+        mock_reader.return_value.pages = [mock_page]
+
+        res = await tool.run("test.pdf")
+        assert res.success is True
+        assert "Texto del PDF" in res.content
+
+    # 4. DOCX
+    fake_docx = tmp_path / "test.docx"
+    fake_docx.write_text("fake")
+    with patch("app.tools.documents.Document") as mock_doc:
+        mock_p = MagicMock()
+        mock_p.text = "Texto del DOCX"
+        mock_doc.return_value.paragraphs = [mock_p]
+        mock_doc.return_value.tables = []
+
+        res = await tool.run("test.docx")
+        assert res.success is True
+        assert "Texto del DOCX" in res.content
+
+    # 5. XLSX
+    fake_xlsx = tmp_path / "test.xlsx"
+    fake_xlsx.write_text("fake")
+    with patch("app.tools.documents.load_workbook") as mock_wb:
+        mock_sheet = MagicMock()
+        mock_sheet.iter_rows.return_value = [(1, 2), (3, 4)]
+        mock_wb.return_value.sheetnames = ["Hoja1"]
+        mock_wb.return_value.__getitem__.return_value = mock_sheet
+
+        res = await tool.run("test.xlsx")
+        assert res.success is True
+        assert "1 | 2" in res.content
+
+    # 6. PPTX
+    fake_pptx = tmp_path / "test.pptx"
+    fake_pptx.write_text("fake")
+    with patch("app.tools.documents.Presentation") as mock_pptx:
+        mock_slide = MagicMock()
+        mock_shape = MagicMock()
+        mock_shape.text = "Texto del PPTX"
+        mock_slide.shapes = [mock_shape]
+        mock_pptx.return_value.slides = [mock_slide]
+
+        res = await tool.run("test.pptx")
+        assert res.success is True
+        assert "Texto del PPTX" in res.content
+
+    # 7. Formato no soportado
+    fake_txt = tmp_path / "test.txt"
+    fake_txt.write_text("Hello")
+    res = await tool.run("test.txt")
+    assert res.success is False
+    assert "no soportado" in res.error
+
+
+@pytest.mark.asyncio
+async def test_read_document_empty_and_truncated(tmp_path):
+    """Cubre líneas 55, 59 y 84-87 de documents.py."""
+    from app.tools.documents import ReadDocumentTool
+    from unittest.mock import patch, MagicMock
+    from app.core.config import settings
+
+    tool = ReadDocumentTool(base_dir=str(tmp_path))
+
+    # 1. Documento vacío (línea 55)
+    fake_pdf = tmp_path / "empty.pdf"
+    fake_pdf.write_text("fake")
+    with patch("app.tools.documents.PdfReader") as mock_reader:
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = ""
+        mock_reader.return_value.pages = [mock_page]
+
+        res = await tool.run("empty.pdf")
+        assert res.success is True
+        assert "no contiene texto extraíble" in res.content
+
+    # 2. Documento con mucho texto (línea 59)
+    fake_pdf2 = tmp_path / "large.pdf"
+    fake_pdf2.write_text("fake")
+    with patch("app.tools.documents.PdfReader") as mock_reader:
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = "A" * 20000
+        mock_reader.return_value.pages = [mock_page]
+
+        with patch.object(settings, "MAX_DOCUMENT_CHARS", 100):
+            res = await tool.run("large.pdf")
+            assert res.success is True
+            assert "[DOCUMENTO TRUNCADO]" in res.content
+            assert "MAX_DOCUMENT_CHARS" in res.content
+            assert "caracteres" in res.content
+
+    # 3. DOCX con tablas (líneas 84-87)
+    fake_docx = tmp_path / "table.docx"
+    fake_docx.write_text("fake")
+    with patch("app.tools.documents.Document") as mock_doc:
+        mock_doc.return_value.paragraphs = []
+
+        mock_table = MagicMock()
+        mock_cell1 = MagicMock()
+        mock_cell1.text = "Celda 1"
+        mock_cell2 = MagicMock()
+        mock_cell2.text = "Celda 2"
+        mock_row = MagicMock()
+        mock_row.cells = [mock_cell1, mock_cell2]
+        mock_table.rows = [mock_row]
+
+        mock_doc.return_value.tables = [mock_table]
+
+        res = await tool.run("table.docx")
+        assert res.success is True
+        assert "Celda 1 | Celda 2" in res.content
+
+
+@pytest.mark.asyncio
+async def test_read_document_pptx(tmp_path):
+    """Cubre líneas 94-97 de documents.py (_read_pptx)."""
+    from app.tools.documents import ReadDocumentTool
+    from unittest.mock import patch, MagicMock
+
+    tool = ReadDocumentTool(base_dir=str(tmp_path))
+
+    fake_pptx = tmp_path / "test.pptx"
+    fake_pptx.write_text("fake")
+    with patch("app.tools.documents.Presentation") as mock_pptx:
+        mock_slide = MagicMock()
+        mock_shape = MagicMock()
+        mock_shape.text = "Texto del PPTX"
+        mock_slide.shapes = [mock_shape]
+        mock_pptx.return_value.slides = [mock_slide]
+
+        res = await tool.run("test.pptx")
+        assert res.success is True
+        assert "Texto del PPTX" in res.content

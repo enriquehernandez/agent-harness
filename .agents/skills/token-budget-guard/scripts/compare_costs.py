@@ -1,11 +1,16 @@
 import json
 import argparse
 from pathlib import Path
+from analyze_session import analyze_session
 
 
-def compare(old_report: Path, new_report: Path):
-    old = json.loads(old_report.read_text())
-    new = json.loads(new_report.read_text())
+def compare(old_session: str, new_session: str, model: str):
+    old = analyze_session(Path(f".harness/sessions/{old_session}.json"), model)
+    new = analyze_session(Path(f".harness/sessions/{new_session}.json"), model)
+
+    if old is None or new is None:
+        missing = old_session if old is None else new_session
+        return {"error": f"Session {missing} not found."}
 
     cost_diff = new["cost_usd"] - old["cost_usd"]
     token_diff = new["total_tokens"] - old["total_tokens"]
@@ -20,8 +25,10 @@ def compare(old_report: Path, new_report: Path):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("old")
-    parser.add_argument("new")
+    parser = argparse.ArgumentParser(
+        description="Compare token usage/cost between two sessions.")
+    parser.add_argument("--old", required=True, help="Old session ID")
+    parser.add_argument("--new", required=True, help="New session ID")
+    parser.add_argument("--model", default="openai/gpt-5")
     args = parser.parse_args()
-    print(json.dumps(compare(Path(args.old), Path(args.new)), indent=2))
+    print(json.dumps(compare(args.old, args.new, args.model), indent=2))

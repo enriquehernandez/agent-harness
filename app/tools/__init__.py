@@ -4,6 +4,7 @@ from .shell import BashTool
 from .memory import MemorySaveTool, MemoryRecallTool
 from .skills import LoadSkillTool
 from .observations import ExportObservationsTool
+from .documents import ReadDocumentTool
 
 
 def register_core_tools(registry: ToolRegistry, base_dir: str = ".", memory_store=None, mcp_clients=None) -> None:
@@ -19,6 +20,8 @@ def register_core_tools(registry: ToolRegistry, base_dir: str = ".", memory_stor
     registry.register(BashTool(export_observations=export_tool))
 
     registry.register(LoadSkillTool(registry=registry))
+
+    registry.register(ReadDocumentTool(base_dir=base_dir))
 
     if memory_store:
         registry.register(MemorySaveTool(store=memory_store))

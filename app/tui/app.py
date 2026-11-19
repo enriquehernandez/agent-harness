@@ -1,4 +1,6 @@
-import re
+import os
+from textual_image.widget import HalfcellImage, UnicodeImage  # 🔥 Importar alternativas
+from urllib.parse import unquote  # 🔥 Importar
 import asyncio
 import base64
 import json
@@ -597,7 +599,16 @@ class AgentHarnessApp(App):
             # 🔥 1. Mostrar la imagen en el chat
             try:
                 scroll = self.query_one("#chat-scroll", VerticalScroll)
-                img_widget = TerminalImage(p, classes="message-image")
+
+                # 🔥 Detectar Warp y usar un fallback que SÍ funcione
+                if os.environ.get("TERM_PROGRAM") == "WarpTerminal":
+                    # Usamos Halfcell (bloques de color) en lugar de TGP
+                    img_widget = HalfcellImage(p, classes="message-image")
+                else:
+                    # En Kitty/WezTerm usamos el TGP de alta calidad
+                    from textual_image.widget import Image as TerminalImage
+                    img_widget = TerminalImage(p, classes="message-image")
+
                 await scroll.mount(img_widget)
                 scroll.scroll_end(animate=False)
             except Exception as e:

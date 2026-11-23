@@ -3,7 +3,7 @@
 Antes de dar una tarea por terminada, el agente DEBE verificar:
 
 ## 1. Validación Automática
-- [ ] `uv run tom test` pasa sin errores y con >99% de cobertura.
+- [ ] `uv run tom test` pasa sin errores y con 100% de cobertura.
 - [ ] `uv run tom test-integration` pasa (verifica que los servidores MCP respondan).
 - [ ] `uv run python scripts/check_pricing.py` valida la configuración de precios.
 

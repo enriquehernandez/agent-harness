@@ -21,7 +21,7 @@ flowchart TD
     %% Despensa y Contexto
     subgraph Despensa [🗄️ La Despensa y el Pizarrón - Memoria y Contexto]
         AGENTS[("📜 AGENTS.md\n(Normas de la cocina)")]:::docs
-        TASKS[("📝 tasks/actual.md\n(Orden del día)")]:::docs
+        TASKS[("📝 tasks/actual.md\n(Pizarrón: se consulta si preguntan)")]:::docs
         MEM[("🧠 Memoria a Largo Plazo\n(Recetario de clientes)")]:::memory
         SESS[("📁 Sesiones\n(Historial de comandas)")]:::memory
     end
@@ -90,7 +90,7 @@ flowchart TD
 *   **Las Recetas (Los Skills / `.md`):** El chef no memoriza cómo hacer un Soufflé. Cuando le piden uno, lee la receta (`load_skill` o `@nombre-skill`) y ejecuta los pasos exactos.
 *   **La Despensa y el Pizarrón:** 
     *   `AGENTS.md`: Las normas de la cocina ("Los cuchillos se afilan así").
-    *   `tasks/actual.md`: La orden que está anotada en el pizarrón para hoy.
+    *   `tasks/actual.md`: El pizarrón de tareas; el chef solo lo consulta si el cliente pregunta por el estado, no lo menciona a cada comanda.
     *   **Memoria:** El recetario de gustos de los clientes (ej. "El cliente 1 prefiere la carne sin sal").
 
 ## 🛡️ Los Hooks: El "Chef Supervisor"

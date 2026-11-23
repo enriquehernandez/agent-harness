@@ -101,16 +101,20 @@ async def test_cmd_clear(mock_app, ctx):
 @pytest.mark.asyncio
 async def test_cmd_model_show(mock_app, ctx):
     with patch("app.tui.commands.list_providers", return_value=["fake", "openai"]):
-        assert await handle_command("/model", ctx, {"provider": "fake"}, None, mock_app) is True
-        assert "Configuración Actual" in mock_app.write_to_chat.call_args[0][0]
+        assert await handle_command("/model", ctx, {"provider": "fake", "model": "gpt-4o"}, None, mock_app) is True
+        msg = mock_app.write_to_chat.call_args[0][0]
+        assert "Modelo Actual" in msg
+        assert "gpt-4o" in msg
 
 
 @pytest.mark.asyncio
 async def test_cmd_model_change_success(mock_app, ctx):
     with patch("app.tui.commands.get_llm", new_callable=MagicMock):
         state = {"provider": "fake"}
-        assert await handle_command("/model openai", ctx, state, None, mock_app) is True
-        assert state["provider"] == "openai"
+        assert await handle_command("/model gpt-4o", ctx, state, None, mock_app) is True
+        # /model cambia el MODELO, no el provider
+        assert state["model"] == "gpt-4o"
+        assert state["provider"] == "fake"  # no cambia
         mock_app.update_dashboard.assert_called()
 
 

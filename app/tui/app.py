@@ -1,6 +1,6 @@
 import os
-from textual_image.widget import HalfcellImage, UnicodeImage  # 🔥 Importar alternativas
-from urllib.parse import unquote  # 🔥 Importar
+from textual_image.widget import HalfcellImage, UnicodeImage
+from urllib.parse import unquote
 import asyncio
 import base64
 import json
@@ -9,7 +9,8 @@ import shutil
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal, Center, VerticalScroll
 from textual.widgets import Input, Static, LoadingIndicator, Markdown, Button, ListView, ListItem, Label, Tree
-from app.tui.widgets import RichMessage
+from textual import events
+from app.tui.widgets.rich_message import RichMessage
 from textual_image.widget import Image as TerminalImage
 from textual import work
 from textual.screen import ModalScreen
@@ -29,172 +30,11 @@ from app.core.config import settings
 from app.tui.suggester import SkillSuggester, CombinedSuggester
 from app.core.logger import logger, get_debug_events
 from app.tui.debug_screen import DebugDetailScreen
+from app.tui.widgets.file_aware_input import FileAwareInput
+from app.tui.modals.permission import PermissionModal
 
-# ==========================================
-# INPUT PERSONALIZADO (INTERCEPTA ARCHIVOS)
-# ==========================================
-
-
-class FileAwareInput(Input):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._processing_paste = False
-        self._pending_files = []
-        self._batch_timer = None
-
-    def _clean_path(self, text: str) -> str:
-        text = text.strip().strip("'\"")
-        text = text.replace("\\", "")
-        return text
-
-    async def _process_batch(self) -> None:
-        """Procesa todos los archivos acumulados en un solo lote."""
-        await asyncio.sleep(0.2)  # Esperar a que terminen de llegar
-
-        files_to_process = self._pending_files.copy()
-        self._pending_files.clear()
-
-        for path_str in files_to_process:
-            await self._process_single_file(path_str)
-
-    async def _process_single_file(self, path_str: str) -> None:
-        try:
-            p = Path(path_str).expanduser()
-            if p.exists() and p.is_file():
-                project_root = Path.cwd()
-
-                if not p.resolve().is_relative_to(project_root):
-                    temp_dir = project_root / ".harness" / "temp_attachments"
-                    temp_dir.mkdir(parents=True, exist_ok=True)
-                    dest = temp_dir / p.name
-                    shutil.copy2(p, dest)
-                    p = dest
-                    await self.app.write_to_chat(f"📎 Archivo copiado a `{dest.relative_to(project_root)}` para poder leerlo.", type="system")
-
-                await self.app.handle_file_paste(str(p))
-        except Exception as e:
-            logger.error(
-                f"FileAwareInput: error procesando archivo: {e}", exc_info=True)
-
-    async def _on_paste(self, event) -> None:
-        clean_path = self._clean_path(event.text)
-        if clean_path:
-            self._pending_files.append(clean_path)
-            if self._batch_timer:
-                self._batch_timer.cancel()
-            self._batch_timer = asyncio.create_task(self._process_batch())
-            event.prevent_default()
-            event.stop()
-
-    def watch_value(self, value: str) -> None:
-        if self._processing_paste:
-            self._processing_paste = False
-            return
-
-        clean_path = self._clean_path(value)
-        allowed_exts = [
-            ".pdf", ".txt", ".md", ".py", ".csv", ".json",
-            ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt",
-            ".png", ".jpg", ".jpeg", ".gif", ".webp"
-        ]
-
-        if clean_path.startswith("/") and any(clean_path.endswith(ext) for ext in allowed_exts):
-            p = Path(clean_path)
-            if p.exists() and p.is_file():
-                self._pending_files.append(clean_path)
-                self._processing_paste = True
-                self.value = ""
-
-                if self._batch_timer:
-                    self._batch_timer.cancel()
-                self._batch_timer = asyncio.create_task(self._process_batch())
-
-
-# ==========================================
-# PERMISSION MODAL
-# ==========================================
-
-
-class PermissionModal(ModalScreen[str]):
-    CSS = """
-    PermissionModal {
-        align: center middle;
-        background: rgba(0, 0, 0, 0.7);
-    }
-    #dialog {
-        width: 80;
-        height: auto;
-        max-height: 30;  /* 🔥 Altura máxima del modal */
-        border: round $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #message {
-        height: auto;
-        max-height: 20;  /* 🔥 Limita la altura del mensaje/diff */
-        overflow-y: auto; /* 🔥 Scroll si hay más contenido */
-        width: 100%;
-        padding: 0 0 1 0;
-    }
-    #buttons {
-        height: auto;
-        width: 100%;
-        align: center middle;
-        dock: bottom;  /* 🔥 Fija los botones abajo */
-    }
-    Button {
-        width: 1fr;
-        margin: 0 1;
-    }
-    """
-
-    def __init__(self, tool_name: str, args_str: str, diff_text: str | None = None):
-        super().__init__()
-        self.tool_name = tool_name
-        self.args_str = args_str
-        self.diff_text = diff_text
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="dialog"):
-            msg = f"🛠️ [bold yellow]El agente quiere usar:[/] [bold]{self.tool_name}[/]\n\n"
-            if self.args_str.strip():
-                msg += f"[dim]Argumentos:[/]\n{self.args_str}"
-            else:
-                msg += "[dim]Esta herramienta no requiere argumentos.[/]"
-
-            if self.diff_text:
-                msg += f"\n\n[dim]Propuesta de cambios:[/]\n{self.diff_text}"
-
-            yield Static(msg, id="message", markup=True)
-
-            with Horizontal(id="buttons"):
-                yield Button("Permitir (y)", id="allow", variant="success")
-                yield Button("Siempre (a)", id="always", variant="primary")
-                yield Button("Denegar (n)", id="deny", variant="error")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "allow":
-            self.dismiss("y")
-        elif event.button.id == "always":
-            self.dismiss("a")
-        else:
-            self.dismiss("n")
-
-    def on_key(self, event) -> None:
-        key = event.key.lower()
-        if key == "y":
-            self.dismiss("y")
-            event.prevent_default()
-        elif key == "a":
-            self.dismiss("a")
-            event.prevent_default()
-        elif key in ("n", "escape"):
-            self.dismiss("n")
-            event.prevent_default()
-
-# ==========================================
-# MAIN APP
-# ==========================================
+# 🔥 Importamos el Crítico
+from app.tools.critic import CriticTool
 
 
 class AgentHarnessApp(App):
@@ -206,142 +46,27 @@ class AgentHarnessApp(App):
     ]
 
     CSS = """
-    Screen {
-        background: #0d1117;
-    }
-    
-    #header-container {
-        height: 4;
-        align: center middle; 
-        background: #161b22;
-        border-bottom: solid #30363d;
-        width: 100%;
-        dock: top;
-    }
-    #dashboard {
-        width: auto;
-        height: auto;
-        background: transparent;
-        color: #c9d1d9;
-        text-align: center;
-    }
-
-    #main-content {
-        height: 1fr;
-    }
-
-    #chat-container {
-        width: 1fr;
-        padding: 1 2;
-    }
-    #chat-scroll {
-        height: 1fr;
-        background: transparent;
-        border: none;
-    }
-    
-    .message-user {
-        background: #161b22;
-        border-left: thick #58a6ff;
-        padding: 1 2;
-        margin-bottom: 1;
-        color: #c9d1d9;
-    }
-    
-    .message-agent {
-        background: transparent;
-        padding: 0 2;
-        margin-bottom: 1;
-    }
-    
-    .message-system {
-        color: #8b949e;
-        text-style: italic;
-        padding: 1 2;
-        margin-bottom: 1;
-    }
-
-    .message-image {
-        width: 60%;      /* Ajusta el tamaño de la imagen */
-        height: auto;
-        margin: 1 2;
-        border: solid #30363d;
-        padding: 1;
-    }
-
-    #loading-indicator {
-        height: 3;
-        display: none;
-        color: #58a6ff;
-        padding: 0 1;
-    }
-
-    #debug-panel {
-        width: 50%;
-        border-left: solid #30363d;
-        background: #161b22;
-        display: none;
-        padding: 1;
-    }
-    
-    #debug-header {
-        height: 3;
-        content-align: center middle;
-        text-style: bold;
-        color: #58a6ff;
-        border-bottom: solid #30363d;
-        margin-bottom: 1;
-    }
-
-    #debug-list {
-        height: 1fr;
-        background: transparent;
-    }
-
-    #agent-flow-tree {
-        height: 30%;
-        background: transparent;
-        border-top: solid #30363d;
-        padding: 1;
-    }
-
-    .debug-item {
-        padding: 0 1;
-    }
-    .debug-item:hover {
-        background: #21262d;
-    }
-
-    #input-container {
-        dock: bottom; 
-        height: 6; 
-        padding: 0 2; 
-        background: #0d1117;
-        border-top: solid #30363d;
-        align: center middle; 
-    }
-
-    #attachments-bar {
-        height: 2;
-        width: 100%;
-        background: #161b22;
-        border-bottom: solid #30363d;
-        padding: 0 1;
-        display: none;
-        color: #58a6ff;
-        text-style: italic;
-    }
-
-    #input-box {
-        width: 100%;
-        height: 3;
-        border: round #30363d;
-        background: #161b22;
-    }
-    
-    #input-box:focus {
-        border: round #58a6ff;
-    }
+    Screen { background: #0d1117; }
+    #header-container { height: 4; align: center middle; background: #161b22; border-bottom: solid #30363d; width: 100%; dock: top; }
+    #dashboard { width: auto; height: auto; background: transparent; color: #c9d1d9; text-align: center; }
+    #main-content { height: 1fr; }
+    #chat-container { width: 1fr; padding: 1 2; }
+    #chat-scroll { height: 1fr; background: transparent; border: none; }
+    .message-user { background: #161b22; border-left: thick #58a6ff; padding: 1 2; margin-bottom: 1; color: #c9d1d9; }
+    .message-agent { background: transparent; padding: 0 2; margin-bottom: 1; }
+    .message-system { color: #8b949e; text-style: italic; padding: 1 2; margin-bottom: 1; }
+    .message-image { width: 60%; height: auto; margin: 1 2; border: solid #30363d; padding: 1; }
+    #loading-indicator { height: 3; display: none; color: #58a6ff; padding: 0 1; }
+    #debug-panel { width: 50%; border-left: solid #30363d; background: #161b22; display: none; padding: 1; }
+    #debug-header { height: 3; content-align: center middle; text-style: bold; color: #58a6ff; border-bottom: solid #30363d; margin-bottom: 1; }
+    #debug-list { height: 1fr; background: transparent; }
+    #agent-flow-tree { height: 30%; background: transparent; border-top: solid #30363d; padding: 1; }
+    .debug-item { padding: 0 1; }
+    .debug-item:hover { background: #21262d; }
+    #input-container { dock: bottom; height: 6; padding: 0 2; background: #0d1117; border-top: solid #30363d; align: center middle; }
+    #attachments-bar { height: 2; width: 100%; background: #161b22; border-bottom: solid #30363d; padding: 0 1; display: none; color: #58a6ff; text-style: italic; }
+    #input-box { width: 100%; height: 3; border: round #30363d; background: #161b22; }
+    #input-box:focus { border: round #58a6ff; }
     """
 
     def __init__(self):
@@ -362,18 +87,15 @@ class AgentHarnessApp(App):
     def compose(self) -> ComposeResult:
         with Center(id="header-container"):
             yield Static("📊 Iniciando...", id="dashboard")
-
         with Horizontal(id="main-content"):
             with Vertical(id="chat-container"):
                 with VerticalScroll(id="chat-scroll"):
                     pass
                 yield LoadingIndicator(id="loading-indicator")
-
             with Vertical(id="debug-panel"):
                 yield Label("🪲 Panel de Debug", id="debug-header")
                 yield ListView(id="debug-list")
                 yield Tree("🤖 Flujo de Agentes", id="agent-flow-tree")
-
         with Vertical(id="input-container"):
             yield Static("", id="attachments-bar")
             yield FileAwareInput(placeholder="Escribe tu mensaje... (Ctrl+U para limpiar)", id="input-box")
@@ -388,17 +110,11 @@ class AgentHarnessApp(App):
             messages = self.session_manager.load()
             if messages:
                 self.ctx.messages = messages
-
-                # 🔥 Recuperamos los contadores y los inyectamos en el loop
                 metadata = self.session_manager.load_metadata()
                 repair_counts = metadata.get("repair_counts", {})
                 if repair_counts and self.agent_loop:
                     self.agent_loop.repair_counts = repair_counts
-
-                await self.write_to_chat(
-                    f"🔄 Sesión `{last_session['id']}` cargada ({len(messages)} mensajes, {len(repair_counts)} tools en reparación).",
-                    type="system"
-                )
+                await self.write_to_chat(f"🔄 Sesión `{last_session['id']}` cargada ({len(messages)} mensajes, {len(repair_counts)} tools en reparación).", type="system")
 
         await self.write_to_chat("🤖 Agent Harness iniciado. Escribe /help para ver comandos.", type="system")
         await self.write_to_chat("💡 Puedes pegar imágenes o archivos. Escribe @ para cargar una skill.", type="system")
@@ -414,32 +130,43 @@ class AgentHarnessApp(App):
         input_box.focus()
 
     async def initialize_agent(self):
-        # 1. Configuración de memoria y contexto
+        # 1. Memoria y contexto
         memory_store = create_memory_store(settings.MEMORY_BACKEND)
         self.memory_store = memory_store
-        memory_context = ""
-        preamble = memory_store.preamble()
-        if preamble:
-            memory_context = f"\n\n[Long-term memory]:\n{preamble}"
+        memory_context = f"\n\n[Long-term memory]:\n{memory_store.preamble()}" if memory_store.preamble(
+        ) else ""
+
+        context_files = ["AGENTS.md", "tasks/actual.md"]
+        context_text = ""
+        for file_path in context_files:
+            p = Path(file_path)
+            if p.exists():
+                context_text += f"\n\n--- START OF {file_path} ---\n{p.read_text(encoding='utf-8')}\n--- END OF {file_path} ---"
 
         self.ctx = ContextManager(
             system_prompt=(
-                "You are a helpful assistant. You have access to local and remote tools (MCP). "
-                "Answer concisely. Use 'write_file' or 'edit_file' to modify files. "
-                "To review code, use 'delegate_to_reviewer'. To remember things, use 'memory_save'. "
-                "If the user provides an image, describe it or use it as context. "
-                "If you need detailed instructions for a complex task, use 'load_skill' with the skill name. "
+                "You are an expert AI assistant and Senior Software Engineer working on the Agent Harness.\n"
+                "AGENTS.md contains your operational rules: follow them strictly.\n"
+                "Everything else below (docs, the task list in tasks/actual.md and long-term memory) "
+                "is BACKGROUND CONTEXT for reference, not an instruction to act.\n"
+                "Never volunteer, mention or try to resume pending tasks unless the user explicitly "
+                "asks about project tasks or status; in that case, answer using tasks/actual.md.\n"
+                "Always answer the user's actual message directly.\n"
+                f"{context_text}\n"
                 f"{memory_context}"
             )
         )
 
-        # 2. Registro de herramientas principales
+        # 2. Registry
         self.registry = ToolRegistry()
         register_core_tools(
-            self.registry, memory_store=memory_store, mcp_clients=self.mcp_clients
-        )
+            self.registry, memory_store=memory_store, mcp_clients=self.mcp_clients)
 
-        # 3. Conexión a servidores MCP
+        from app.tools.memory import MemorySaveTool, MemoryRecallTool
+        self.registry.register(MemorySaveTool(store=memory_store))
+        self.registry.register(MemoryRecallTool(store=memory_store))
+
+        # 3. MCP
         config_path = Path("mcp_config.json")
         if config_path.exists():
             with open(config_path, "r") as f:
@@ -447,23 +174,19 @@ class AgentHarnessApp(App):
             for name, server_conf in config.get("mcpServers", {}).items():
                 try:
                     client = MCPClient(
-                        command=server_conf["command"],
-                        args=server_conf["args"],
-                        env=server_conf.get("env"),
-                    )
+                        command=server_conf["command"], args=server_conf["args"], env=server_conf.get("env"))
                     await client.connect()
                     await client.register_tools(self.registry, server_name=name)
                     self.mcp_clients.append(client)
                 except Exception as e:
                     await self.write_to_chat(f"❌ Error conectando MCP {name}: {e}", type="system")
 
-        # 4. Configuración del PermissionGate
+        # 4. Permisos
         self.gate = PermissionGate(ask_user=self.request_permission)
 
-        # 5. Subagente Reviewer (Legacy, se mantiene para compatibilidad)
+        # 5. Subagente Reviewer (Legacy)
         reviewer_tools = ToolRegistry()
         for tool_name in ["read_text_file", "list_directory", "bash"]:
-            self.gate.policies[tool_name] = Decision.ALLOW
             if tool_name in self.registry:
                 reviewer_tools.register(self.registry.get(tool_name))
 
@@ -476,53 +199,31 @@ class AgentHarnessApp(App):
         )
         self.registry.register(reviewer_tool)
 
-        # 🔥 6. NUEVO: Integración del sistema Agent-to-Agent (A2A)
+        # 6. A2A
         from app.core.harness.a2a import AgentCard, OrchestratorTool
-
-        # Tools base para los subagentes (para que no tengan acceso a todo)
         a2a_base_tools = ToolRegistry()
         for tool_name in ["read_text_file", "list_directory", "bash"]:
             if tool_name in self.registry:
                 a2a_base_tools.register(self.registry.get(tool_name))
 
-        # Leemos los modelos del .env (vacío = usar el modelo por defecto)
-        analyst_model = settings.A2A_ANALYST_MODEL or None
-        writer_model = settings.A2A_WRITER_MODEL or None
-        reviewer_model = settings.A2A_REVIEWER_MODEL or None
-
-        # Definición de los perfiles de agentes (Agent Cards)
         a2a_agents = {
             "analyst": AgentCard(
-                name="analyst",
-                description="Analiza código y datos, genera reportes técnicos.",
-                system_prompt=(
-                    "Eres un analista experto. Usa la tool 'read_file' para leer el archivo "
-                    "y luego analízalo en profundidad. Termina SIEMPRE con 'HANDOFF: writer'."
-                ),
-                tools=a2a_base_tools,
-                mode="isolated",
-                model=analyst_model,  # 🔥 None si está vacío en .env
+                name="analyst", description="Analiza código y datos.",
+                system_prompt="Eres un analista experto. Termina con 'HANDOFF: writer'.",
+                tools=a2a_base_tools, mode="isolated", model=settings.A2A_ANALYST_MODEL or None,
             ),
             "writer": AgentCard(
-                name="writer",
-                description="Escribe documentación y código siguiendo un análisis previo.",
-                system_prompt="Eres un escritor técnico. Documenta con claridad y precisión.",
-                tools=a2a_base_tools,
-                mode="fork",
-                model=writer_model,
+                name="writer", description="Escribe documentación.",
+                system_prompt="Eres un escritor técnico.",
+                tools=a2a_base_tools, mode="fork", model=settings.A2A_WRITER_MODEL or None,
             ),
             "reviewer": AgentCard(
-                name="reviewer",
-                description="Revisa el trabajo de otros agentes de forma imparcial.",
-                system_prompt="Eres un revisor estricto. Señala errores y mejoras sin sesgos.",
-                tools=a2a_base_tools,
-                mode="isolated",
-                model=reviewer_model,
+                name="reviewer", description="Revisa el trabajo.",
+                system_prompt="Eres un revisor estricto.",
+                tools=a2a_base_tools, mode="isolated", model=settings.A2A_REVIEWER_MODEL or None,
             ),
         }
-        logger.debug(a2a_agents)
 
-        # Registramos la herramienta orquestadora en el registry principal
         orchestrator = OrchestratorTool(
             llm=get_llm(self.state["provider"]),
             agents=a2a_agents,
@@ -530,12 +231,20 @@ class AgentHarnessApp(App):
         )
         self.registry.register(orchestrator)
 
-        # 7. Configuración final del AgentLoop principal
+        # 🔥 7. CONFIGURACIÓN DEL CRÍTICO (Auto-Reflexión)
+        # Usamos el modelo definido para el Reviewer en el .env (ej. nemotron o claude)
+        critic_model_name = settings.A2A_REVIEWER_MODEL or None
+        critic_llm = get_llm(self.state["provider"], model=critic_model_name)
+        self.critic_tool = CriticTool(llm=critic_llm)
+
+        # 8. AgentLoop
         self.agent_loop = AgentLoop(
             llm=get_llm(self.state["provider"]),
             tools=self.registry,
             permissions=self.gate,
-            provider_name=self.state["provider"],  # Para pricing
+            provider_name=self.state["provider"],
+            critic_tool=self.critic_tool,  # 🔥 Le pasamos el crítico
+            agent_rules=context_text,  # 🔥 Pasamos las reglas desde el arranque
         )
 
         self.update_dashboard("Listo")
@@ -543,15 +252,11 @@ class AgentHarnessApp(App):
     def update_dashboard(self, status: str, tokens: int = 0, last_tool: str = "Ninguna"):
         dash = self.query_one("#dashboard", Static)
         color = "green" if status == "Listo" else "yellow" if status == "Pensando..." else "red"
-
         model_name = "Desconocido"
         if self.agent_loop and self.agent_loop.llm:
             model_name = getattr(self.agent_loop.llm, 'model_name', getattr(
                 self.agent_loop.llm, 'model', 'Desconocido'))
-
-        # 🔥 Mostramos el coste total
         cost_display = f"${self.total_cost:.4f}" if self.total_cost > 0 else "$0.0000"
-
         dash.update(
             f"⚡ [bold]{self.state['provider']}[/] ({model_name})  •  "
             f"Estado: [bold {color}]{status}[/]  •  "
@@ -569,7 +274,6 @@ class AgentHarnessApp(App):
                 widget = Static(text, classes="message-system", markup=True)
             else:
                 widget = RichMessage(text, classes="message-agent")
-
             await scroll.mount(widget)
             scroll.scroll_end(animate=False)
         except Exception:
@@ -577,12 +281,8 @@ class AgentHarnessApp(App):
 
     def update_attachments_bar(self):
         bar = self.query_one("#attachments-bar", Static)
-        items = []
-        for f in self.attached_files:
-            items.append(f"📎 {Path(f).name}")
-        for _ in self.attached_images:
-            items.append("🖼️ Imagen")
-
+        items = [f"📎 {Path(f).name}" for f in self.attached_files] + \
+            ["🖼️ Imagen" for _ in self.attached_images]
         if items:
             bar.update(" | ".join(items) +
                        "  [dim](Ctrl+U para limpiar)[/dim]")
@@ -592,69 +292,36 @@ class AgentHarnessApp(App):
             bar.display = False
 
     async def handle_file_paste(self, path: str):
-        logger.info(f"App: handle_file_paste recibido: '{path}'")
         p = Path(path)
-
         if p.suffix.lower() in [".png", ".jpg", ".jpeg", ".gif", ".webp"]:
-            # 🔥 1. Mostrar la imagen en el chat
             try:
                 scroll = self.query_one("#chat-scroll", VerticalScroll)
-
-                # 🔥 Detectar Warp y usar un fallback que SÍ funcione
-                if os.environ.get("TERM_PROGRAM") == "WarpTerminal":
-                    # Usamos Halfcell (bloques de color) en lugar de TGP
-                    img_widget = HalfcellImage(p, classes="message-image")
-                else:
-                    # En Kitty/WezTerm usamos el TGP de alta calidad
-                    from textual_image.widget import Image as TerminalImage
-                    img_widget = TerminalImage(p, classes="message-image")
-
+                img_widget = HalfcellImage(p, classes="message-image") if os.environ.get(
+                    "TERM_PROGRAM") == "WarpTerminal" else TerminalImage(p, classes="message-image")
                 await scroll.mount(img_widget)
                 scroll.scroll_end(animate=False)
             except Exception as e:
                 logger.warning(f"No se pudo renderizar la imagen: {e}")
-                # Fallback: al menos mostrar el nombre
                 await self.write_to_chat(f"🖼️ **Imagen adjunta:** `{p.name}` (vista previa no disponible)", type="system")
 
-            # 🔥 2. Guardar en Base64 para el LLM (código existente)
             with open(p, "rb") as f:
                 img_data = base64.b64encode(f.read()).decode("utf-8")
-
-            mime = "image/jpeg"
-            if p.suffix.lower() == ".png":
-                mime = "image/png"
-            elif p.suffix.lower() == ".gif":
-                mime = "image/gif"
-            elif p.suffix.lower() == ".webp":
-                mime = "image/webp"
-
-            b64_url = f"data:{mime};base64,{img_data}"
-            self.attached_images.append(b64_url)
-
-            # Si el renderizado falló, ya mostramos el mensaje de sistema arriba.
-            # Si funcionó, no mostramos el mensaje de texto para no duplicar.
-            # (Puedes elegir mostrar siempre el mensaje de sistema si prefieres)
+            mime = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
+            self.attached_images.append(f"data:{mime};base64,{img_data}")
         else:
-            logger.info(f"App: añadiendo archivo adjunto: '{str(p)}'")
             if str(p) not in self.attached_files:
                 self.attached_files.append(str(p))
                 await self.write_to_chat(f"📎 **Archivo adjunto:** `{p.name}`", type="system")
-
         self.update_attachments_bar()
 
     async def _expand_skills(self, user_input: str) -> str:
-        """Si el usuario escribe @skill-name, carga la skill y la inyecta en el contexto."""
         import re
         from app.tools.skills import LoadSkillTool
-
         matches = re.findall(r'@([\w\-]+)', user_input)
-
         if not matches:
             return user_input
-
         skill_tool = LoadSkillTool()
         skills_context = ""
-
         for skill_name in matches:
             result = await skill_tool.run(skill_name)
             if result.success:
@@ -662,31 +329,8 @@ class AgentHarnessApp(App):
                 await self.write_to_chat(f"📖 Skill `{skill_name}` cargada automáticamente.", type="system")
             else:
                 await self.write_to_chat(f"❌ No se pudo cargar la skill `{skill_name}`: {result.error}", type="system")
-
         clean_input = re.sub(r'@[\w\-]+', '', user_input).strip()
         return f"{clean_input}\n\n{skills_context}"
-
-    async def _safe_request_permission(self, tool_name: str, signature: str, args: dict, diff_text: str | None = None) -> str:
-        """
-        Wrapper seguro para request_permission que garantiza que el modal
-        se lance en el contexto correcto de Textual, incluso desde subagentes.
-        """
-        # 1. Verificar si ya está permitido en session_allowed (persistido en JSON)
-        if self.gate and self.gate._is_allowed(signature):
-            return "y"  # Ya está permitido, no preguntar
-
-        # 2. Si estamos en el contexto de la TUI, usar el método normal
-        try:
-            # Verificamos que push_screen_wait esté disponible y funcione
-            if self.is_running and self._driver is not None:
-                return await self.request_permission(tool_name, signature, args, diff_text)
-        except Exception as e:
-            logger.warning(f"No se pudo usar el modal de la TUI: {e}")
-
-        # 3. Fallback: si la TUI no está disponible, denegar por seguridad
-        logger.warning(
-            f"Permiso denegado por falta de contexto de UI para: {tool_name}")
-        return "n"
 
     async def request_permission(self, tool_name: str, signature: str, args: dict, diff_text: str | None = None) -> str:
         args_str = ""
@@ -698,9 +342,6 @@ class AgentHarnessApp(App):
             else:
                 args_str += f"- `{k}`: {v}\n"
 
-        # self.query_one("#loading-indicator", LoadingIndicator).display = False
-
-        # 🔥 Truncamos el diff si es muy largo (ej. más de 50 líneas)
         if diff_text:
             lines = diff_text.split("\n")
             if len(lines) > 50:
@@ -729,7 +370,6 @@ class AgentHarnessApp(App):
     async def action_toggle_debug(self) -> None:
         self.debug_mode = not self.debug_mode
         panel = self.query_one("#debug-panel")
-
         if self.debug_mode:
             panel.display = True
             await self._refresh_debug_list()
@@ -754,10 +394,8 @@ class AgentHarnessApp(App):
             asyncio.create_task(self._refresh_debug_list())
 
     async def _refresh_debug_list(self):
-        # 1. Actualizar el ListView de eventos generales
         list_view = self.query_one("#debug-list", ListView)
         await list_view.clear()
-
         events = get_debug_events()
         if not events:
             list_view.append(ListItem(Label("No hay eventos aún.")))
@@ -766,33 +404,21 @@ class AgentHarnessApp(App):
                 summary = f"#{idx+1} {log['timestamp']} • {log['type']} • {log['summary'][:50]}..."
                 list_view.append(ListItem(Label(summary), id=f"log-{idx}"))
 
-        # 🔥 2. Actualizar el Tree de flujo de agentes
         from app.core.logger import get_agent_flow
         tree = self.query_one("#agent-flow-tree", Tree)
         tree.clear()
-
         flow = get_agent_flow()
         if not flow:
             tree.root.add("No hay actividad de agentes aún.")
             return
-
-        # Agrupar el flujo en un árbol
-        # Estructura: Root -> [por cada agente, un nodo con sus eventos]
         root = tree.root
-
-        # Diccionario para agrupar los eventos por agente (manteniendo el orden)
         agent_nodes = {}
-
         for entry in flow:
             agent = entry["agent"]
             action = entry["action"]
             timestamp = entry["timestamp"]
-
-            # Si el agente no tiene nodo, lo creamos en la raíz
             if agent not in agent_nodes:
                 agent_nodes[agent] = root.add(f"🤖 {agent}")
-
-            # Añadimos el evento como hijo del agente
             if action == "start":
                 agent_nodes[agent].add(f"▶️ start ({timestamp})")
             elif action == "end":
@@ -801,8 +427,6 @@ class AgentHarnessApp(App):
                 agent_nodes[agent].add(f"🔄 handoff ({timestamp})")
             else:
                 agent_nodes[agent].add(f"❓ {action} ({timestamp})")
-
-        # Expandimos todo el árbol para que sea visible
         tree.root.expand()
         for node in agent_nodes.values():
             node.expand()
@@ -810,7 +434,6 @@ class AgentHarnessApp(App):
     async def on_list_view_selected(self, event: ListView.Selected) -> None:
         if not event.item.id or not event.item.id.startswith("log-"):
             return
-
         idx = int(event.item.id.split("-")[1])
         events = get_debug_events()
         if idx < len(events):
@@ -820,7 +443,6 @@ class AgentHarnessApp(App):
     @work(exclusive=True)
     async def process_input(self, user_input: str):
         loading = self.query_one("#loading-indicator", LoadingIndicator)
-
         if user_input.startswith("/"):
             await self.write_to_chat(f"⚙️ Ejecutando comando: {user_input}", type="system")
             try:
@@ -854,90 +476,87 @@ class AgentHarnessApp(App):
                 await self._refresh_debug_list()
 
     async def stream_to_chat(self, stream_generator):
-        """Renderiza el streaming en el chat y actualiza el dashboard al final."""
         scroll = self.query_one("#chat-scroll", VerticalScroll)
-        markdown_widget = None  # 🔥 Se crea al primer chunk
+        markdown_widget = None
         loading = self.query_one("#loading-indicator", LoadingIndicator)
-
         full_text = ""
-        final_result = None
-        start_time = asyncio.get_event_loop().time()
         TIMEOUT_SECONDS = settings.LLM_STREAM_TIMEOUT
+        is_correction = False  # 🔥 Flag para detectar correcciones
+        stream_iterator = stream_generator.__aiter__()
 
         try:
-            async for chunk in stream_generator:
-                if asyncio.get_event_loop().time() - start_time > TIMEOUT_SECONDS:
-                    raise asyncio.TimeoutError()
+            while True:
+                # 🔥 Timeout real sin crear un Task nuevo por evento:
+                # `wait_for` envuelve `__anext__()` en su propio Task, por lo que
+                # el contexto de OTel/Langfuse abierto en un `anext` se intentaba
+                # liberar en otro -> "Failed to detach context".
+                # `asyncio.timeout` cancela el Task actual y preserva el Context.
+                try:
+                    async with asyncio.timeout(TIMEOUT_SECONDS):
+                        event = await stream_iterator.__anext__()
+                except StopAsyncIteration:
+                    break
 
-                if isinstance(chunk, str):
-                    full_text += chunk
+                if event.type == "text_chunk":
+                    text = event.data["text"]
 
-                    # 🔥 Creamos el Markdown al primer chunk y ocultamos el loading
+                    # 🔥 Detección de corrección por marcador de control (no por texto)
+                    if event.data.get("is_correction_marker"):
+                        is_correction = True
+                        continue
+
+                    if is_correction and markdown_widget:
+                        await markdown_widget.remove()
+                        markdown_widget = None
+                        full_text = ""
+                        is_correction = False
+
+                    full_text += event.data["text"]
                     if markdown_widget is None:
                         markdown_widget = Markdown(
                             full_text, classes="message-agent")
                         await scroll.mount(markdown_widget)
-                        loading.display = False  # 🔥 Ocultamos el loading principal
+                        loading.display = False
                     else:
                         await markdown_widget.update(full_text)
-
                     scroll.scroll_end(animate=False)
-                elif isinstance(chunk, dict) and chunk.get("type") == "result":
-                    final_result = chunk
+
+                elif event.type == "result":
+                    final_result = event.data
+                    tokens = (final_result.get("usage_total")
+                              or {}).get("total_tokens", 0)
+                    cost = final_result.get("cost_usd", 0.0)
+
+                    self.total_cost += cost
+                    self.last_cost = cost
+                    self.last_usage = final_result.get("usage_total", {})
+
+                    if self.agent_loop and self.agent_loop.llm:
+                        self.last_model = getattr(
+                            self.agent_loop.llm, 'model_name', 'Desconocido')
+
+                    if tokens == 0:
+                        tokens = len(full_text) // 4
+                    self.update_dashboard("Listo", tokens=tokens)
                     break
+
+                elif event.type == "error":
+                    self.update_dashboard("Error")
+                    loading.display = False
+                    msg = event.data.get("message", "Error desconocido")
+                    await self.write_to_chat(f"❌ **Error del Agente:** {msg}", type="system")
+                    break
+
         except asyncio.TimeoutError:
             self.update_dashboard("Error")
             loading.display = False
-            await self.write_to_chat(
-                f"⏳ **Timeout:** El agente tardó más de {TIMEOUT_SECONDS}s. "
-                f"El modelo `nemotron` es lento generando reportes largos. "
-                f"Prueba a cambiar de modelo con `/model openai`.",
-                type="system"
-            )
-            return full_text
+            await self.write_to_chat("⏳ **Timeout:** El agente tardó demasiado.", type="system")
         except Exception as e:
             self.update_dashboard("Error")
             loading.display = False
-            await self.write_to_chat(f"❌ **Error del LLM:** {e}", type="system")
-            return full_text
+            await self.write_to_chat(f"❌ **Error inesperado en la TUI:** {e}", type="system")
         finally:
-            loading.display = False  # 🔥 Aseguramos que se oculte al terminar
-
-        if final_result:
-            tokens = (final_result.get("usage_total")
-                      or {}).get("total_tokens", 0)
-
-            cost = final_result.get("cost_usd", 0.0)
-
-            # 🔥 Acumulamos el coste total
-            self.total_cost += cost
-            self.last_cost = cost
-
-            # 🔥 GUARDAMOS EL USAGE COMPLETO PARA /trace
-            self.last_usage = final_result.get("usage_total", {})
-
-            # 🔥 Protegemos contra agent_loop=None (ej. en tests)
-            if self.agent_loop and self.agent_loop.llm:
-                self.last_model = getattr(
-                    self.agent_loop.llm,
-                    'model_name',
-                    getattr(self.agent_loop.llm, 'model', 'Desconocido')
-                )
-            else:
-                self.last_model = "Desconocido"
-
-            if tokens == 0:
-                tokens = len(full_text) // 4
-
-            # last_tool = final_result["tools_used"][-1] if final_result["tools_used"] else "Ninguna"
-
-            self.update_dashboard(
-                "Listo",
-                tokens=tokens,
-                # last_tool=last_tool
-            )
-
-        return full_text
+            loading.display = False
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         user_text = event.value.strip()
@@ -945,30 +564,20 @@ class AgentHarnessApp(App):
             return
 
         event.input.value = ""
-
-        # 🔥 Expandimos las skills con @
         user_text = await self._expand_skills(user_text)
 
         if self.attached_images:
             display_text = user_text if user_text else "[Imagen adjunta]"
             await self.write_to_chat(display_text, type="user")
-
             self.ctx.add_user_with_image(user_text, self.attached_images)
-
             self.attached_images = []
             self.update_attachments_bar()
-
             self.update_dashboard("Pensando...")
             loading = self.query_one("#loading-indicator", LoadingIndicator)
             loading.display = True
-
             try:
-                stream_gen = self.agent_loop.stream(
-                    "",
-                    context=self.ctx,
-                    verbose=getattr(self, 'verbose_mode', False),
-                    timeout_seconds=settings.LLM_STREAM_TIMEOUT
-                )
+                stream_gen = self.agent_loop.stream("", context=self.ctx, verbose=getattr(
+                    self, 'verbose_mode', False), timeout_seconds=settings.LLM_STREAM_TIMEOUT)
                 await self.stream_to_chat(stream_gen)
                 self.update_dashboard("Listo")
             except Exception as e:
@@ -1006,7 +615,6 @@ class AgentHarnessApp(App):
     async def on_unmount(self) -> None:
         if self.ctx:
             self.session_manager.save(self.ctx, self.agent_loop)
-
         for client in reversed(self.mcp_clients):
             try:
                 await client.disconnect()

@@ -24,14 +24,13 @@ class MCPClient:
         self.server_params = StdioServerParameters(
             command=command,
             args=args,
-            env=server_env
+            env=server_env,
         )
         self.session: ClientSession | None = None
         self.exit_stack = AsyncExitStack()
 
     async def _do_connect(self):
         """Lógica interna de conexión (extraída para tenacity)."""
-        # Limpiamos cualquier conexión previa
         await self.disconnect()
         self.exit_stack = AsyncExitStack()
 
@@ -48,30 +47,26 @@ class MCPClient:
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
         retry=retry_if_exception_type(Exception),
-        reraise=True
+        reraise=True,
     )
     async def connect(self):
         """Conecta con backoff exponencial (3 intentos)."""
-        for attempt in range(3):
-            try:
-                # Usamos wait_for para el timeout de conexión
-                await asyncio.wait_for(
-                    self._do_connect(),
-                    timeout=settings.MCP_CONNECT_TIMEOUT
-                )
-                logger.info(f"MCP conectado exitosamente: {self.command}")
-                return
-            except asyncio.TimeoutError:
-                logger.warning(
-                    f"Timeout conectando a MCP {self.command} (intento {attempt + 1}/3)")
-                if attempt == 2:
-                    raise
-            except Exception as e:
-                logger.warning(
-                    f"Error conectando a MCP {self.command}: {e} (intento {attempt + 1}/3)")
-                if attempt == 2:
-                    raise
-            await asyncio.sleep(2 ** attempt)  # 1s, 2s
+        if self.session is not None:
+            return
+
+        try:
+            await asyncio.wait_for(
+                self._do_connect(),
+                timeout=settings.MCP_CONNECT_TIMEOUT,
+            )
+            logger.info(f"MCP conectado exitosamente: {self.command}")
+            return
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout conectando a MCP {self.command}")
+            raise
+        except Exception as e:
+            logger.warning(f"Error conectando a MCP {self.command}: {e}")
+            raise
 
     async def disconnect(self):
         """Cierra la conexión limpiamente."""
@@ -84,6 +79,7 @@ class MCPClient:
     async def reconnect(self) -> bool:
         """Fuerza una reconexión (usada por el proxy si una tool falla)."""
         try:
+            await self.disconnect()
             await self.connect()
             return True
         except Exception as e:
@@ -98,12 +94,15 @@ class MCPClient:
         mcp_tools = await self.session.list_tools()
 
         for mcp_tool in mcp_tools.tools:
+            prefixed_name = f"mcp_{server_name}_{mcp_tool.name}"
             tool = MCPToolProxy(
-                name=mcp_tool.name,
+                name=prefixed_name,
+                original_name=mcp_tool.name,
                 description=mcp_tool.description or "",
-                parameters_schema=mcp_tool.input_schema,
-                client=self,  # 🔥 Pasamos el cliente, no la sesión
-                server_name=server_name
+                parameters_schema=mcp_tool.input_schema or {
+                    "type": "object", "properties": {}},
+                client=self,
+                server_name=server_name,
             )
             registry.register(tool)
 
@@ -111,51 +110,65 @@ class MCPClient:
 class MCPToolProxy(BaseTool):
     """Adapter que envuelve una tool MCP remota con auto-reconexión."""
 
-    def __init__(self, name: str, description: str, parameters_schema: dict, client: MCPClient, server_name: str = "unknown"):
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        parameters_schema: dict,
+        client: MCPClient,
+        server_name: str = "unknown",
+        original_name: str | None = None,
+    ):
         self.name = name
         self.description = f"[MCP:{server_name}] {description}"
         self.parameters_schema = parameters_schema
         self.client = client
         self.server_name = server_name
+        self.original_name = original_name or name
+
+    async def _call(self, **kwargs) -> ToolResult:
+        result = await asyncio.wait_for(
+            self.client.session.call_tool(
+                self.original_name, arguments=kwargs),
+            timeout=settings.TOOL_TIMEOUT,
+        )
+
+        content_str = ""
+        for item in getattr(result, "content", []) or []:
+            if getattr(item, "type", None) == "text":
+                content_str += item.text + "\n"
+            else:
+                content_str += f"[{getattr(item, 'type', 'unknown')} data]\n"
+
+        is_error = getattr(result, "isError", False) or getattr(
+            result, "is_error", False)
+
+        if is_error:
+            return ToolResult(success=False, content="", error=content_str.strip())
+
+        return ToolResult(success=True, content=content_str.strip())
 
     async def run(self, **kwargs) -> ToolResult:
         try:
             if not self.client.session:
-                # Si no hay sesión, intentamos reconectar
                 if not await self.client.reconnect():
-                    return ToolResult(success=False, content="", error=f"MCP {self.server_name} no disponible.")
-
-            result = await self.client.session.call_tool(self.name, arguments=kwargs)
-
-            content_str = ""
-            for item in result.content:
-                if item.type == "text":
-                    content_str += item.text + "\n"
-                else:
-                    content_str += f"[{item.type} data]\n"
-
-            is_error = getattr(result, "isError", False) or getattr(
-                result, "is_error", False)
-
-            if is_error:
-                return ToolResult(success=False, content="", error=content_str.strip())
-
-            return ToolResult(success=True, content=content_str.strip())
+                    return ToolResult(
+                        success=False, content="",
+                        error=f"MCP {self.server_name} no disponible.",
+                    )
+            return await self._call(**kwargs)
 
         except Exception as e:
             logger.warning(
                 f"Fallo en tool MCP {self.name}: {e}. Intentando reconexión...")
 
-            # 🔥 Fallback: Si falla, reconectamos y reintentamos UNA vez
             if await self.client.reconnect():
                 try:
-                    result = await self.client.session.call_tool(self.name, arguments=kwargs)
-                    content_str = ""
-                    for item in result.content:
-                        if item.type == "text":
-                            content_str += item.text + "\n"
-                    return ToolResult(success=True, content=content_str.strip())
+                    return await self._call(**kwargs)
                 except Exception as retry_error:
-                    return ToolResult(success=False, content="", error=f"Fallo tras reconexión: {retry_error}")
+                    return ToolResult(
+                        success=False, content="",
+                        error=f"Fallo tras reconexión: {retry_error}",
+                    )
 
             return ToolResult(success=False, content="", error=str(e))

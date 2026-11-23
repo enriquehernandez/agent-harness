@@ -24,8 +24,7 @@ class PermissionGate:
     ask_user: Callable[[str, str, dict, str | None],
                        Awaitable[str]] | None = None
     persist_file: Path = field(
-        default_factory=lambda: settings.permissions_file  # 🔥 Ruta centralizada
-    )
+        default_factory=lambda: settings.permissions_file)
 
     def __post_init__(self):
         if not self.policies:
@@ -53,6 +52,7 @@ class PermissionGate:
     def _save_persisted_permissions(self):
         data = {"session_allowed": list(self.session_allowed)}
         try:
+            self.persist_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.persist_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
@@ -81,13 +81,15 @@ class PermissionGate:
                 except Exception:
                     pass
             new_content = args["content"]
-            return "".join(difflib.unified_diff(
-                old_content.splitlines(keepends=True),
-                new_content.splitlines(keepends=True),
-                fromfile=f"a/{args['path']}",
-                tofile=f"b/{args['path']}",
-                lineterm=""
-            ))
+            return "".join(
+                difflib.unified_diff(
+                    old_content.splitlines(keepends=True),
+                    new_content.splitlines(keepends=True),
+                    fromfile=f"a/{args['path']}",
+                    tofile=f"b/{args['path']}",
+                    lineterm="",
+                )
+            )
 
         if "path" in args and "edits" in args:
             path = Path(args["path"])
@@ -102,18 +104,22 @@ class PermissionGate:
             for edit in args["edits"]:
                 old_text = edit.get("oldText", "")
                 new_text = edit.get("newText", "")
+                if not old_text:
+                    return "⚠️ edit con 'oldText' vacío: no se puede generar el diff."
                 if old_text in new_content:
                     new_content = new_content.replace(old_text, new_text)
                 else:
                     return f"⚠️ Text to replace not found: {old_text[:20]}..."
 
-            return "".join(difflib.unified_diff(
-                old_content.splitlines(keepends=True),
-                new_content.splitlines(keepends=True),
-                fromfile=f"a/{args['path']}",
-                tofile=f"b/{args['path']}",
-                lineterm=""
-            ))
+            return "".join(
+                difflib.unified_diff(
+                    old_content.splitlines(keepends=True),
+                    new_content.splitlines(keepends=True),
+                    fromfile=f"a/{args['path']}",
+                    tofile=f"b/{args['path']}",
+                    lineterm="",
+                )
+            )
 
         return None
 

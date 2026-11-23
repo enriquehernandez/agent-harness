@@ -53,6 +53,8 @@ class FunctionTool(BaseTool):
             result = self._func(**kwargs)
             if hasattr(result, "__await__"):  # is async
                 result = await result
+            if isinstance(result, ToolResult):
+                return result
             return ToolResult(success=True, content=str(result))
         except Exception as e:
             return ToolResult(success=False, content="", error=str(e))

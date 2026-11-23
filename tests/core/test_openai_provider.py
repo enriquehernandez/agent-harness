@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from app.core.llm.providers.openai_provider import OpenAICompatibleProvider
@@ -97,7 +99,6 @@ async def test_openai_provider_tool_calls(mock_async_openai):
 async def test_openai_provider_prompt_caching_and_error(mock_async_openai):
     mock_client = mock_async_openai.return_value
 
-    # Simulamos una respuesta válida
     mock_message = MagicMock()
     mock_message.content = "Cached response"
     mock_message.tool_calls = None
@@ -107,7 +108,7 @@ async def test_openai_provider_prompt_caching_and_error(mock_async_openai):
     mock_usage.prompt_tokens = 10
     mock_usage.completion_tokens = 5
     mock_usage.total_tokens = 15
-    mock_usage.prompt_tokens_details.cached_tokens = 8  # 🔥 Simulamos Cache Hit
+    mock_usage.prompt_tokens_details.cached_tokens = 8
     mock_response = MagicMock()
     mock_response.choices = [mock_choice]
     mock_response.usage = mock_usage
@@ -115,17 +116,27 @@ async def test_openai_provider_prompt_caching_and_error(mock_async_openai):
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
     provider = OpenAICompatibleProvider(api_key="key", model="model")
-    # Enviamos un system prompt para activar el caching
     messages = [{"role": "system", "content": "System prompt"}]
+    original = json.dumps(messages)
 
-    # Forzamos ENABLE_PROMPT_CACHING = True
     with patch("app.core.config.settings.ENABLE_PROMPT_CACHING", True):
         res = await provider.chat(messages)
 
     assert res.content == "Cached response"
-    # Verificamos que el system prompt se transformó en lista con cache_control
-    assert isinstance(messages[0]["content"], list)
-    assert messages[0]["content"][0]["cache_control"]["type"] == "ephemeral"
+
+    # ✅ El caller NO debe ver mensajes mutados
+    assert json.dumps(messages) == original, (
+        "messages fue mutado in-place por prompt caching (bug 13)"
+    )
+
+    # ✅ El provider SÍ debe enviar cache_control a la API
+    call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+    sent_messages = call_kwargs["messages"]
+    assert isinstance(sent_messages[0]["content"], list)
+    assert sent_messages[0]["content"][0]["cache_control"]["type"] == "ephemeral"
+
+    # Y el caller sigue teniendo el original
+    assert messages[0]["content"] == "System prompt"
 
 
 @pytest.mark.asyncio

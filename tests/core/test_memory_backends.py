@@ -375,3 +375,87 @@ async def test_vector_store_basic(tmp_path):
     # Clear
     await store.clear()
     assert len(await store.get_all()) == 0
+
+
+@pytest.mark.asyncio
+async def test_session_files_parse_invalid_content(tmp_path):
+    """Cubre _parse_memory_file cuando el contenido no tiene cabecera (línea 13)."""
+    from app.core.harness.memory.backends.session_files import _parse_memory_file
+
+    assert _parse_memory_file("contenido sin cabecera") is None
+    assert _parse_memory_file("") is None
+
+
+@pytest.mark.asyncio
+async def test_session_files_parse_without_metadata(tmp_path):
+    """Cubre el fallback a kind='fact' y timestamp=now sin metadata (líneas 26-27)."""
+    from app.core.harness.memory.backends.session_files import (
+        SessionFilesStore,
+        _parse_memory_file,
+    )
+
+    store = SessionFilesStore(base_dir=tmp_path)
+    (tmp_path / "sin_metadata.md").write_text(
+        "# sin_metadata\n\nvalor sin pie de metadata", encoding="utf-8"
+    )
+
+    entries = await store.get_all()
+    assert len(entries) == 1
+    assert entries[0].key == "sin_metadata"
+    assert entries[0].kind == "fact"
+    assert abs((datetime.now() - entries[0].timestamp).total_seconds()) < 10
+
+    # La función directa también devuelve un timestamp reciente
+    entry = _parse_memory_file("# clave\n\nvalor")
+    assert entry is not None
+    assert entry.kind == "fact"
+
+
+@pytest.mark.asyncio
+async def test_session_files_save_empty_key(tmp_path):
+    """Cubre el ValueError cuando la key sanitizada queda vacía (línea 43)."""
+    from app.core.harness.memory.backends.session_files import SessionFilesStore
+
+    store = SessionFilesStore(base_dir=tmp_path)
+    with pytest.raises(ValueError, match="Key inválida"):
+        await store.save(MemoryEntry(key="", value="valor", timestamp=datetime.now()))
+
+
+@pytest.fixture
+def mock_vector_model(monkeypatch):
+    """Modelo de embeddings falso: evita descargar fastembed en estos tests."""
+    from app.core.harness.memory.backends import vector as vector_module
+
+    fake_model = MagicMock()
+    embedding = MagicMock()
+    embedding.tolist.return_value = [0.1] * 384
+    fake_model.embed.return_value = [embedding]
+    monkeypatch.setattr(vector_module.VectorStore, "_model", fake_model)
+    return fake_model
+
+
+@pytest.mark.asyncio
+async def test_vector_store_empty_text_embedding(tmp_path, mock_vector_model):
+    """Cubre el vector cero para textos vacíos (línea 57)."""
+    from app.core.harness.memory.backends.vector import VectorStore
+
+    store = VectorStore(db_path=tmp_path / "vec_empty.db")
+
+    assert store._embed("") == [0.0] * 384
+    assert store._embed("   ") == [0.0] * 384
+    mock_vector_model.embed.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_vector_store_save_without_inserted_row(tmp_path, mock_vector_model):
+    """Cubre el RuntimeError si INSERT ... RETURNING no devuelve fila (línea 78)."""
+    from app.core.harness.memory.backends.vector import VectorStore
+
+    store = VectorStore(db_path=tmp_path / "vec_no_row.db")
+
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.fetchone.return_value = None
+    store.conn = mock_conn
+
+    with pytest.raises(RuntimeError, match="No se pudo guardar/actualizar"):
+        await store.save(MemoryEntry(key="k", value="v", timestamp=datetime.now()))

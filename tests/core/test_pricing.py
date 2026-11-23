@@ -126,6 +126,39 @@ class TestPricingProvider:
         cost = await provider.get_cost("unknown", 1000, 500)
         assert cost == 0.0
 
+    @pytest.mark.asyncio
+    async def test_get_cost_pricing(self):
+        class MockSource(PricingSource):
+            async def get_prices(self):
+                return {"model1": {"input": 2.5e-6, "output": 1e-5}}
+
+        provider = PricingProvider(MockSource())
+        result = await provider.get_cost_pricing("model1", 1000, 500)
+        assert result == {
+            "input_cost": 1000 * 2.5e-6,
+            "output_cost": 500 * 1e-5,
+        }
+
+    @pytest.mark.asyncio
+    async def test_get_cost_pricing_unknown_model(self):
+        class MockSource(PricingSource):
+            async def get_prices(self):
+                return {}
+
+        provider = PricingProvider(MockSource())
+        result = await provider.get_cost_pricing("unknown", 1000, 500)
+        assert result == {"input_cost": 0.0, "output_cost": 0.0}
+
+    @pytest.mark.asyncio
+    async def test_get_cost_pricing_missing_prices(self):
+        class MockSource(PricingSource):
+            async def get_prices(self):
+                return {"free_model": {"input": None, "output": None}}
+
+        provider = PricingProvider(MockSource())
+        result = await provider.get_cost_pricing("free_model", 1000, 500)
+        assert result == {"input_cost": 0.0, "output_cost": 0.0}
+
 
 class TestRegistry:
     def test_expand_env_vars(self):

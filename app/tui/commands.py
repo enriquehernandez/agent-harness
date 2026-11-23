@@ -40,7 +40,7 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `/permissions` | Gestiona permisos guardados |\n"
             "| `/export [formato]` | Exporta la conversación (markdown/json) |\n"
             "| `/memory [clear/migrate]` | Gestiona la memoria persistente |\n"
-            "| `/session [list/load/delete/save]` | Gestiona las sesiones guardadas |\n"
+            "| `/session [list/load/delete/save/new]` | Gestiona las sesiones guardadas |\n"
             "| `/doctor` | 🩺 Diagnóstico del estado del sistema |\n"
             "| `/trace` | 📊 Muestra el uso de tokens real de la última llamada |\n"
             "| `/quit` | Sale del programa |\n"
@@ -367,23 +367,27 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
         await app.write_to_chat("🧹 Historial de conversación limpiado.", type="system")
         return True
 
-    elif cmd in ("/model", "/provider"):
+    elif cmd == "/provider":
         if len(parts) > 1:
-            new_provider = parts[1]
+            new_provider = parts[1].lower()
             try:
                 new_llm = get_llm(new_provider)
                 state["provider"] = new_provider
                 if app.agent_loop:
                     app.agent_loop.llm = new_llm
                 app.update_dashboard("Listo")
-                await app.write_to_chat(f"✅ Proveedor cambiado a: **{new_provider}**", type="system")
+                await app.write_to_chat(
+                    f"✅ Proveedor cambiado a: **{new_provider}**", type="system"
+                )
             except Exception as e:
-                await app.write_to_chat(f"❌ Error al cambiar de proveedor: {e}", type="system")
+                await app.write_to_chat(
+                    f"❌ Error al cambiar de proveedor: {e}", type="system"
+                )
         else:
             current = state.get("provider", "desconocido")
             available = ", ".join(list_providers())
-            model_name = getattr(llm, 'model_name', getattr(
-                llm, 'model', 'Desconocido'))
+            model_name = getattr(llm, "model_name", getattr(
+                llm, "model", "Desconocido"))
             info = (
                 f"### ⚙️ Configuración Actual\n\n"
                 f"**Proveedor:** `{current.upper()}`\n\n"
@@ -394,12 +398,44 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             await app.write_to_chat(info, type="agent")
         return True
 
+    elif cmd == "/model":
+        if len(parts) > 1:
+            new_model = parts[1]
+            provider = state.get("provider", settings.LLM_PROVIDER)
+            try:
+                new_llm = get_llm(provider, model=new_model)
+                state["model"] = new_model
+                if app.agent_loop:
+                    app.agent_loop.llm = new_llm
+                app.update_dashboard("Listo")
+                await app.write_to_chat(
+                    f"✅ Modelo cambiado a: **{new_model}** (provider: `{provider}`)",
+                    type="system",
+                )
+            except Exception as e:
+                await app.write_to_chat(
+                    f"❌ Error al cambiar de modelo: {e}", type="system"
+                )
+        else:
+            current = state.get("model", "desconocido")
+            provider = state.get("provider", "desconocido")
+            await app.write_to_chat(
+                f"### ⚙️ Modelo Actual\n\n"
+                f"**Modelo:** `{current}`\n\n"
+                f"**Proveedor:** `{provider.upper()}`\n\n"
+                f"Usa `/model <nombre>` para cambiarlo.",
+                type="agent",
+            )
+        return True
+
     elif cmd == "/compact":
         strategy_arg = parts[1].lower() if len(parts) > 1 else "summarize"
         if strategy_arg not in ("summarize", "sliding", "none"):
             await app.write_to_chat("❌ Estrategias válidas: `summarize`, `sliding`, `none`.", type="system")
             return True
 
+        # 🔥 Guardar la estrategia actual y restaurarla después (no permanente)
+        previous_strategy = ctx.strategy
         strategy_name = ctx.set_strategy(strategy_arg)
         await app.write_to_chat(f"🗜️ **Compactando contexto** (Estrategia: `{strategy_name}`)...", type="system")
 
@@ -418,7 +454,7 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             f"- Tokens: `{old_tokens}` ➡️ `{new_tokens}`"
         )
         await app.write_to_chat(summary, type="agent")
-
+        ctx.strategy = previous_strategy
         if verbose and summary_text:
             clean_summary = summary_text.replace("--- Summary of previous conversation ---", "").replace(
                 "----------------------------------------", "").strip()
@@ -477,7 +513,9 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             return True
 
         data = json.loads(perm_file.read_text())
-        allowed = list(data.get("session_allowed", {}).keys())
+        allowed = data.get("session_allowed", [])
+        if not isinstance(allowed, list):
+            allowed = list(allowed.keys()) if isinstance(allowed, dict) else []
 
         if not allowed:
             await app.write_to_chat("No hay herramientas con 'Permitir siempre'.", type="system")
@@ -486,7 +524,7 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
         txt = "### 🔐 Permisos Permanentes\n\n"
         for tool in allowed:
             txt += f"- `{tool}`\n"
-        txt += "\n*Para borrarlos, elimina el archivo `.harness_permissions.json`.*"
+        txt += f"\n*Para borrarlos, elimina el archivo `{settings.permissions_file}`.*"
 
         await app.write_to_chat(txt, type="agent")
         return True
@@ -518,21 +556,64 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
                 if getattr(app, "memory_store", None) is None:
                     await app.write_to_chat("❌ Store no inicializado.", type="system")
                     return True
+
                 target = parts[2].lower() if len(parts) > 2 else "sqlite"
                 from app.core.harness.memory.factory import create_memory_store
-                from app.tools.memory import MemorySaveTool, MemoryRecallTool  # 🔥 Importamos tools
+                from app.tools.memory import MemorySaveTool, MemoryRecallTool
 
                 new_store = create_memory_store(target)
                 old_entries = await app.memory_store.get_all()
                 for entry in old_entries:
                     await new_store.save(entry)
 
+                # Cerrar el store viejo si tiene close()
+                if hasattr(app.memory_store, "close"):
+                    import inspect
+                    if inspect.iscoroutinefunction(app.memory_store.close):
+                        await app.memory_store.close()
+                    else:
+                        app.memory_store.close()
+
                 app.memory_store = new_store
-                # 🔥 Re-registramos las tools con el nuevo store
+
+                if hasattr(new_store, "close"):
+                    import inspect
+                    if inspect.iscoroutinefunction(new_store.close):
+                        await new_store.close()
+                    else:
+                        new_store.close()
+                elif hasattr(new_store, "commit"):
+                    await new_store.commit()
+
+                # Re-registrar tools con el nuevo store
                 app.registry.register(MemorySaveTool(store=new_store))
                 app.registry.register(MemoryRecallTool(store=new_store))
 
-                await app.write_to_chat(f"✅ Memoria migrada a `{target}` y herramientas actualizadas.", type="system")
+                if app.agent_loop:
+                    app.agent_loop.tools = app.registry
+
+                # 🔥 Actualizar el system prompt del contexto con el nuevo preamble
+                if getattr(app, "ctx", None) and app.ctx.messages and app.ctx.messages[0].get("role") == "system":
+                    new_preamble = new_store.preamble()
+                    if new_preamble:
+                        current = app.ctx.messages[0]["content"]
+                        # Reemplazar la sección de memoria si existe, o añadirla al final
+                        if "[Long-term memory]:" in current:
+                            import re
+                            current = re.sub(
+                                r"\[Long-term memory\]:\n.*?(?=\n\n|\Z)",
+                                f"[Long-term memory]:\n{new_preamble}",
+                                current,
+                                flags=re.DOTALL,
+                            )
+                        else:
+                            current += f"\n\n[Long-term memory]:\n{new_preamble}"
+                        app.ctx.messages[0]["content"] = current
+
+                await app.write_to_chat(
+                    f"✅ Memoria migrada a `{target}` y herramientas actualizadas.",
+                    type="system",
+                )
             else:
                 await app.write_to_chat("Uso: `/memory clear` o `/memory migrate sqlite`", type="system")
         return True
@@ -565,9 +646,22 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
                     if messages:
                         app.ctx.messages = messages
                         app.session_manager = sm
-                        await app.write_to_chat(f"✅ Sesión `{session_id}` cargada ({len(messages)} mensajes).", type="system")
+
+                        # 🔥 Recargar repair_counts desde los metadatos
+                        metadata = sm.load_metadata()
+                        repair_counts = metadata.get("repair_counts", {})
+                        if repair_counts and getattr(app, "agent_loop", None):
+                            app.agent_loop.repair_counts = repair_counts
+
+                        await app.write_to_chat(
+                            f"✅ Sesión `{session_id}` cargada ({len(messages)} mensajes, "
+                            f"{len(repair_counts)} tools en reparación).",
+                            type="system",
+                        )
                     else:
-                        await app.write_to_chat(f"❌ Sesión `{session_id}` no encontrada.", type="system")
+                        await app.write_to_chat(
+                            f"❌ Sesión `{session_id}` no encontrada.", type="system"
+                        )
                 else:
                     await app.write_to_chat("Uso: `/session load <id>`", type="system")
 
@@ -591,6 +685,49 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
                 else:
                     await app.write_to_chat("❌ No hay sesión activa.", type="system")
 
+            elif subcmd == "new":
+                from app.core.harness.session import SessionManager
+
+                # 1. Guardar la sesión actual si existe
+                if getattr(app, "session_manager", None) and app.ctx:
+                    app.session_manager.save(
+                        app.ctx, getattr(app, "agent_loop", None))
+                    await app.write_to_chat(
+                        "💾 Sesión actual guardada antes de crear la nueva.", type="system"
+                    )
+
+                # 2. Crear nueva sesión (nuevo ID y archivo JSON vacío en disco)
+                sm = SessionManager.new()
+                app.session_manager = sm
+
+                # Limpiar los contadores de reparación del loop para la nueva sesión
+                if getattr(app, "agent_loop", None):
+                    app.agent_loop.repair_counts = {}
+
+                # 3. Limpiar el contexto preservando el System Prompt
+                # (Asumiendo que tu ContextManager guarda el system prompt en messages[0])
+                if hasattr(app.ctx, "clear"):
+                    # Si tu método clear() ya preserva el system prompt, está perfecto.
+                    app.ctx.clear()
+                else:
+                    # Si no, lo preservamos manualmente:
+                    system_prompt = app.ctx.messages[0] if app.ctx.messages and app.ctx.messages[0].get(
+                        "role") == "system" else None
+                    app.ctx.messages = [system_prompt] if system_prompt else []
+
+                # 4. Limpiar la pantalla del chat (UI)
+                if hasattr(app, "query_one"):
+                    try:
+                        scroll = app.query_one("#chat-scroll")
+                        await scroll.remove_children()
+                    except Exception:
+                        pass  # Por si acaso se llama fuera de la UI
+
+                await app.write_to_chat(
+                    f"✅ Nueva sesión creada: `{sm.session_id}`. Contexto limpio.", type="system"
+                )
+                return True
+
             else:
                 await app.write_to_chat("Uso: `/session [list|load|delete|save] [id]`", type="system")
         else:
@@ -599,7 +736,8 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
                 "- `/session list` → Lista todas las sesiones guardadas\n"
                 "- `/session load <id>` → Carga una sesión\n"
                 "- `/session delete <id>` → Elimina una sesión\n"
-                "- `/session save` → Guarda la sesión actual",
+                "- `/session save` → Guarda la sesión actual\n"
+                "- `/session new` → Guarda la actual y crea una nueva sesión",
                 type="agent"
             )
         return True

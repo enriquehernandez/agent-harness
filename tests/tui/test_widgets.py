@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch
-from app.tui.widgets import RichMessage
+from app.tui.widgets.rich_message import RichMessage
 
 
 def test_rich_message_plain_text():

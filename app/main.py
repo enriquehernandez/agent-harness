@@ -10,8 +10,9 @@ from app.tui.app import run_tui
 
 
 def main():
-    asyncio.run(run_tui())
+    """Entry point. `run_tui` es síncrono (Textual gestiona su propio loop)."""
+    run_tui()
 
 
 if __name__ == "__main__":
-    run_tui()
+    main()

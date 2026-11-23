@@ -4,6 +4,15 @@ from app.core.harness.tool import BaseTool, ToolResult
 from app.core.logger import logger
 
 
+def _is_within_base_dir(target: Path, base_dir: Path) -> bool:
+    """Comprueba que `target` está dentro de `base_dir` (resuelto)."""
+    try:
+        target.resolve().relative_to(base_dir.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 class ReadFileTool(BaseTool):
     def __init__(self, base_dir: str = "."):
         self.name = "read_file"
@@ -13,27 +22,23 @@ class ReadFileTool(BaseTool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Relative path of the file to read (e.g., 'app/main.py')."
+                    "description": "Relative path of the file to read (e.g., 'app/main.py').",
                 }
             },
-            "required": ["path"]
+            "required": ["path"],
         }
         self.base_dir = Path(base_dir).resolve()
 
     async def run(self, path: str, **kwargs) -> ToolResult:
-        # Ignoramos 'timeout' y cualquier otro argumento extra que envíe el LLM con (**kwargs)
         try:
             target = (self.base_dir / path).resolve()
-            if not str(target).startswith(str(self.base_dir)):
+            if not _is_within_base_dir(target, self.base_dir):
                 return ToolResult(success=False, content="", error="Access denied: outside base directory.")
 
             if not target.is_file():
                 return ToolResult(success=False, content="", error=f"File '{path}' does not exist.")
 
-            # logger.info(
-            #     f"ReadFileTool: leyendo '{path}' desde cwd='{Path.cwd()}'")
             content = target.read_text(encoding="utf-8")
-            # logger.info(f"ReadFileTool: leídos {len(content)} caracteres")
             if len(content) > 10000:
                 content = content[:10000] + "\n\n... [TRUNCATED]"
 
@@ -51,16 +56,16 @@ class WriteFileTool(BaseTool):
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Relative path of the file."},
-                "content": {"type": "string", "description": "The content to write."}
+                "content": {"type": "string", "description": "The content to write."},
             },
-            "required": ["path", "content"]
+            "required": ["path", "content"],
         }
         self.base_dir = Path(base_dir).resolve()
 
     async def run(self, path: str, content: str) -> ToolResult:
         try:
             target = (self.base_dir / path).resolve()
-            if not str(target).startswith(str(self.base_dir)):
+            if not _is_within_base_dir(target, self.base_dir):
                 return ToolResult(success=False, content="", error="Access denied: outside base directory.")
 
             target.parent.mkdir(parents=True, exist_ok=True)

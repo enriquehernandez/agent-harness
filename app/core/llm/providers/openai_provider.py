@@ -1,4 +1,3 @@
-import asyncio
 import json
 from typing import Any, AsyncIterator, Optional
 from openai import AsyncOpenAI
@@ -36,15 +35,18 @@ class OpenAICompatibleProvider(BaseLLM):
         # 🔥 PROMPT CACHING LOGIC
         from app.core.config import settings
         if getattr(settings, "ENABLE_PROMPT_CACHING", False) and messages:
-            if messages[0]["role"] == "system" and "content" in messages[0]:
-                if isinstance(messages[0]["content"], str):
-                    messages[0]["content"] = [
+            messages = [dict(m) for m in messages]
+            if messages[0].get("role") == "system" and isinstance(messages[0].get("content"), str):
+                messages[0] = {
+                    **messages[0],
+                    "content": [
                         {
                             "type": "text",
                             "text": messages[0]["content"],
-                            "cache_control": {"type": "ephemeral"}
+                            "cache_control": {"type": "ephemeral"},
                         }
-                    ]
+                    ],
+                }
 
         payload = {
             "model": self.model,
@@ -98,6 +100,7 @@ class OpenAICompatibleProvider(BaseLLM):
             if hasattr(response.usage, "prompt_tokens_details"):
                 cached = getattr(
                     response.usage.prompt_tokens_details, "cached_tokens", 0)
+                usage["cached_tokens"] = cached
                 if cached > 0:
                     logger.debug(f"✅ Cache Hit: {cached} tokens saved.")
 
@@ -122,24 +125,17 @@ class OpenAICompatibleProvider(BaseLLM):
         }
         # logger.debug(json.dumps(payload, indent=2, ensure_ascii=False))
 
-        # stream = await self.client.chat.completions.create(
-        #     model=self.model,
-        #     messages=messages,
-        #     tools=tools,
-        #     stream=True,
-        #     stream_options={"include_usage": True},  # 🔥 Para obtener usage
-        #     **kwargs,
-        # )
-        stream = await asyncio.wait_for(
-            self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=tools,
-                stream=True,
-                stream_options={"include_usage": True},
-                **kwargs,
-            ),
-            timeout=60.0  # 🔥 Timeout de 60s para la conexión
+        # Sin `asyncio.wait_for` aquí: sólo cubría la creación del stream, no
+        # la recepción de tokens, y creaba un Task propio que rompía el contexto
+        # de OTel/Langfuse al cancelarse. Los timeouts reales están en
+        # AgentLoop.stream y en la TUI.
+        stream = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            tools=tools,
+            stream=True,
+            stream_options={"include_usage": True},
+            **kwargs,
         )
 
         # 🔥 Acumulamos los tool_calls mientras llegan por partes

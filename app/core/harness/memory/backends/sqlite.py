@@ -20,20 +20,24 @@ class SQLiteStore(MemoryStore):
         self.conn.commit()
 
     async def save(self, entry: MemoryEntry) -> None:
+        # FTS5 no soporta UNIQUE en key: borramos antes de insertar
+        self.conn.execute("DELETE FROM memories WHERE key = ?", (entry.key,))
         self.conn.execute(
             "INSERT INTO memories (key, value, kind, timestamp) VALUES (?, ?, ?, ?)",
-            (entry.key, entry.value, entry.kind, entry.timestamp.isoformat())
+            (entry.key, entry.value, entry.kind, entry.timestamp.isoformat()),
         )
         self.conn.commit()
 
     async def recall(self, query: str, limit: int = 5) -> list[MemoryEntry]:
+        safe_query = query.replace('"', '""')
         cursor = self.conn.execute(
-            "SELECT key, value, kind, timestamp FROM memories WHERE memories MATCH ? LIMIT ?",
-            (query, limit)
+            'SELECT key, value, kind, timestamp FROM memories WHERE memories MATCH ? LIMIT ?',
+            (f'"{safe_query}"', limit),
         )
         return [
-            MemoryEntry(key=k, value=v, kind=kd,
-                        timestamp=datetime.fromisoformat(ts))
+            MemoryEntry(
+                key=k, value=v, kind=kd, timestamp=datetime.fromisoformat(ts)
+            )
             for k, v, kd, ts in cursor.fetchall()
         ]
 

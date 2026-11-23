@@ -9,6 +9,15 @@ from app.core.harness.tool import BaseTool, ToolResult
 from app.core.logger import logger
 
 
+def _is_within_base_dir(target: Path, base_dir: Path) -> bool:
+    """Comprueba que `target` está dentro de `base_dir` (resuelto)."""
+    try:
+        target.resolve().relative_to(base_dir.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 class ReadDocumentTool(BaseTool):
     def __init__(self, base_dir: str = "."):
         self.name = "read_document"
@@ -21,17 +30,17 @@ class ReadDocumentTool(BaseTool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Ruta del archivo a leer (ej. '.harness/temp_attachments/cv.pdf')."
+                    "description": "Ruta del archivo a leer (ej. '.harness/temp_attachments/cv.pdf').",
                 }
             },
-            "required": ["path"]
+            "required": ["path"],
         }
         self.base_dir = Path(base_dir).resolve()
 
     async def run(self, path: str) -> ToolResult:
         try:
             target = (self.base_dir / path).resolve()
-            if not str(target).startswith(str(self.base_dir)):
+            if not _is_within_base_dir(target, self.base_dir):
                 return ToolResult(success=False, content="", error="Access denied: outside base directory.")
 
             if not target.is_file():
@@ -50,23 +59,31 @@ class ReadDocumentTool(BaseTool):
             elif ext == ".pptx":
                 text = self._read_pptx(target)
             else:
-                return ToolResult(success=False, content="", error=f"Formato '{ext}' no soportado por read_document.")
+                return ToolResult(
+                    success=False, content="",
+                    error=f"Formato '{ext}' no soportado por read_document.",
+                )
 
             if not text.strip():
-                return ToolResult(success=True, content="(El documento no contiene texto extraíble. Podría estar vacío o ser una imagen escaneada.)")
+                return ToolResult(
+                    success=True,
+                    content=(
+                        "(El documento no contiene texto extraíble. "
+                        "Podría estar vacío o ser una imagen escaneada.)"
+                    ),
+                )
 
-            # 🔥 TRUNCADO CONFIGURABLE CON MENSAJE CLARO
             max_chars = settings.MAX_DOCUMENT_CHARS
             if len(text) > max_chars:
                 total = len(text)
                 text = text[:max_chars]
-                truncation_msg = (
+                text += (
                     f"\n\n--- ⚠️ [DOCUMENTO TRUNCADO] ---\n"
-                    f"El documento tiene {total:,} caracteres en total, pero solo se han extraído los primeros {max_chars:,} "
-                    f"debido al límite `MAX_DOCUMENT_CHARS` configurado en `.env`. "
-                    f"Si necesitas el resto del contenido, pide al usuario que te proporcione una parte específica o aumenta el límite."
+                    f"El documento tiene {total:,} caracteres en total, pero solo se han extraído "
+                    f"los primeros {max_chars:,} debido al límite `MAX_DOCUMENT_CHARS` configurado "
+                    f"en `.env`. Si necesitas el resto del contenido, pide al usuario que te "
+                    f"proporcione una parte específica o aumenta el límite."
                 )
-                text += truncation_msg
 
             return ToolResult(success=True, content=text)
 
@@ -104,7 +121,6 @@ class ReadDocumentTool(BaseTool):
             sheet = wb[sheet_name]
             text += f"--- Hoja: {sheet_name} ---\n"
             for row in sheet.iter_rows(values_only=True):
-                # Filtrar filas completamente vacías
                 if any(cell is not None for cell in row):
                     row_text = [
                         str(cell) if cell is not None else "" for cell in row]

@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # LLM
-    LLM_PROVIDER: str = "openai"
+    LLM_PROVIDER: str = "fake"
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"
     OPENROUTER_API_KEY: str = ""
@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     # Seguridad
     LOG_LEVEL: str = "INFO"
     ENABLE_PROMPT_CACHING: bool = True
+
+    # LangFuse
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = ""
 
     # LIMITS
     MAX_DOCUMENT_CHARS: int = 15000
@@ -54,7 +59,7 @@ class Settings(BaseSettings):
     def sessions_dir(self) -> Path:
         return self.DATA_DIR / "sessions"
 
-        # Pricing
+    # Pricing
     PRICING_CACHE_TTL_DAYS: int = 1
     PRICING_CONFIG_FILE: str = "pricing_config.json"
 

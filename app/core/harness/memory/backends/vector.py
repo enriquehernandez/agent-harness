@@ -52,15 +52,17 @@ class VectorStore(MemoryStore):
             """)
 
     def _embed(self, text: str) -> list[float]:
-        """fastembed devuelve un generador, lo convertimos a lista."""
+        if not text or not text.strip():
+            # fastembed con "" puede dar vector cero o fallar; devolvemos vector cero
+            return [0.0] * 384
         return list(self.model.embed([text]))[0].tolist()
 
     async def save(self, entry: MemoryEntry) -> None:
         embedding = self._embed(entry.value)
 
         with self.conn:
-            # 1. Insertamos/actualizamos el recuerdo y obtenemos su ID
-            cursor = self.conn.execute("""
+            cursor = self.conn.execute(
+                """
                 INSERT INTO memories (key, value, kind, timestamp)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET
@@ -68,20 +70,21 @@ class VectorStore(MemoryStore):
                     kind=excluded.kind,
                     timestamp=excluded.timestamp
                 RETURNING id
-            """, (entry.key, entry.value, entry.kind, entry.timestamp.isoformat()))
-
-            memory_id = cursor.fetchone()[0]
-
-            # 2. Borramos el vector viejo (si existía) para evitar la UNIQUE constraint
-            self.conn.execute(
-                "DELETE FROM vec_memories WHERE memory_id = ?", (memory_id,)
+                """,
+                (entry.key, entry.value, entry.kind, entry.timestamp.isoformat()),
             )
+            row = cursor.fetchone()
+            if not row:
+                raise RuntimeError(
+                    f"No se pudo guardar/actualizar la memoria '{entry.key}'")
+            memory_id = row[0]
 
-            # 3. Insertamos el nuevo vector
-            self.conn.execute("""
-                INSERT INTO vec_memories (memory_id, embedding)
-                VALUES (?, ?)
-            """, (memory_id, sqlite_vec.serialize_float32(embedding)))
+            self.conn.execute(
+                "DELETE FROM vec_memories WHERE memory_id = ?", (memory_id,))
+            self.conn.execute(
+                "INSERT INTO vec_memories (memory_id, embedding) VALUES (?, ?)",
+                (memory_id, sqlite_vec.serialize_float32(embedding)),
+            )
 
     async def recall(self, query: str, limit: int = 5) -> list[MemoryEntry]:
         query_embedding = self._embed(query)

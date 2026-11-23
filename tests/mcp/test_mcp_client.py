@@ -12,16 +12,13 @@ async def test_mcp_client_full_flow(mock_session_class, mock_stdio_client):
     mock_read = MagicMock()
     mock_write = MagicMock()
 
-    # Mock del context manager stdio_client
     mock_stdio_client.return_value.__aenter__ = AsyncMock(
         return_value=(mock_read, mock_write))
     mock_stdio_client.return_value.__aexit__ = AsyncMock()
 
-    # Mock de ClientSession
     mock_session = mock_session_class.return_value.__aenter__.return_value
     mock_session.initialize = AsyncMock()
 
-    # Mock de list_tools
     mock_tool = MagicMock()
     mock_tool.name = "test_tool"
     mock_tool.description = "Una tool"
@@ -34,13 +31,21 @@ async def test_mcp_client_full_flow(mock_session_class, mock_stdio_client):
     await client.connect()
 
     registry = ToolRegistry()
-    await client.register_tools(registry)
+    await client.register_tools(registry, server_name="fs")
     await client.disconnect()
 
     # 3. Verificaciones
     mock_session.initialize.assert_called_once()
-    assert "test_tool" in registry.names()
-    assert registry.get("test_tool").description == "[MCP:unknown] Una tool"
+
+    # ✅ El nombre está prefijado (Bug 6)
+    expected_name = "mcp_fs_test_tool"
+    assert expected_name in registry.names(), (
+        f"Esperaba '{expected_name}', tengo: {registry.names()}"
+    )
+
+    tool = registry.get(expected_name)
+    assert tool.description == "[MCP:fs] Una tool"
+    assert tool.original_name == "test_tool"  # 🔥 el nombre original se conserva
 
 
 @pytest.mark.asyncio

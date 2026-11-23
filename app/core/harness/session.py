@@ -56,6 +56,22 @@ class SessionManager:
         data = json.loads(self.session_file.read_text(encoding="utf-8"))
         return data.get("messages", [])
 
+    @classmethod
+    def new(cls) -> "SessionManager":
+        """Crea una nueva sesión y guarda su JSON inicial en disco."""
+        instance = cls()
+        data = {
+            "session_id": instance.session_id,
+            "timestamp": datetime.now().isoformat(),
+            "message_count": 0,
+            "messages": []
+        }
+        instance.session_file.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+        return instance
+
     @staticmethod
     def list_sessions() -> list[dict]:
         """Lista todas las sesiones guardadas con su metadata."""

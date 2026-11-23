@@ -2,7 +2,7 @@ import asyncio
 from typing import AsyncIterator
 
 import pytest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 from app.core.harness.loop import AgentLoop
 from app.core.harness.permissions import PermissionGate, Decision
 from app.core.harness.tool import FunctionTool, ToolRegistry, ToolResult
@@ -183,3 +183,162 @@ async def test_loop_stream_repair_counts_real(fake_llm, basic_registry):
             assert "Reintento 1/3" in all_content
             assert "Reintento 2/3" in all_content
             assert "falló 3 veces" in all_content
+
+
+def test_init_langfuse_without_credentials():
+    """Cubre el return None de _init_langfuse() cuando no hay credenciales."""
+    from app.core.harness import loop as loop_module
+
+    with patch.object(loop_module.settings, "LANGFUSE_PUBLIC_KEY", ""), \
+            patch.object(loop_module.settings, "LANGFUSE_SECRET_KEY", ""):
+        assert loop_module._init_langfuse() is None
+
+
+@pytest.mark.asyncio
+async def test_loop_run_critic_rejection_then_accept(fake_llm, basic_registry):
+    """Cubre la rama de auto-reflexión de run() (REJECTED → corrección → aceptación)."""
+    fake_llm._responses = [
+        LLMResponse(content="Borrador", usage={"prompt_tokens": 10}),
+        LLMResponse(content="Corregido", usage={"completion_tokens": 5}),
+    ]
+    critic = MagicMock()
+    critic.run = AsyncMock(side_effect=[
+        ToolResult(success=True, content="REJECTED: revisa el tono"),
+        ToolResult(success=True, content="OK"),
+    ])
+    ctx = ContextManager()
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, critic_tool=critic,
+                     agent_rules="Reglas de prueba")
+
+    result = await loop.run("Hola", context=ctx)
+
+    assert result.final_answer == "Corregido"
+    assert result.steps == 2
+    assert result.usage_total == {"prompt_tokens": 10, "completion_tokens": 5}
+    assert critic.run.await_count == 2
+    assert critic.run.await_args_list[0].kwargs["agent_rules"] == "Reglas de prueba"
+    all_content = " ".join(str(msg.get("content", ""))
+                           for msg in ctx.get_messages())
+    assert "revisa el tono" in all_content
+
+
+@pytest.mark.asyncio
+async def test_loop_run_max_iterations(fake_llm, basic_registry):
+    """Cubre el retorno final de run() al agotar max_iterations."""
+    fake_llm._responses = [
+        LLMResponse(
+            content="Pensando",
+            tool_calls=[{"id": f"c{i}", "name": "add", "arguments": {"a": 1, "b": 2}}],
+            usage={"total_tokens": i + 1},
+        )
+        for i in range(3)
+    ]
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry,
+                     permissions=gate, max_iterations=3)
+
+    result = await loop.run("Suma 1 y 2")
+
+    assert result.final_answer == "[Max iterations reached without final answer]"
+    assert result.steps == 3
+    assert result.tools_used == ["add", "add", "add"]
+    assert result.usage_total["total_tokens"] == 6
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_timeout_fallback_to_settings(fake_llm, basic_registry):
+    """Cubre el fallback a settings.LLM_STREAM_TIMEOUT cuando timeout <= 0."""
+    async def quick_stream(*args, **kwargs):
+        yield "Respuesta rápida"
+
+    from app.core.harness import loop as loop_module
+
+    with patch.object(fake_llm, "stream_chat", side_effect=quick_stream):
+        with patch.object(loop_module.settings, "LLM_STREAM_TIMEOUT", 30.0):
+            loop = AgentLoop(llm=fake_llm, tools=basic_registry, max_iterations=1)
+            events = [event async for event in loop.stream("Hola", timeout_seconds=0)]
+
+    results = [e for e in events if e.type == "result"]
+    assert len(results) == 1
+    assert results[0].data["final_answer"] == "Respuesta rápida"
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_critic_rejection_then_accept(fake_llm, basic_registry):
+    """Cubre la rama de rechazo del crítico dentro de stream()."""
+    critic = MagicMock()
+    critic.run = AsyncMock(side_effect=[
+        ToolResult(success=True, content="REJECTED: falta contexto"),
+        ToolResult(success=True, content="OK"),
+    ])
+    ctx = ContextManager()
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry,
+                     critic_tool=critic, max_iterations=3)
+
+    events = [event async for event in loop.stream("Hola", context=ctx)]
+
+    texts = [e.data for e in events if e.type == "text_chunk"]
+    assert any(d.get("is_correction_marker") for d in texts)
+    assert any("Corrección aplicada: falta contexto" in d.get("text", "") for d in texts)
+    results = [e for e in events if e.type == "result"]
+    assert len(results) == 1
+    assert results[0].data["steps"] == 2
+    assert critic.run.await_count == 2
+    assert critic.run.await_args_list[0].kwargs["agent_rules"] == \
+        "Sigue las instrucciones del sistema."
+    all_content = " ".join(str(msg.get("content", ""))
+                           for msg in ctx.get_messages())
+    assert "falta contexto" in all_content
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_critic_reflection_limit(fake_llm, basic_registry):
+    """Cubre el aviso de límite de reflexiones en stream()."""
+    critic = MagicMock()
+    critic.run = AsyncMock(return_value=ToolResult(
+        success=True, content="REJECTED: incompleto"))
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry,
+                     critic_tool=critic, max_iterations=4)
+
+    events = [event async for event in loop.stream("Hola")]
+
+    assert critic.run.await_count == 2
+    texts = [e.data.get("text", "") for e in events if e.type == "text_chunk"]
+    assert any("límite de reflexiones" in text for text in texts)
+    results = [e for e in events if e.type == "result"]
+    assert len(results) == 1
+    assert results[0].data["steps"] == 3
+
+
+@pytest.mark.asyncio
+async def test_loop_execute_tool_permission_denied(fake_llm, basic_registry, tmp_path):
+    """Cubre la rama DENY de _execute_tool()."""
+    gate = PermissionGate(policies={"add": Decision.DENY},
+                          persist_file=tmp_path / "no_perms.json")
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+    ctx = ContextManager()
+
+    success, result = await loop._execute_tool(
+        {"id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}, ctx)
+
+    assert success is False
+    assert result is None
+    assert ctx.get_messages()[-1] == {
+        "role": "tool",
+        "tool_call_id": "c1",
+        "content": "ERROR: Permission denied for 'add'.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_loop_calculate_cost_delegates_to_pricing(fake_llm, basic_registry):
+    """Cubre _calculate_cost() y su delegación a get_cost_pricing()."""
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+    loop.pricing.get_cost_pricing = AsyncMock(
+        return_value={"input_cost": 0.1, "output_cost": 0.2})
+
+    cost = await loop._calculate_cost(
+        {"prompt_tokens": 100, "completion_tokens": 50})
+
+    assert cost == {"input_cost": 0.1, "output_cost": 0.2}
+    loop.pricing.get_cost_pricing.assert_awaited_once_with("fake-model", 100, 50)

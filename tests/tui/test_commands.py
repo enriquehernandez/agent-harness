@@ -714,3 +714,150 @@ async def test_cmd_cost_no_usage(mock_app, ctx):
 
     await handle_command("/cost", ctx, {}, None, mock_app)
     assert "No hay datos de coste" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_provider_show_change_and_error(mock_app, ctx):
+    """Cubre todas las ramas de /provider (mostrar, cambiar y error)."""
+    llm = MagicMock()
+    llm.model_name = "gpt-4o"
+
+    with patch("app.tui.commands.list_providers", return_value=["fake", "openai"]):
+        assert await handle_command("/provider", ctx, {"provider": "openai"}, llm, mock_app) is True
+    msg = mock_app.write_to_chat.call_args[0][0]
+    assert "Configuración Actual" in msg
+    assert "gpt-4o" in msg
+    assert "fake" in msg
+
+    new_llm = MagicMock()
+    mock_app.agent_loop = MagicMock()
+    with patch("app.tui.commands.get_llm", return_value=new_llm) as mock_get:
+        state = {}
+        assert await handle_command("/provider FAKE", ctx, state, llm, mock_app) is True
+        mock_get.assert_called_once_with("fake")
+        assert state == {"provider": "fake"}
+        assert mock_app.agent_loop.llm is new_llm
+        mock_app.update_dashboard.assert_called_with("Listo")
+        assert "Proveedor cambiado" in mock_app.write_to_chat.call_args[0][0]
+
+    with patch("app.tui.commands.get_llm", side_effect=Exception("boom")):
+        assert await handle_command("/provider bad", ctx, {}, llm, mock_app) is True
+        assert "Error al cambiar de proveedor" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_memory_migrate_commit_and_preamble(mock_app, ctx):
+    """Cubre el commit del store nuevo y la actualización del preamble en memoria."""
+    class CommitStore:
+        """Store sin close() pero con commit() para forzar la rama elif."""
+
+        def __init__(self, preamble):
+            self._preamble = preamble
+            self.save = AsyncMock()
+            self.commit = AsyncMock()
+
+        def preamble(self):
+            return self._preamble
+
+    mock_app.ctx = ctx  # ContextManager real para poder inspeccionar messages[0]
+    mock_app.agent_loop = MagicMock()
+
+    old_store = MagicMock()
+    old_store.get_all = AsyncMock(return_value=[])
+    mock_app.memory_store = old_store
+
+    new_store = CommitStore("Recuerdo: azul")
+    with patch("app.core.harness.memory.factory.create_memory_store", return_value=new_store):
+        assert await handle_command("/memory migrate sqlite", ctx, {}, None, mock_app) is True
+    new_store.commit.assert_called_once()
+    assert "[Long-term memory]:\nRecuerdo: azul" in ctx.messages[0]["content"]
+
+    # Segunda migración: ya existe la sección [Long-term memory] -> re.sub()
+    ctx.messages[0]["content"] = "System\n\n[Long-term memory]:\nviejo\n\nFinal"
+    mock_app.memory_store = MagicMock()
+    mock_app.memory_store.get_all = AsyncMock(return_value=[])
+    new_store_2 = CommitStore("Recuerdo: verde")
+    with patch("app.core.harness.memory.factory.create_memory_store", return_value=new_store_2):
+        assert await handle_command("/memory migrate sqlite", ctx, {}, None, mock_app) is True
+    content = ctx.messages[0]["content"]
+    assert "Recuerdo: verde" in content
+    assert "viejo" not in content
+    assert "Final" in content
+
+    # Tercera migración: preamble vacío -> no se toca el system prompt
+    previous = ctx.messages[0]["content"]
+    mock_app.memory_store = MagicMock()
+    mock_app.memory_store.get_all = AsyncMock(return_value=[])
+    with patch("app.core.harness.memory.factory.create_memory_store",
+               return_value=CommitStore("")):
+        assert await handle_command("/memory migrate sqlite", ctx, {}, None, mock_app) is True
+    assert ctx.messages[0]["content"] == previous
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_load_with_repair_counts(mock_app, ctx):
+    """Cubre la inyección de repair_counts al cargar una sesión."""
+    mock_app.agent_loop = MagicMock()
+    with patch("app.core.harness.session.SessionManager") as mock_sm:
+        sm = mock_sm.return_value
+        sm.load.return_value = [{"role": "user", "content": "Hola"}]
+        sm.load_metadata.return_value = {"repair_counts": {"bash": 2}}
+
+        assert await handle_command("/session load 123", ctx, {}, None, mock_app) is True
+
+    assert mock_app.agent_loop.repair_counts == {"bash": 2}
+    # El mensaje usa len(repair_counts), no la suma de contadores
+    assert "1 tools en reparación" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_new(mock_app, ctx):
+    """Cubre /session new guardando la sesión anterior con ContextManager real."""
+    mock_app.ctx = ctx
+    old_sm = MagicMock()
+    old_sm.save.return_value = "/fake.json"
+    mock_app.session_manager = old_sm
+    mock_app.agent_loop = MagicMock()
+    mock_app.agent_loop.repair_counts = {"bash": 3}
+    ctx.add_user("Hola")
+
+    new_sm = MagicMock()
+    new_sm.session_id = "nueva-sesion"
+    with patch("app.core.harness.session.SessionManager") as mock_sm_class:
+        mock_sm_class.new.return_value = new_sm
+        assert await handle_command("/session new", ctx, {}, None, mock_app) is True
+
+    old_sm.save.assert_called_once()
+    assert mock_app.session_manager is new_sm
+    assert mock_app.agent_loop.repair_counts == {}
+    assert [m["role"] for m in ctx.messages] == ["system"]
+    messages = [str(c) for c in mock_app.write_to_chat.call_args_list]
+    assert any("Sesión actual guardada" in m for m in messages)
+    assert any("Nueva sesión creada" in m for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_cmd_session_new_without_previous_session(mock_app):
+    """Cubre /session new sin sesión previa, con ctx sin clear() y sin UI."""
+    class PlainCtx:
+        def __init__(self):
+            self.messages = [
+                {"role": "system", "content": "System"},
+                {"role": "user", "content": "Hola"},
+            ]
+
+    plain_ctx = PlainCtx()
+    mock_app.ctx = plain_ctx
+    mock_app.session_manager = None
+    mock_app.agent_loop = None
+    mock_app.query_one.side_effect = Exception("sin UI")
+
+    new_sm = MagicMock()
+    new_sm.session_id = "otra-sesion"
+    with patch("app.core.harness.session.SessionManager") as mock_sm_class:
+        mock_sm_class.new.return_value = new_sm
+        assert await handle_command("/session new", plain_ctx, {}, None, mock_app) is True
+
+    assert mock_app.session_manager is new_sm
+    assert plain_ctx.messages == [{"role": "system", "content": "System"}]
+    assert "Nueva sesión creada" in mock_app.write_to_chat.call_args[0][0]

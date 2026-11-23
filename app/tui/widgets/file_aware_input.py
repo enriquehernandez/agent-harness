@@ -56,7 +56,8 @@ class FileAwareInput(Input):
 
     async def on_key(self, event: events.Key) -> None:
         if event.key == "ctrl+u":
-            await self.app.action_clear_input()
+            # action_clear_input es síncrono; hacer `await` lanza TypeError.
+            self.app.action_clear_input()
             event.prevent_default()
             event.stop()
 

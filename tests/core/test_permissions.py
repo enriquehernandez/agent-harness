@@ -245,3 +245,17 @@ def test_permissions_generate_diff_error_76_78(tmp_path):
 
     # Como falló la lectura, old_content es "", y el diff se genera desde vacío
     assert "New content" in diff
+
+
+def test_permission_gate_diff_edit_empty_old_text(tmp_path):
+    """Cubre el aviso cuando un edit tiene 'oldText' vacío (línea 108)."""
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("Contenido original")
+
+    gate = PermissionGate()
+    diff = gate._generate_diff({
+        "path": str(test_file),
+        "edits": [{"oldText": "", "newText": "Nuevo"}],
+    })
+
+    assert diff == "⚠️ edit con 'oldText' vacío: no se puede generar el diff."

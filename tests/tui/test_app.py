@@ -1,7 +1,7 @@
 import asyncio
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
-from app.tui.app import AgentHarnessApp, FileAwareInput
+from app.tui.app import AgentHarnessApp, FileAwareInput, run_tui
 from textual.widgets import Input, Static, ListView, Tree
 from textual.worker import NoActiveWorker
 from app.core.harness.loop import LoopResult
@@ -18,6 +18,14 @@ def mock_session_manager():
         mock_sm.return_value = mock_instance
         mock_sm.list_sessions.return_value = []  # 🔥 Para el método estático
         yield mock_sm
+
+
+def test_run_tui():
+    """Cubre el punto de entrada run_tui()."""
+    with patch("app.tui.app.AgentHarnessApp") as mock_app_class:
+        run_tui()
+    mock_app_class.assert_called_once_with()
+    mock_app_class.return_value.run.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -1131,3 +1139,71 @@ async def test_file_aware_input_concurrent_pastes(tmp_path):
             await pilot.pause(0.3)  # Esperamos a que el batch procese ambos
 
             assert len(app.attached_files) == 2
+
+
+@pytest.mark.asyncio
+async def test_stream_to_chat_updates_existing_markdown():
+    """Cubre la rama de stream_to_chat que actualiza el Markdown ya montado."""
+    from textual.widgets import Markdown
+    from app.core.harness.events import AgentEvent
+
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def mock_stream():
+                yield AgentEvent(type="text_chunk", data={"text": "Hola"})
+                yield AgentEvent(type="text_chunk", data={"text": " mundo"})
+                yield AgentEvent(type="result", data={"usage_total": {}, "cost_usd": 0.0})
+
+            await app.stream_to_chat(mock_stream())
+            await pilot.pause()
+
+            widgets = [c for c in app.query_one("#chat-scroll").children
+                       if isinstance(c, Markdown)]
+            assert len(widgets) == 1
+            assert widgets[0]._markdown == "Hola mundo"
+
+
+@pytest.mark.asyncio
+async def test_stream_to_chat_correction_marker():
+    """Cubre la detección de correcciones: marcar, descartar y redibujar el Markdown."""
+    from textual.widgets import Markdown
+    from app.core.harness.events import AgentEvent
+
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def mock_stream():
+                yield AgentEvent(type="text_chunk", data={"text": "Respuesta original"})
+                yield AgentEvent(type="text_chunk", data={
+                    "text": "", "is_correction_marker": True})
+                yield AgentEvent(type="text_chunk", data={"text": "Respuesta corregida"})
+                yield AgentEvent(type="result", data={"usage_total": {}, "cost_usd": 0.0})
+
+            await app.stream_to_chat(mock_stream())
+            await pilot.pause()
+
+            widgets = [c for c in app.query_one("#chat-scroll").children
+                       if isinstance(c, Markdown)]
+            assert len(widgets) == 1
+            assert widgets[0]._markdown == "Respuesta corregida"
+
+
+@pytest.mark.asyncio
+async def test_stream_to_chat_error_event():
+    """Cubre la rama del evento 'error' en stream_to_chat."""
+    from app.core.harness.events import AgentEvent
+
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def mock_stream():
+                yield AgentEvent(type="error", data={"message": "Fallo del agente"})
+
+            await app.stream_to_chat(mock_stream())
+            await pilot.pause()
+
+            assert "Error" in str(app.query_one("#dashboard").render())
+            texts = [str(getattr(child, "renderable", getattr(child, "content", "")))
+                     for child in app.query_one("#chat-scroll").children]
+            assert any("Fallo del agente" in t for t in texts)

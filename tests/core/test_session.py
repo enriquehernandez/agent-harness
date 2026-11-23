@@ -128,3 +128,18 @@ def test_session_load_metadata_file_not_exists(mock_settings):
     # No creamos el archivo
     assert not sm.session_file.exists()  # Verificamos que no existe
     assert sm.load_metadata() == {}      # Debe devolver {} por la línea 45
+
+
+def test_session_new_creates_initial_file(mock_settings):
+    """Cubre SessionManager.new(): crea y guarda el JSON inicial en disco."""
+    sm = SessionManager.new()
+
+    assert sm.session_id
+    assert sm.session_file.parent == Path(mock_settings)
+    assert sm.session_file.exists()
+
+    data = json.loads(sm.session_file.read_text(encoding="utf-8"))
+    assert data["session_id"] == sm.session_id
+    assert "timestamp" in data
+    assert data["message_count"] == 0
+    assert data["messages"] == []

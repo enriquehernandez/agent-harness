@@ -1,20 +1,14 @@
 import json
 from unittest.mock import patch, mock_open
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from app.core.harness.permissions import PermissionGate, Decision
 
 
 @pytest.fixture(autouse=True)
-def clean_permissions_file():
-    path = Path(".harness/permissions.json")
-    if path.exists():
-        path.unlink()
-    yield
-    if path.exists():
-        path.unlink()
+def isolated_permissions_file(tmp_path, monkeypatch):
+    """Aísla el permissions.json real: cada test usa un .harness temporal."""
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.mark.asyncio

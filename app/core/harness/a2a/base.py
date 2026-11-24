@@ -46,14 +46,23 @@ class A2AStrategy(ABC):
 
         En modo `fork` hereda el historial del padre (mensajes user/assistant/tool),
         pero mantiene el `system_prompt` del `AgentCard`: las instrucciones del
-        orquestador no deben convertirse en instrucciones del subagente.
+        orquestador no deben convertirse en instrucciones del subagente. Tras el
+        historial heredado añade un preámbulo para que el subagente distinga ese
+        contexto de la tarea que `AgentLoop.run()` añadirá a continuación.
         """
         agent_ctx = ContextManager(system_prompt=agent.system_prompt)
         if agent.mode == "fork" and context:
-            agent_ctx.messages.extend(
+            inherited = [
                 message for message in context.messages
                 if message.get("role") != "system"
-            )
+            ]
+            if inherited:
+                agent_ctx.messages.extend(inherited)
+                agent_ctx.add_user(
+                    "Continúas la tarea iniciada por el agente principal. "
+                    "El historial anterior es contexto heredado; tu tarea "
+                    "se indica en el siguiente mensaje."
+                )
         return agent_ctx
 
     def _child_gate(self, allow: Iterable[str] = ()) -> PermissionGate:

@@ -140,7 +140,57 @@ async def test_orchestrator_fork_agent_receives_parent_history(mock_llm, mock_re
 
             agent_ctx = MockLoop.return_value.run.call_args.kwargs["context"]
             assert [m["content"] for m in agent_ctx.messages] == [
-                "Eres un escritor", "Contexto previo del padre"]
+                "Eres un escritor",
+                "Contexto previo del padre",
+                "Continúas la tarea iniciada por el agente principal. "
+                "El historial anterior es contexto heredado; tu tarea "
+                "se indica en el siguiente mensaje.",
+            ]
+
+
+def test_fork_context_marks_inherited_history(mock_llm, mock_registry):
+    """El fork distingue el historial heredado de la tarea que llega después."""
+    strategy = SupervisorStrategy(mock_llm, mock_registry, permissions=None)
+    ctx = ContextManager(system_prompt="Sistema")
+    ctx.add_user("Contexto previo del padre")
+    ctx.add_assistant("Respuesta previa")
+
+    agent_ctx = strategy._fork_context(mock_registry["writer"], ctx)
+
+    assert [m["role"] for m in agent_ctx.messages] == [
+        "system", "user", "assistant", "user"
+    ]
+    assert agent_ctx.messages[0]["content"] == "Eres un escritor"
+    assert agent_ctx.messages[-1]["content"] == (
+        "Continúas la tarea iniciada por el agente principal. "
+        "El historial anterior es contexto heredado; tu tarea "
+        "se indica en el siguiente mensaje."
+    )
+
+
+def test_fork_context_without_history_has_no_preamble(mock_llm, mock_registry):
+    """Sin historial heredado no se añade el preámbulo de continuación."""
+    strategy = SupervisorStrategy(mock_llm, mock_registry, permissions=None)
+    ctx = ContextManager(system_prompt="Sistema")
+
+    agent_ctx = strategy._fork_context(mock_registry["writer"], ctx)
+
+    assert agent_ctx.messages == [
+        {"role": "system", "content": "Eres un escritor"}
+    ]
+
+
+def test_isolated_context_ignores_parent_history(mock_llm, mock_registry):
+    """El modo isolated no hereda mensajes ni añade preámbulo."""
+    strategy = SupervisorStrategy(mock_llm, mock_registry, permissions=None)
+    ctx = ContextManager(system_prompt="Sistema")
+    ctx.add_user("Contexto previo del padre")
+
+    agent_ctx = strategy._fork_context(mock_registry["analyst"], ctx)
+
+    assert agent_ctx.messages == [
+        {"role": "system", "content": "Eres un analista"}
+    ]
 
 
 @pytest.mark.asyncio

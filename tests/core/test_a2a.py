@@ -102,6 +102,48 @@ async def test_orchestrator_tool_supervisor_strategy(mock_llm, mock_registry):
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_passes_context_from_provider(mock_llm, mock_registry):
+    """El orchestrator entrega el contexto actual a la estrategia."""
+    ctx = ContextManager(system_prompt="Sistema")
+    ctx.add_user("Mensaje del padre")
+
+    with patch("app.core.config.settings.A2A_STRATEGY", "supervisor"):
+        with patch("app.core.harness.a2a.orchestrator.SupervisorStrategy") as MockStrategy:
+            mock_strategy = MagicMock()
+            mock_strategy.execute = AsyncMock(
+                return_value=MagicMock(success=True, content="ok"))
+            MockStrategy.return_value = mock_strategy
+
+            tool = OrchestratorTool(
+                mock_llm, mock_registry, permissions=None,
+                context_provider=lambda: ctx)
+            await tool.run("tarea")
+
+            mock_strategy.execute.assert_awaited_once_with("tarea", context=ctx)
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_fork_agent_receives_parent_history(mock_llm, mock_registry):
+    """Un agente en modo fork recibe el historial del contexto de la TUI."""
+    ctx = ContextManager(system_prompt="Sistema")
+    ctx.add_user("Contexto previo del padre")
+    mock_llm.chat.return_value = LLMResponse(content="writer")
+
+    with patch("app.core.config.settings.A2A_STRATEGY", "supervisor"):
+        with patch("app.core.harness.a2a.strategies.supervisor.AgentLoop") as MockLoop:
+            MockLoop.return_value.run = AsyncMock(
+                return_value=MagicMock(final_answer="Hecho"))
+            tool = OrchestratorTool(
+                mock_llm, mock_registry, permissions=None,
+                context_provider=lambda: ctx)
+            await tool.run("tarea")
+
+            agent_ctx = MockLoop.return_value.run.call_args.kwargs["context"]
+            assert [m["content"] for m in agent_ctx.messages] == [
+                "Eres un escritor", "Contexto previo del padre"]
+
+
+@pytest.mark.asyncio
 async def test_orchestrator_unknown_strategy(mock_llm, mock_registry):
     """Cubre estrategia desconocida."""
     with patch("app.core.config.settings.A2A_STRATEGY", "inventada"):

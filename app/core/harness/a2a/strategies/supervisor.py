@@ -45,13 +45,7 @@ class SupervisorStrategy(A2AStrategy):
         log_agent_flow(chosen_agent.name, "start")
 
         # Preparamos el contexto según el modo del agente
-        if chosen_agent.mode == "fork" and context:
-            agent_ctx = ContextManager(
-                system_prompt=chosen_agent.system_prompt)
-            agent_ctx.messages = context.messages.copy()
-        else:
-            agent_ctx = ContextManager(
-                system_prompt=chosen_agent.system_prompt)
+        agent_ctx = self._fork_context(chosen_agent, context)
 
         # 4. Gate del subagente: comparte aprobaciones con el padre
         sub_gate = self._child_gate()

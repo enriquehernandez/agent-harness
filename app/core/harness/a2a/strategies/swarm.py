@@ -38,11 +38,7 @@ class SwarmStrategy(A2AStrategy):
             log_agent_flow(current_agent_name, "start")
 
             # Preparamos el contexto
-            if agent.mode == "fork" and context:
-                agent_ctx = ContextManager(system_prompt=agent.system_prompt)
-                agent_ctx.messages = context.messages.copy()
-            else:
-                agent_ctx = ContextManager(system_prompt=agent.system_prompt)
+            agent_ctx = self._fork_context(agent, context)
 
             # Inyectamos el historial previo
             if history:

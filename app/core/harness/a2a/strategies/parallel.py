@@ -16,11 +16,7 @@ class ParallelStrategy(A2AStrategy):
 
     async def _run_agent(self, agent: AgentCard, task: str, context: ContextManager = None) -> tuple[str, str]:
         """Ejecuta un agente y devuelve (nombre, resultado)."""
-        if agent.mode == "fork" and context:
-            agent_ctx = ContextManager(system_prompt=agent.system_prompt)
-            agent_ctx.messages = context.messages.copy()
-        else:
-            agent_ctx = ContextManager(system_prompt=agent.system_prompt)
+        agent_ctx = self._fork_context(agent, context)
 
         # Gate del subagente: comparte aprobaciones con el padre
         sub_gate = self._child_gate()

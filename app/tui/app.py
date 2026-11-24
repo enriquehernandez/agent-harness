@@ -227,6 +227,7 @@ class AgentHarnessApp(App):
             llm=get_llm(self.state["provider"]),
             agents=a2a_agents,
             permissions=self.gate,
+            context_provider=lambda: self.ctx,
         )
         self.registry.register(orchestrator)
 

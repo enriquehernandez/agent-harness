@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 from app.core.config import settings
+from app.core.harness.context import ContextManager
 from app.core.harness.permissions import PermissionGate
 from app.core.harness.tool import ToolRegistry, ToolResult
 
@@ -37,6 +38,23 @@ class A2AStrategy(ABC):
             return set(data.get("session_allowed", []))
         except Exception:
             return set()
+
+    def _fork_context(
+        self, agent: AgentCard, context: ContextManager | None
+    ) -> ContextManager:
+        """Prepara el contexto del subagente.
+
+        En modo `fork` hereda el historial del padre (mensajes user/assistant/tool),
+        pero mantiene el `system_prompt` del `AgentCard`: las instrucciones del
+        orquestador no deben convertirse en instrucciones del subagente.
+        """
+        agent_ctx = ContextManager(system_prompt=agent.system_prompt)
+        if agent.mode == "fork" and context:
+            agent_ctx.messages.extend(
+                message for message in context.messages
+                if message.get("role") != "system"
+            )
+        return agent_ctx
 
     def _child_gate(self, allow: Iterable[str] = ()) -> PermissionGate:
         """Construye el gate del subagente compartiendo estado con el padre.

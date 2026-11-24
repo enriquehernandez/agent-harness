@@ -411,6 +411,7 @@ async def test_app_subagents_receive_registered_tools():
     assert set(reviewer.tools.names()) == {"read_file", "bash"}
 
     orchestrator = app.registry.get("delegate_task")
+    assert orchestrator.context_provider() is app.ctx
     for card in orchestrator.agents.values():
         assert set(card.tools.names()) == {"read_file", "bash"}
 

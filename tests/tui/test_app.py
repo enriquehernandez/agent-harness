@@ -984,9 +984,13 @@ async def test_app_handle_file_paste_exception(tmp_path):
 
     with patch.object(app, "initialize_agent", new_callable=AsyncMock):
         async with app.run_test() as pilot:
-            # 1. Parcheamos TerminalImage para que no falle al instanciarse
-            with patch("app.tui.app.TerminalImage") as MockImage:
+            # 1. Parcheamos AMBAS clases de imagen: en WarpTerminal se usa
+            # HalfcellImage, en el resto TerminalImage. Sin esto el test
+            # depende de la variable de entorno TERM_PROGRAM.
+            with patch("app.tui.app.TerminalImage") as MockImage, \
+                    patch("app.tui.app.HalfcellImage") as MockHalfcell:
                 MockImage.return_value = MagicMock()
+                MockHalfcell.return_value = MagicMock()
 
                 # 2. Parcheamos query_one para devolver un scroll mockeado
                 with patch.object(app, "query_one") as mock_query:

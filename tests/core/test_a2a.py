@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.core.harness.a2a.base import AgentCard
 from app.core.harness.a2a.strategies.supervisor import SupervisorStrategy
 from app.core.harness.a2a.strategies.sequential import SequentialStrategy
+from app.core.harness.a2a.strategies.swarm import SwarmStrategy
 from app.core.harness.a2a.orchestrator import OrchestratorTool
 from app.core.harness.tool import ToolRegistry
 from app.core.harness.context import ContextManager
@@ -129,6 +130,26 @@ async def test_supervisor_reads_persisted_permissions(tmp_path, monkeypatch, moc
     # Verificamos que el método _load_persisted_permissions lee el archivo
     persisted = strategy._load_persisted_permissions()
     assert "read_text_file:test.txt" in persisted
+
+
+@pytest.mark.parametrize(
+    "strategy_cls, kwargs",
+    [
+        (SupervisorStrategy, {}),
+        (SequentialStrategy, {"sequence": ["analyst"]}),
+        (SwarmStrategy, {}),
+    ],
+)
+def test_strategies_without_permissions_file(
+    tmp_path, monkeypatch, mock_llm, mock_registry, strategy_cls, kwargs
+):
+    """Sin .harness/permissions.json no hay permisos persistidos."""
+    from app.core.harness.permissions import PermissionGate
+
+    monkeypatch.chdir(tmp_path)  # no existe .harness/permissions.json
+    gate = PermissionGate(ask_user=None)
+    strategy = strategy_cls(mock_llm, mock_registry, permissions=gate, **kwargs)
+    assert strategy._load_persisted_permissions() == set()
 
 
 @pytest.mark.asyncio

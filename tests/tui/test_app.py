@@ -380,13 +380,38 @@ async def test_app_initialize_agent_with_tools():
             def side_effect(registry, **kwargs):
                 from app.core.harness.tool import FunctionTool
                 registry.register(FunctionTool(
-                    name="read_text_file", description="", parameters_schema={}, func=lambda: ""
+                    name="read_file", description="", parameters_schema={}, func=lambda: ""
                 ))
             mock_register.side_effect = side_effect
 
             async with app.run_test() as pilot:
                 await app.initialize_agent()
                 await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_app_subagents_receive_registered_tools():
+    """Reviewer y agentes A2A reciben tools que existen en el registry."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient"), patch("app.tui.app.register_core_tools") as mock_register:
+        def side_effect(registry, **kwargs):
+            from app.core.harness.tool import FunctionTool
+            for name in ["read_file", "bash"]:
+                registry.register(FunctionTool(
+                    name=name, description="", parameters_schema={}, func=lambda: ""
+                ))
+        mock_register.side_effect = side_effect
+
+        async with app.run_test() as pilot:
+            await app.initialize_agent()
+            await pilot.pause()
+
+    reviewer = app.registry.get("delegate_to_reviewer")
+    assert set(reviewer.tools.names()) == {"read_file", "bash"}
+
+    orchestrator = app.registry.get("delegate_task")
+    for card in orchestrator.agents.values():
+        assert set(card.tools.names()) == {"read_file", "bash"}
 
 
 @pytest.mark.asyncio

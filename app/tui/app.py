@@ -186,7 +186,7 @@ class AgentHarnessApp(App):
 
         # 5. Subagente Reviewer (Legacy)
         reviewer_tools = ToolRegistry()
-        for tool_name in ["read_text_file", "list_directory", "bash"]:
+        for tool_name in ["read_file", "bash"]:
             if tool_name in self.registry:
                 reviewer_tools.register(self.registry.get(tool_name))
 
@@ -202,7 +202,7 @@ class AgentHarnessApp(App):
         # 6. A2A
         from app.core.harness.a2a import AgentCard, OrchestratorTool
         a2a_base_tools = ToolRegistry()
-        for tool_name in ["read_text_file", "list_directory", "bash"]:
+        for tool_name in ["read_file", "bash"]:
             if tool_name in self.registry:
                 a2a_base_tools.register(self.registry.get(tool_name))
 

@@ -63,7 +63,14 @@ chroma_db/
 # ==========================================
 # Datos de usuario del Harness
 # ==========================================
-.harness/
+# Todo .harness/ queda fuera salvo la configuración y los scripts de hooks.
+.harness/*
+!.harness/hooks.json
+!.harness/hooks/
+.harness/hooks/*
+!.harness/hooks/**
+# Los logs generados por los hooks siguen siendo locales.
+.harness/hooks/**/*.log
 
 # # ==========================================
 # # Permisos Locales del Harness

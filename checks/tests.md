@@ -3,7 +3,7 @@
 Antes de dar una tarea por terminada, el agente DEBE verificar:
 
 ## 1. Validación Automática
-- [ ] `uv run tom test` pasa sin errores. Revisa además el informe de cobertura (`--cov=app`) y confirma que marca 100%: el porcentaje se **verifica en el informe**, no lo exige el comando ni CI (ni el script de `pyproject.toml` ni `.github/workflows/ci.yml` usan `--cov-fail-under`; CI solo sube `coverage.xml` a Codecov).
+- [ ] `uv run tom test` pasa sin errores. El script `test` de `pyproject.toml` incluye `--cov-fail-under=100`, así que el comando falla si la cobertura baja del 100%; CI lo ejecuta y además sube `coverage.xml` a Codecov.
 - [ ] `uv run tom test-integration` pasa (verifica que los servidores MCP respondan).
 - [ ] `uv run python scripts/check_pricing.py` valida la configuración de precios.
 

@@ -30,14 +30,6 @@
       context» aunque esos archivos no se cargan. Escenario: el agente intente responder sobre
       `docs/arquitectura.md` sin herramientas de lectura disponibles.
 
-- [ ] **Inyectar la lista de skills en el system prompt.** `/reload-skills`
-      (`app/tui/commands.py`) busca el marcador `Available skills:` con una regex,
-      pero ese marcador nunca se inserta en el prompt (`app/tui/app.py`).
-
-- [ ] **Mostrar `/reload-skills` en `/help`.** El comando existe
-      (`app/tui/commands.py`), pero no aparece en la tabla de `help_text`,
-      aunque `README.md` sí lo documenta.
-
 - [ ] **Alinear el proveedor por defecto.** `settings.LLM_PROVIDER` es `fake`
       (`app/core/config.py`), pero `.env.example` fija `openrouter`. Tras
       `cp .env.example .env`, el default efectivo es OpenRouter y requiere API key.
@@ -50,14 +42,7 @@
       `Formato '…' no soportado por read_document.`. Escenario: usuario adjunta un `.doc`
       heredado y el agente no puede leerlo. Ver `PRODUCT_BLUEPRINT/02_COMPONENTS/10_document_reading.md`.
 
-- [ ] **Exigir el 100% de cobertura en el comando o en CI.** El informe marca 100%, pero
-      ni `uv run tom test` (`pyproject.toml`) ni `.github/workflows/ci.yml`
-      usan `--cov-fail-under=100`; CI solo sube `coverage.xml` a Codecov.
-
 ## Prioridad baja — Limpieza y artefactos
-
-- [ ] **Quitar imports sin usar.** `UnicodeImage` y `unquote` en `app/tui/app.py`;
-      `pandas` en `app/tools/documents.py` (la dependencia sigue declarada en `pyproject.toml`).
 
 - [ ] **Verificar soporte del modelo antes de aplicar prompt caching.**
       `OpenAICompatibleProvider` inyecta `cache_control` cuando `ENABLE_PROMPT_CACHING=True`

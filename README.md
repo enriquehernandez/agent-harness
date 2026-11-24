@@ -203,7 +203,7 @@ Comandos disponibles:
 🤖 Agente: Veo una factura comercial con un sello de "RECHAZADO"...
 ```
 
-`/session new` guarda la sesión actual y crea una nueva; `/memory migrate sqlite` cambia el backend de memoria; `/reload-skills` recarga las skills tras instalarlas.
+`/session new` guarda la sesión actual y crea una nueva; `/memory migrate sqlite` cambia el backend de memoria; `/reload [skills|permissions|tools]` recarga las skills, los permisos persistidos o las herramientas y conexiones MCP (conservando el contexto).
 
 ## 🛡️ El Guardián de Seguridad (Permission Gate)
 

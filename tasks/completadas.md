@@ -25,3 +25,23 @@
 - **Objetivo:** permitir cambios puntuales con `path` + `edits` (`oldText`/`newText`), reutilizando el diff que ya genera `PermissionGate`.
 - **Diseño elegido:** `EditFileTool` en `app/tools/filesystem.py`, registrada por `register_core_tools()`. Valida `base_dir`, existencia del archivo y coincidencia exacta de cada `oldText`; aplica las sustituciones en orden.
 - **Estado:** Completada. Cubierto por `tests/core/test_tools.py` (éxito, registro y casos de error) y documentado en `AGENTS.md`, `README.md`, `docs/herramientas.md` y `PRODUCT_BLUEPRINT/02_COMPONENTS/01_harness_loop.md`.
+
+## Exigir 100% de cobertura en `tom test`
+
+- **Objetivo:** que un descenso de cobertura haga fallar el comando usado por CI.
+- **Estado:** Completada. El script `test` de `pyproject.toml` incluye `--cov-fail-under=100` (sin tocar `addopts`, para no romper ejecuciones parciales). Cubierto por `tests/test_init_files.py::test_tom_test_enforces_full_coverage`.
+
+## Mostrar el comando de recarga en `/help`
+
+- **Objetivo:** que la ayuda de la TUI liste el comando de recarga.
+- **Estado:** Completada. Se añadió la fila en la tabla de `help_text` (`app/tui/commands.py`), actualizada después a `/reload`. Cubierto por `tests/tui/test_commands.py::test_cmd_help_lists_reload`.
+
+## Quitar imports sin usar
+
+- **Objetivo:** eliminar `UnicodeImage` y `unquote` de `app/tui/app.py`, y `pandas` de `app/tools/documents.py` (la dependencia sigue declarada en `pyproject.toml`).
+- **Estado:** Completada. Cubierto por `tests/test_init_files.py::test_no_known_unused_imports`.
+
+## Unificar la recarga en `/reload [skills|permissions|tools]`
+
+- **Objetivo:** sustituir `/reload-skills` por un comando genérico con objetivos y arreglar el marcador `Available skills:` del system prompt.
+- **Estado:** Completada. `/reload skills` actualiza el prompt y el autocompletado; `/reload permissions` recarga `.harness/permissions.json` vía `PermissionGate.reload_persisted()`; `/reload tools` desconecta los clientes MCP, reinicializa herramientas y conserva el contexto. La lista de comandos del autocompletado vive en `AVAILABLE_COMMANDS` (`app/tui/commands.py`). Cubierto por tests en `tests/tui/test_commands.py`, `tests/tui/test_app.py` y `tests/core/test_permissions.py`.

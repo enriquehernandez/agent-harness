@@ -80,7 +80,7 @@ uv run tom test
 uv run tom test-integration
 ```
 
-El informe de cobertura debe marcar **100%** de líneas (se verifica en el reporte de `uv run tom test`; ningún comando ni CI lo exige con `--cov-fail-under`). En la TUI (`app/tui/`) las exclusiones **no son solo visuales**: `def on_`, `def watch_` y `def compose` excluyen manejadores de eventos, watchers reactivos y métodos de construcción de widgets de Textual; además se aplican las reglas globales (`except`, `continue`, `return`, `...`, `if __name__ == ...` y `pragma: no cover`) detalladas en la sección 5.
+El informe de cobertura debe marcar **100%** de líneas: el script `test` de `pyproject.toml` usa `--cov-fail-under=100`, por lo que `uv run tom test` (y por extensión CI) falla si baja de ese umbral. En la TUI (`app/tui/`) las exclusiones **no son solo visuales**: `def on_`, `def watch_` y `def compose` excluyen manejadores de eventos, watchers reactivos y métodos de construcción de widgets de Textual; además se aplican las reglas globales (`except`, `continue`, `return`, `...`, `if __name__ == ...` y `pragma: no cover`) detalladas en la sección 5.
 
 ## 10. Mocking de Pricing
 El `PricingProvider` se mockea fácilmente porque usa `PricingSource` (interfaz). Para tests:

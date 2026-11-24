@@ -76,3 +76,8 @@
 - **Objetivo:** que los formatos Office 97-2003 que acepta `FileAwareInput` puedan leerse con `read_document`.
 - **Diseño elegido:** previa aprobación, se añadieron `xlrd` y `olefile` con `uv`. `.xls` se lee con `xlrd` (conversión de celdas de fecha); `.doc` y `.ppt` se leen de los streams OLE `WordDocument` y `PowerPoint Document`, extrayendo cadenas imprimibles en UTF-16LE con fallback a Latin-1. Es best-effort: sin formato y con posible texto de metadatos.
 - **Estado:** Completada. Cubierto por `tests/core/test_tools.py::test_read_document_legacy_formats` y `test_read_document_legacy_text_fallback`; documentado en `PRODUCT_BLUEPRINT/02_COMPONENTS/10_document_reading.md`, `docs/herramientas.md`, `README.md` y `PRODUCT_BLUEPRINT/03_SECURITY_AND_AUDIT/01_testing_y_mocks.md`.
+
+## Verificar soporte del modelo antes de aplicar prompt caching
+
+- **Objetivo:** no enviar `cache_control` a modelos que no soportan esa extensión de la API compatible con OpenAI.
+- **Estado:** Completada. `_supports_prompt_caching(model)` comprueba que el nombre contenga `claude` o `anthropic` (sin distinción de mayúsculas); `OpenAICompatibleProvider.chat()` solo reescribe el mensaje `system` cuando la guardia pasa, sin mutar los mensajes del caller. Actualizado `docs/herramientas.md` y `.env.example`. Cubierto por `tests/core/test_openai_provider.py::test_prompt_caching_model_support` y `::test_openai_provider_prompt_caching_skipped_for_unsupported_model`, además del test de caching con `anthropic/claude-3-5-sonnet-20241022`.

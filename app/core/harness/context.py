@@ -5,6 +5,7 @@ from ..llm.base import BaseLLM
 from .compaction import (
     CompactionStrategy, SummarizationStrategy, SlidingWindowStrategy, NoneStrategy
 )
+from .hooks import HookEvent, emit_hook
 
 
 class ContextManager:
@@ -74,12 +75,16 @@ class ContextManager:
         estimated = self.estimate_tokens()
         limit = llm.max_context_window
         if estimated > (limit * 0.8):
+            await emit_hook(HookEvent(hook_event_name="PreCompact", trigger="auto"))
             self.messages = await self.strategy.compact(self.messages, llm)
+            await emit_hook(HookEvent(hook_event_name="PostCompact", trigger="auto"))
             return True
         return False
 
     async def force_compact(self, llm: BaseLLM, verbose: bool = False) -> str | None:
+        await emit_hook(HookEvent(hook_event_name="PreCompact", trigger="manual"))
         self.messages = await self.strategy.compact(self.messages, llm)
+        await emit_hook(HookEvent(hook_event_name="PostCompact", trigger="manual"))
         if verbose:
             for msg in reversed(self.messages):
                 if msg["role"] == "system" and "Summary of previous conversation" in msg.get("content", ""):

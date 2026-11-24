@@ -52,6 +52,10 @@ class Settings(BaseSettings):
         return self.DATA_DIR / "permissions.json"
 
     @property
+    def hooks_file(self) -> Path:
+        return self.DATA_DIR / "hooks.json"
+
+    @property
     def logs_dir(self) -> Path:
         return self.DATA_DIR / "logs"
 

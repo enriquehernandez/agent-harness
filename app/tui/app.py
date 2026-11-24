@@ -19,6 +19,7 @@ from rich.syntax import Syntax
 from app.core.llm import get_llm
 from app.core.harness import AgentLoop, ToolRegistry, ContextManager
 from app.core.harness.permissions import Decision, PermissionGate
+from app.core.harness.hooks import HookEvent, emit_hook
 from app.core.harness.subagents import DelegateTool
 from app.core.harness.memory.factory import create_memory_store
 from app.core.harness.session import SessionManager
@@ -480,6 +481,10 @@ class AgentHarnessApp(App):
         await self._stream_user_message(user_input, loading)
 
     async def _stream_user_message(self, user_input: str, loading: LoadingIndicator) -> None:
+        await emit_hook(HookEvent(
+            hook_event_name="UserPromptSubmit", prompt=user_input,
+            session_id=str(getattr(self.session_manager, "session_id", "") or ""),
+        ))
         self.update_dashboard("Pensando...")
         display_text = user_input if len(
             user_input) < 300 else user_input[:300] + "..."
@@ -598,6 +603,10 @@ class AgentHarnessApp(App):
         user_text = await self._expand_skills(user_text)
 
         if self.attached_images:
+            await emit_hook(HookEvent(
+                hook_event_name="UserPromptSubmit", prompt=user_text,
+                session_id=str(getattr(self.session_manager, "session_id", "") or ""),
+            ))
             display_text = user_text if user_text else "[Imagen adjunta]"
             await self.write_to_chat(display_text, type="user")
             temp_msg = self._begin_pending_mode()

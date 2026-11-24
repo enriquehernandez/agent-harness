@@ -3,6 +3,7 @@ from .tool import BaseTool, FunctionTool, ToolRegistry, ToolResult
 from .permissions import PermissionGate, Decision
 from .context import ContextManager
 from .compaction import CompactionStrategy, SummarizationStrategy
+from .hooks import HookEvent, HookManager, HookRegistry, emit_hook
 
 __all__ = [
     "AgentLoop", "LoopResult",
@@ -10,4 +11,5 @@ __all__ = [
     "PermissionGate", "Decision",
     "ContextManager",
     "CompactionStrategy", "SummarizationStrategy",
+    "HookEvent", "HookManager", "HookRegistry", "emit_hook",
 ]

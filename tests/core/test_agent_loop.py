@@ -342,3 +342,126 @@ async def test_loop_calculate_cost_delegates_to_pricing(fake_llm, basic_registry
 
     assert cost == {"input_cost": 0.1, "output_cost": 0.2}
     loop.pricing.get_cost_pricing.assert_awaited_once_with("fake-model", 100, 50)
+
+
+@pytest.mark.asyncio
+async def test_loop_run_emits_prompt_and_stop(fake_llm, basic_registry):
+    """El modo headless dispara UserPromptSubmit y Stop sin intervención del usuario."""
+    fake_llm._responses = [LLMResponse(content="Listo")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+
+    with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+        result = await loop.run("Hola", context=ContextManager())
+
+    assert result.final_answer == "Listo"
+    events = [call.args[0] for call in emit.await_args_list]
+    assert [event.hook_event_name for event in events] == [
+        "UserPromptSubmit", "Stop"]
+    assert events[0].prompt == "Hola"
+
+
+@pytest.mark.asyncio
+async def test_loop_execute_tool_emits_pre_and_post(fake_llm, basic_registry):
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+
+    with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+        success, _ = await loop._execute_tool(
+            {"id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}},
+            ContextManager(),
+        )
+
+    assert success is True
+    events = [call.args[0] for call in emit.await_args_list]
+    assert [event.hook_event_name for event in events] == [
+        "PreToolUse", "PostToolUse"]
+    assert events[0].tool_name == "add"
+    assert events[0].tool_input == {"a": 1, "b": 2}
+    assert events[1].success is True
+
+
+@pytest.mark.asyncio
+async def test_loop_denied_tool_emits_post_hook(fake_llm, basic_registry, tmp_path):
+    gate = PermissionGate(policies={"add": Decision.DENY},
+                          persist_file=tmp_path / "no_perms.json")
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+
+    with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+        success, result = await loop._execute_tool(
+            {"id": "c1", "name": "add", "arguments": {}}, ContextManager())
+
+    assert (success, result) == (False, None)
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "PreToolUse", "PostToolUse"]
+    assert emit.await_args_list[1].args[0].success is False
+
+
+@pytest.mark.asyncio
+async def test_loop_missing_tool_emits_post_hook(fake_llm, basic_registry):
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+
+    with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+        success, result = await loop._execute_tool(
+            {"id": "c1", "name": "ghost", "arguments": {}}, ContextManager())
+
+    assert (success, result) == (False, None)
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "PreToolUse", "PostToolUse"]
+    assert emit.await_args_list[1].args[0].success is False
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_emits_stop(fake_llm, basic_registry):
+    async def mock_stream(*args, **kwargs):
+        yield "Listo"
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+        with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+            events = [event async for event in loop.stream("Hola")]
+
+    assert any(event.type == "result" for event in events)
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "Stop"]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_emits_stop_failure_on_timeout():
+    loop = AgentLoop(llm=HangingLLM(), tools=ToolRegistry())
+
+    with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+        events = [event async for event in loop.stream(
+            "Hola", timeout_seconds=0.1)]
+
+    assert events[-1].type == "error"
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "StopFailure"]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_emits_stop_failure_on_error(fake_llm):
+    with patch.object(fake_llm, "stream_chat", side_effect=RuntimeError("boom")):
+        loop = AgentLoop(llm=fake_llm, tools=ToolRegistry())
+        with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+            events = [event async for event in loop.stream("Hola")]
+
+    assert events[-1].type == "error"
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "StopFailure"]
+
+
+@pytest.mark.asyncio
+async def test_loop_max_iterations_emits_stop(fake_llm, basic_registry):
+    async def mock_stream(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "add",
+               "arguments": {"a": 1, "b": 2}}
+
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry,
+                         permissions=gate, max_iterations=1)
+        with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+            events = [event async for event in loop.stream("Hola")]
+
+    assert events[-1].type == "result"
+    assert [call.args[0].hook_event_name for call in emit.await_args_list][-1] == "Stop"

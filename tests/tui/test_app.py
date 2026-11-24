@@ -1270,6 +1270,72 @@ async def test_stream_to_chat_error_event():
 
 
 @pytest.mark.asyncio
+async def test_app_emits_user_prompt_submit_hook():
+    """El envío de texto dispara el hook sin escribir ningún comando."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+
+        async def mock_stream(*args, **kwargs):
+            yield "ok"
+
+        app.agent_loop = MagicMock(stream=mock_stream)
+        async with app.run_test() as pilot:
+            with patch("app.tui.app.emit_hook", new_callable=AsyncMock) as emit:
+                app.process_input("Hola")
+                await pilot.pause()
+
+    events = [call.args[0] for call in emit.await_args_list]
+    assert [event.hook_event_name for event in events] == ["UserPromptSubmit"]
+    assert events[0].prompt == "Hola"
+
+
+@pytest.mark.asyncio
+async def test_app_emits_user_prompt_submit_hook_for_inline_mode():
+    """La pregunta inline de un código de respuesta también dispara el hook."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+
+        async def mock_stream(*args, **kwargs):
+            yield "ok"
+
+        app.agent_loop = MagicMock(stream=mock_stream)
+        async with app.run_test() as pilot:
+            with patch("app.tui.app.emit_hook", new_callable=AsyncMock) as emit:
+                app.process_input("/devil ¿Fallos?")
+                await pilot.pause()
+
+    events = [call.args[0] for call in emit.await_args_list]
+    assert [event.hook_event_name for event in events] == ["UserPromptSubmit"]
+    assert events[0].prompt == "¿Fallos?"
+
+
+@pytest.mark.asyncio
+async def test_app_emits_user_prompt_submit_hook_for_images():
+    """La rama multimodal dispara el mismo hook."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+        app.attached_images = ["data:image/png;base64,fake_base64"]
+
+        async def mock_stream(*args, **kwargs):
+            yield "ok"
+
+        app.agent_loop = MagicMock(stream=mock_stream)
+        mock_event = MagicMock(value="¿Qué ves?", input=MagicMock())
+
+        async with app.run_test() as pilot:
+            with patch("app.tui.app.emit_hook", new_callable=AsyncMock) as emit:
+                await app.on_input_submitted(mock_event)
+                await pilot.pause()
+
+    events = [call.args[0] for call in emit.await_args_list]
+    assert [event.hook_event_name for event in events] == ["UserPromptSubmit"]
+    assert events[0].prompt == "¿Qué ves?"
+
+
+@pytest.mark.asyncio
 async def test_app_process_input_one_shot_mode_is_consumed():
     """El código solo afecta a la primera pregunta y no queda en el historial."""
     from app.tui.commands import mode_message

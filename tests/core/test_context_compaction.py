@@ -5,6 +5,50 @@ from app.core.llm.base import LLMResponse
 
 
 @pytest.mark.asyncio
+async def test_maybe_compact_emits_hooks(fake_llm):
+    fake_llm._max_tokens = 100
+    fake_llm._responses = [LLMResponse(content="[Summary of old messages]")]
+    ctx = ContextManager(system_prompt="System")
+    for _ in range(10):
+        ctx.add_user("A" * 50)
+
+    with patch("app.core.harness.context.emit_hook", new_callable=AsyncMock) as emit:
+        assert await ctx.maybe_compact(fake_llm) is True
+
+    events = [call.args[0] for call in emit.await_args_list]
+    assert [event.hook_event_name for event in events] == [
+        "PreCompact", "PostCompact"]
+    assert all(event.trigger == "auto" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_no_compaction_emits_no_hooks(fake_llm):
+    ctx = ContextManager(system_prompt="System")
+    ctx.add_user("Hola")
+
+    with patch("app.core.harness.context.emit_hook", new_callable=AsyncMock) as emit:
+        assert await ctx.maybe_compact(fake_llm) is False
+
+    emit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_force_compact_emits_hooks(fake_llm):
+    fake_llm._responses = [LLMResponse(content="[Resumen]")]
+    ctx = ContextManager(system_prompt="System")
+    ctx.add_user("Mensaje 1")
+    ctx.add_user("Mensaje 2")
+
+    with patch("app.core.harness.context.emit_hook", new_callable=AsyncMock) as emit:
+        await ctx.force_compact(fake_llm)
+
+    events = [call.args[0] for call in emit.await_args_list]
+    assert [event.hook_event_name for event in events] == [
+        "PreCompact", "PostCompact"]
+    assert all(event.trigger == "manual" for event in events)
+
+
+@pytest.mark.asyncio
 async def test_context_compaction_trigger(fake_llm):
     """Verifies that compaction triggers when the 80% limit is exceeded."""
     fake_llm._max_tokens = 100

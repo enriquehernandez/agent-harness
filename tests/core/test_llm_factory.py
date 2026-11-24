@@ -1,6 +1,20 @@
+import re
+from pathlib import Path
+
 import pytest
 from app.core.llm import get_llm, list_providers
 from app.core.llm.base import BaseLLM
+
+
+def test_env_example_provider_matches_settings_default():
+    """Copiar .env.example no debe cambiar el proveedor por defecto."""
+    from app.core.config import Settings
+
+    example = Path(".env.example").read_text(encoding="utf-8")
+    match = re.search(r"^LLM_PROVIDER=(\S+)$", example, re.MULTILINE)
+
+    assert match is not None
+    assert match.group(1) == Settings.model_fields["LLM_PROVIDER"].default
 
 
 def test_list_providers():

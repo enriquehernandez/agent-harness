@@ -18,10 +18,10 @@ MCP es un protocolo abierto que estandariza cómo un modelo de IA (o un Harness)
 }
 ```
 
-2. **Conexión (stdio)**: El `MCPClient` lanza el proceso del servidor mediante `stdio` (Standard Input/Output). Se crea un `ClientSession`.
+2. **Conexión (stdio)**: El `MCPClient` lanza el proceso del servidor mediante `stdio` (Standard Input/Output). Se crea un `ClientSession`. `connect()` limita `_do_connect()` con `asyncio.wait_for(..., timeout=settings.MCP_CONNECT_TIMEOUT)` (**10 s** por defecto) y usa `tenacity` con `stop_after_attempt(3)` y `wait_exponential(multiplier=1, min=1, max=10)`: **3 intentos** con backoff exponencial.
 3. **Descubrimiento**: El Harness llama a `session.list_tools()`. El servidor MCP responde con un JSON describiendo sus herramientas.
-4. **Adaptación (Proxy Pattern)**: El Harness no expone las herramientas MCP directamente al LLM. Las envuelve en `MCPToolProxy`, que implementa la interfaz local `BaseTool`.
-5. **Ejecución**: Cuando el LLM pide usar una herramienta, el `MCPToolProxy.run()` llama a `session.call_tool()` enviando los argumentos por el protocolo.
+4. **Adaptación (Proxy Pattern)**: El Harness no expone las herramientas MCP directamente al LLM. Las envuelve en `MCPToolProxy`, que implementa la interfaz local `BaseTool`, y las registra con el prefijo `mcp_<servidor>_` (`mcp_{server_name}_{mcp_tool.name}`) para evitar colisiones con herramientas locales.
+5. **Ejecución**: Cuando el LLM pide usar una herramienta, `MCPToolProxy.run()` -> `_call()` invoca `session.call_tool(self.original_name, arguments=kwargs)` con `asyncio.wait_for(..., timeout=settings.TOOL_TIMEOUT)` (**30 s** por defecto). Si no hay sesión o la llamada falla, intenta `reconnect()` y una segunda llamada antes de devolver `ToolResult(success=False, ...)`.
 
 ## Ventajas
 

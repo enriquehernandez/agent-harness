@@ -41,8 +41,8 @@ El `AgentLoop` interactúa con `ToolRegistry` y `PermissionGate`. Hay dos detall
 
 - **Permisos por defecto**: Si no inyectas un `PermissionGate`, el loop usa el por defecto, que tiene `bash` y `write_file` en `ASK`. Como en los tests no hay UI, el gate devuelve `DENY`, por lo que l**as tools nunca se ejecutan** y `tools_used` queda vacío.
   - **Solución**: En los tests, inyecta `gate = PermissionGate(policies={"tu_tool": Decision.ALLOW})`.
-- **Simular fallos de tools**: El `FunctionTool` envuelve todo en `try/except`. Si tu función de test devuelve un `ToolResult(success=False)`, el `FunctionTool` lo ignorará y devolverá `success=True` (porque no lanzó excepción).
-  - **Solución**: Para simular un fallo real, la función debe lanzar una excepción (`raise ValueError("Fallo")`).
+- **Simular fallos de tools**: `FunctionTool.run()` devuelve el `ToolResult` tal cual si la función ya devolvió uno (`isinstance(result, ToolResult)`), conservando `success=False` y `error`. Solo envuelve el valor en `ToolResult(success=True, content=str(result))` cuando **no** es un `ToolResult`; las excepciones sí se capturan y se convierten en `ToolResult(success=False, ...)`.
+  - **Solución**: Para simular un fallo basta con devolver `ToolResult(success=False, content="", error="Fallo simulado")`; lanza una excepción (`raise ValueError("Fallo")`) solo si además quieres cubrir el `except`.
 
 ## 4. Trampas del Testing de la TUI (Textual)
 Testear interfaces de terminal es complejo. Usamos `app.run_test()` y `pilot`.
@@ -58,7 +58,7 @@ Testear interfaces de terminal es complejo. Usamos `app.run_test()` y `pilot`.
 Algunas líneas son difíciles de cubrir porque son defensivas (ej. `if not file.exists(): return {}`).
 
 - **No las ignores**: Escribe un test específico que fuerce esa condición (ej. no crees el archivo).
-- **Si es imposible (ej. excepciones del sistema)**: Usa `# pragma: no cover` con una justificación clara. En este proyecto, `pyproject.toml` ya excluye líneas de UI (CSS, BINDINGS) y `except` de callbacks.
+- **Si es imposible (ej. excepciones del sistema)**: Usa `# pragma: no cover` con una justificación clara. En este proyecto, `pyproject.toml` (`[tool.coverage.report].exclude_lines`) ya tiene **9 reglas**: `pragma: no cover` (exclusión explícita), `if __name__ == .__main__.:` (bloques de entrada no ejecutados en tests), `^\s*\.\.\.\s*$` (cuerpos abstractos/stubs), `^\s*except.*:\s*$` (ramas defensivas de excepción), `^\s*continue\s*$` (saltos de control), `^\s*def on_`, `^\s*def watch_` y `^\s*def compose` (callbacks de Textual), y `^\s*return$` (retornos vacíos). Ya no hay una exclusión específica de CSS/BINDINGS.
 
 ## 6. El `except` del Timeout en `AgentLoop.stream()`
 El bloque `except (asyncio.TimeoutError, TimeoutError)` solo se ejecuta si el LLM se cuelga. Para cubrirlo, el `FakeLLM` debe tener un método `stream_chat` que haga un await `asyncio.sleep(2)` antes de devolver un chunk, y el test debe llamar a `loop.stream(..., timeout_seconds=0.1).`
@@ -80,7 +80,7 @@ uv run tom test
 uv run tom test-integration
 ```
 
-La cobertura mínima exigida es del **100%** para los módulos del núcleo (`app/core/`). Los archivos de la TUI (`app/tui/`) pueden tener pequeñas exclusiones visuales justificadas en `pyproject.toml`.
+El informe de cobertura debe marcar **100%** de líneas: el script `test` de `pyproject.toml` usa `--cov-fail-under=100`, por lo que `uv run tom test` (y por extensión CI) falla si baja de ese umbral. En la TUI (`app/tui/`) las exclusiones **no son solo visuales**: `def on_`, `def watch_` y `def compose` excluyen manejadores de eventos, watchers reactivos y métodos de construcción de widgets de Textual; además se aplican las reglas globales (`except`, `continue`, `return`, `...`, `if __name__ == ...` y `pragma: no cover`) detalladas en la sección 5.
 
 ## 10. Mocking de Pricing
 El `PricingProvider` se mockea fácilmente porque usa `PricingSource` (interfaz). Para tests:
@@ -114,4 +114,4 @@ Las estrategias tienen ramas de error (agente no encontrado, límite de saltos, 
 - Parchea `get_llm` para simular modelos específicos.
 
 ## 15. Mocking de Document Parsers
-Para testear `read_document`, mockea las librerías de extracción (`PdfReader`, `Document`, `load_workbook`, `Presentation`) para evitar depender de archivos reales y mantener los tests rápidos.
+Para testear `read_document`, mockea las librerías de extracción (`PdfReader`, `Document`, `load_workbook`, `Presentation`, `xlrd.open_workbook` y `olefile.OleFileIO`) para evitar depender de archivos reales y mantener los tests rápidos. Para los formatos legacy se puede mockear el stream OLE devolviendo bytes UTF-16LE con texto conocido.

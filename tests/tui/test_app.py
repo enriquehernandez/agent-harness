@@ -5,6 +5,7 @@ from app.tui.app import AgentHarnessApp, FileAwareInput, run_tui
 from textual.widgets import Input, Static, ListView, Tree
 from textual.worker import NoActiveWorker
 from app.core.harness.loop import LoopResult
+from app.core.harness.context import ContextManager
 from pathlib import Path
 
 
@@ -64,6 +65,20 @@ async def test_app_clear_chat():
             await pilot.press("ctrl+l")
             await pilot.pause()
             assert len(app.query_one("#chat-scroll").children) <= 1
+
+
+@pytest.mark.asyncio
+async def test_app_clear_chat_clears_context():
+    """Ctrl+L debe vaciar el historial como /clear, conservando el system prompt."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            app.ctx = ContextManager(system_prompt="Reglas")
+            app.ctx.add_user("Historial anterior")
+            await pilot.press("ctrl+l")
+            await pilot.pause()
+            assert [m["role"] for m in app.ctx.messages] == ["system"]
+            assert app.ctx.messages[0]["content"] == "Reglas"
 
 
 @pytest.mark.asyncio
@@ -219,6 +234,7 @@ async def test_app_initialize_agent_real():
                 assert app.registry is not None
                 assert app.agent_loop is not None
                 assert app.gate is not None
+                assert "Available skills:" in app.ctx.messages[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -365,13 +381,39 @@ async def test_app_initialize_agent_with_tools():
             def side_effect(registry, **kwargs):
                 from app.core.harness.tool import FunctionTool
                 registry.register(FunctionTool(
-                    name="read_text_file", description="", parameters_schema={}, func=lambda: ""
+                    name="read_file", description="", parameters_schema={}, func=lambda: ""
                 ))
             mock_register.side_effect = side_effect
 
             async with app.run_test() as pilot:
                 await app.initialize_agent()
                 await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_app_subagents_receive_registered_tools():
+    """Reviewer y agentes A2A reciben tools que existen en el registry."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient"), patch("app.tui.app.register_core_tools") as mock_register:
+        def side_effect(registry, **kwargs):
+            from app.core.harness.tool import FunctionTool
+            for name in ["read_file", "bash"]:
+                registry.register(FunctionTool(
+                    name=name, description="", parameters_schema={}, func=lambda: ""
+                ))
+        mock_register.side_effect = side_effect
+
+        async with app.run_test() as pilot:
+            await app.initialize_agent()
+            await pilot.pause()
+
+    reviewer = app.registry.get("delegate_to_reviewer")
+    assert set(reviewer.tools.names()) == {"read_file", "bash"}
+
+    orchestrator = app.registry.get("delegate_task")
+    assert orchestrator.context_provider() is app.ctx
+    for card in orchestrator.agents.values():
+        assert set(card.tools.names()) == {"read_file", "bash"}
 
 
 @pytest.mark.asyncio
@@ -976,6 +1018,20 @@ async def test_system_prompt_treats_tasks_as_background_context():
 
 
 @pytest.mark.asyncio
+async def test_system_prompt_does_not_claim_docs_are_injected():
+    """El prompt solo describe como BACKGROUND CONTEXT lo que realmente carga."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient"), patch("app.tui.app.register_core_tools"):
+        async with app.run_test() as pilot:
+            await app.initialize_agent()
+            await pilot.pause()
+
+    system_prompt = app.ctx.messages[0]["content"]
+    assert "the task list in tasks/actual.md and long-term memory" in system_prompt
+    assert "(docs, the task list in tasks/actual.md and long-term memory)" not in system_prompt
+
+
+@pytest.mark.asyncio
 async def test_app_handle_file_paste_exception(tmp_path):
     """Cubre el except de handle_file_paste (líneas 558-560)."""
     app = AgentHarnessApp()
@@ -1211,3 +1267,98 @@ async def test_stream_to_chat_error_event():
             texts = [str(getattr(child, "renderable", getattr(child, "content", "")))
                      for child in app.query_one("#chat-scroll").children]
             assert any("Fallo del agente" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_app_process_input_one_shot_mode_is_consumed():
+    """El código solo afecta a la primera pregunta y no queda en el historial."""
+    from app.tui.commands import mode_message
+
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+        snapshots = []
+
+        async def mock_stream(user_input, **kwargs):
+            ctx = kwargs["context"]
+            if user_input:
+                ctx.add_user(user_input)
+            snapshots.append(list(ctx.messages))
+            yield "Respuesta"
+
+        app.agent_loop = MagicMock(stream=mock_stream)
+        app.pending_mode = "/truth"
+
+        async with app.run_test() as pilot:
+            app.process_input("Primera")
+            await pilot.pause()
+            assert app.pending_mode is None
+            app.process_input("Segunda")
+            await pilot.pause()
+
+    assert snapshots[0][-2]["content"] == mode_message("/truth")
+    assert snapshots[0][-1]["content"] == "Primera"
+    assert snapshots[1][-1]["content"] == "Segunda"
+    assert mode_message("/truth") not in [m["content"] for m in snapshots[1]]
+    assert [m["content"] for m in app.ctx.messages] == [
+        "System", "Primera", "Segunda"]
+
+
+@pytest.mark.asyncio
+async def test_app_process_input_mode_with_inline_question():
+    """/codigo <pregunta> se procesa en el mismo turno."""
+    from app.tui.commands import mode_message
+
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+        snapshots = []
+
+        async def mock_stream(user_input, **kwargs):
+            ctx = kwargs["context"]
+            if user_input:
+                ctx.add_user(user_input)
+            snapshots.append(list(ctx.messages))
+            yield "ok"
+
+        app.agent_loop = MagicMock(stream=mock_stream)
+
+        async with app.run_test() as pilot:
+            app.process_input("/devil ¿Fallos?")
+            await pilot.pause()
+
+    assert snapshots[0][-2]["content"] == mode_message("/devil")
+    assert snapshots[0][-1]["content"] == "¿Fallos?"
+    assert app.pending_mode is None
+    assert app.pending_question is None
+    assert [m["content"] for m in app.ctx.messages] == ["System", "¿Fallos?"]
+
+
+@pytest.mark.asyncio
+async def test_app_on_input_submitted_with_images_and_mode():
+    """El modo también se aplica (y se retira) en la rama de imágenes."""
+    from app.tui.commands import mode_message
+
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+        app.attached_images = ["data:image/png;base64,fake_base64"]
+        app.pending_mode = "/nofluff"
+        snapshots = []
+
+        async def mock_stream(*args, **kwargs):
+            snapshots.append(list(kwargs["context"].messages))
+            yield "ok"
+
+        app.agent_loop = MagicMock(stream=mock_stream)
+        mock_event = MagicMock(value="¿Qué ves?", input=MagicMock())
+
+        async with app.run_test() as pilot:
+            await app.on_input_submitted(mock_event)
+            await pilot.pause()
+
+    assert snapshots[0][1]["content"] == mode_message("/nofluff")
+    assert any(isinstance(m["content"], list) for m in snapshots[0])
+    assert app.pending_mode is None
+    assert len(app.ctx.messages) == 2
+    assert mode_message("/nofluff") not in [m["content"] for m in app.ctx.messages]

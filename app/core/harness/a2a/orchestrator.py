@@ -1,4 +1,5 @@
-from typing import Any
+from typing import Callable
+from app.core.harness.context import ContextManager
 from app.core.harness.tool import BaseTool, ToolResult
 from app.core.harness.a2a.base import AgentCard
 from app.core.harness.a2a.strategies.supervisor import SupervisorStrategy
@@ -12,7 +13,13 @@ from app.core.logger import logger
 class OrchestratorTool(BaseTool):
     """La tool que el agente principal usa para delegar en el sistema A2A."""
 
-    def __init__(self, llm, agents: dict[str, AgentCard], permissions):
+    def __init__(
+        self,
+        llm,
+        agents: dict[str, AgentCard],
+        permissions,
+        context_provider: Callable[[], ContextManager | None] | None = None,
+    ):
         self.name = "delegate_task"
         self.description = (
             "Delega una tarea compleja a un sistema de subagentes expertos. "
@@ -31,9 +38,12 @@ class OrchestratorTool(BaseTool):
         self.llm = llm
         self.agents = agents
         self.permissions = permissions
+        self.context_provider = context_provider
 
     async def run(self, task: str, **kwargs) -> ToolResult:
         strategy_name = settings.A2A_STRATEGY.lower()
+        # Se resuelve en cada llamada: la TUI puede sustituir ctx con /reload tools
+        context = self.context_provider() if self.context_provider else None
 
         try:
             if strategy_name == "supervisor":
@@ -60,8 +70,7 @@ class OrchestratorTool(BaseTool):
                     error=f"Estrategia A2A desconocida: {strategy_name}"
                 )
 
-            # Pasamos un contexto vacío (el orchestrator no tiene historial propio)
-            return await strategy.execute(task, context=None)
+            return await strategy.execute(task, context=context)
 
         except Exception as e:
             logger.error(f"Error en OrchestratorTool: {e}", exc_info=True)

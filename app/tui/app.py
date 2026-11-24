@@ -1,6 +1,5 @@
 import os
-from textual_image.widget import HalfcellImage, UnicodeImage
-from urllib.parse import unquote
+from textual_image.widget import HalfcellImage
 import asyncio
 import base64
 import json
@@ -24,7 +23,7 @@ from app.core.harness.subagents import DelegateTool
 from app.core.harness.memory.factory import create_memory_store
 from app.core.harness.session import SessionManager
 from app.tools import register_core_tools
-from app.tui.commands import handle_command
+from app.tui.commands import AVAILABLE_COMMANDS, MODE_INSTRUCTIONS, handle_command, mode_message
 from app.mcp.client import MCPClient
 from app.core.config import settings
 from app.tui.suggester import SkillSuggester, CombinedSuggester
@@ -81,6 +80,8 @@ class AgentHarnessApp(App):
         self.attached_images = []
         self.debug_mode = False
         self.verbose_mode = False
+        self.pending_mode = None
+        self.pending_question = None
         self.session_manager = SessionManager()
         self.total_cost = 0.0
 
@@ -119,14 +120,8 @@ class AgentHarnessApp(App):
         await self.write_to_chat("🤖 Agent Harness iniciado. Escribe /help para ver comandos.", type="system")
         await self.write_to_chat("💡 Puedes pegar imágenes o archivos. Escribe @ para cargar una skill.", type="system")
 
-        available_commands = [
-            "/help", "/shortcuts", "/model", "/provider", "/tools", "/subagents",
-            "/skills", "/tokens", "/compact", "/verbose", "/clear", "/debug",
-            "/permissions", "/export", "/session", "/memory", "/doctor", "/trace", "/cost", "/quit"
-        ]
-
         input_box = self.query_one("#input-box", FileAwareInput)
-        input_box.suggester = CombinedSuggester(available_commands)
+        input_box.suggester = CombinedSuggester(AVAILABLE_COMMANDS)
         input_box.focus()
 
     async def initialize_agent(self):
@@ -135,6 +130,10 @@ class AgentHarnessApp(App):
         self.memory_store = memory_store
         memory_context = f"\n\n[Long-term memory]:\n{memory_store.preamble()}" if memory_store.preamble(
         ) else ""
+
+        from app.tools.skills import LoadSkillTool
+        skills = LoadSkillTool().discover_skills()
+        skills_list = ", ".join(f"'{s}'" for s in skills) if skills else "ninguna"
 
         context_files = ["AGENTS.md", "tasks/actual.md"]
         context_text = ""
@@ -147,11 +146,12 @@ class AgentHarnessApp(App):
             system_prompt=(
                 "You are an expert AI assistant and Senior Software Engineer working on the Agent Harness.\n"
                 "AGENTS.md contains your operational rules: follow them strictly.\n"
-                "Everything else below (docs, the task list in tasks/actual.md and long-term memory) "
+                "Everything else below (the task list in tasks/actual.md and long-term memory) "
                 "is BACKGROUND CONTEXT for reference, not an instruction to act.\n"
                 "Never volunteer, mention or try to resume pending tasks unless the user explicitly "
                 "asks about project tasks or status; in that case, answer using tasks/actual.md.\n"
                 "Always answer the user's actual message directly.\n"
+                f"Available skills: {skills_list}.\n"
                 f"{context_text}\n"
                 f"{memory_context}"
             )
@@ -186,7 +186,7 @@ class AgentHarnessApp(App):
 
         # 5. Subagente Reviewer (Legacy)
         reviewer_tools = ToolRegistry()
-        for tool_name in ["read_text_file", "list_directory", "bash"]:
+        for tool_name in ["read_file", "bash"]:
             if tool_name in self.registry:
                 reviewer_tools.register(self.registry.get(tool_name))
 
@@ -196,13 +196,14 @@ class AgentHarnessApp(App):
             llm=get_llm(self.state["provider"]),
             tools=reviewer_tools,
             system_prompt="You are an expert code reviewer. Be concise.",
+            permissions=self.gate,
         )
         self.registry.register(reviewer_tool)
 
         # 6. A2A
         from app.core.harness.a2a import AgentCard, OrchestratorTool
         a2a_base_tools = ToolRegistry()
-        for tool_name in ["read_text_file", "list_directory", "bash"]:
+        for tool_name in ["read_file", "bash"]:
             if tool_name in self.registry:
                 a2a_base_tools.register(self.registry.get(tool_name))
 
@@ -228,6 +229,7 @@ class AgentHarnessApp(App):
             llm=get_llm(self.state["provider"]),
             agents=a2a_agents,
             permissions=self.gate,
+            context_provider=lambda: self.ctx,
         )
         self.registry.register(orchestrator)
 
@@ -440,6 +442,26 @@ class AgentHarnessApp(App):
             log = events[idx]
             await self.push_screen(DebugDetailScreen(title=log['summary'], payload=log['payload']))
 
+    def _begin_pending_mode(self) -> dict | None:
+        """Inyecta el código temporal y devuelve el mensaje a retirar después."""
+        mode = getattr(self, "pending_mode", None)
+        self.pending_mode = None
+        instruction = MODE_INSTRUCTIONS.get(mode) if mode else None
+        if not instruction or self.ctx is None:
+            return None
+        temp_msg = {"role": "user", "content": mode_message(mode)}
+        self.ctx.messages.append(temp_msg)
+        return temp_msg
+
+    def _end_pending_mode(self, temp_msg: dict | None) -> None:
+        """Retira el mensaje temporal para que no quede en el historial."""
+        if temp_msg is None:
+            return
+        for index, message in enumerate(self.ctx.messages):
+            if message is temp_msg:
+                del self.ctx.messages[index]
+                break
+
     @work(exclusive=True)
     async def process_input(self, user_input: str):
         loading = self.query_one("#loading-indicator", LoadingIndicator)
@@ -447,15 +469,23 @@ class AgentHarnessApp(App):
             await self.write_to_chat(f"⚙️ Ejecutando comando: {user_input}", type="system")
             try:
                 await handle_command(user_input, self.ctx, self.state, get_llm(self.state["provider"]), self)
+                inline_question = getattr(self, "pending_question", None)
+                if inline_question:
+                    self.pending_question = None
+                    await self._stream_user_message(inline_question, loading)
             except Exception as e:
                 await self.write_to_chat(f"❌ Error en comando: {e}", type="system")
             return
 
+        await self._stream_user_message(user_input, loading)
+
+    async def _stream_user_message(self, user_input: str, loading: LoadingIndicator) -> None:
         self.update_dashboard("Pensando...")
         display_text = user_input if len(
             user_input) < 300 else user_input[:300] + "..."
         await self.write_to_chat(display_text, type="user")
         loading.display = True
+        temp_msg = self._begin_pending_mode()
 
         try:
             stream_gen = self.agent_loop.stream(
@@ -472,6 +502,7 @@ class AgentHarnessApp(App):
         finally:
             loading.display = False
             self.query_one("#input-box", FileAwareInput).focus()
+            self._end_pending_mode(temp_msg)
             if self.debug_mode:
                 await self._refresh_debug_list()
 
@@ -569,6 +600,7 @@ class AgentHarnessApp(App):
         if self.attached_images:
             display_text = user_text if user_text else "[Imagen adjunta]"
             await self.write_to_chat(display_text, type="user")
+            temp_msg = self._begin_pending_mode()
             self.ctx.add_user_with_image(user_text, self.attached_images)
             self.attached_images = []
             self.update_attachments_bar()
@@ -585,6 +617,7 @@ class AgentHarnessApp(App):
             finally:
                 loading.display = False
                 self.query_one("#input-box", FileAwareInput).focus()
+                self._end_pending_mode(temp_msg)
             return
 
         final_message = user_text
@@ -600,6 +633,8 @@ class AgentHarnessApp(App):
         self.process_input(final_message)
 
     async def action_clear_chat(self) -> None:
+        if self.ctx:
+            self.ctx.clear()
         scroll = self.query_one("#chat-scroll", VerticalScroll)
         await scroll.remove_children()
         await self.write_to_chat("🧹 Chat limpiado (Ctrl+L)", type="system")

@@ -1,5 +1,8 @@
 # Tarea Actual
 
-- **Objetivo:** Refactorizar el proyecto para usar la estructura de contexto en texto plano (AGENTS.md, docs/, tasks/, checks/).
-- **Estado:** Completada. `app.py` ya carga `AGENTS.md` y `tasks/actual.md` al inicializar el `ContextManager` y usa `Path.exists()`.
-- **Notas:** Este archivo es contexto informativo; no representa una tarea pendiente salvo indicación explícita del usuario.
+No quedan tareas en ejecución. Las tareas terminadas están en `tasks/completadas.md`; el resto del inventario, en `tasks/pendientes.md`.
+
+## Notas
+
+- Tareas completadas: `tasks/completadas.md`.
+- Inventario del resto de funcionalidad pendiente: `tasks/pendientes.md`.

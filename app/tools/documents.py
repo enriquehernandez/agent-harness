@@ -1,5 +1,8 @@
+import re
 from pathlib import Path
-import pandas as pd
+
+import olefile
+import xlrd
 from pypdf import PdfReader
 from docx import Document
 from openpyxl import load_workbook
@@ -7,6 +10,20 @@ from pptx import Presentation
 from app.core.config import settings
 from app.core.harness.tool import BaseTool, ToolResult
 from app.core.logger import logger
+
+# Las cadenas legibles de los formatos OLE (.doc/.ppt) aparecen como rutas de
+# caracteres imprimibles; el mínimo evita confundir cabeceras binarias con texto.
+_PRINTABLE_RUN = re.compile(r"[\x20-\x7e\xa1-\xff\r\n\t]{6,}")
+
+
+def _printable_runs(data: bytes, encoding: str) -> str:
+    """Extrae cadenas legibles de un stream binario decodificado con `encoding`."""
+    decoded = data.decode(encoding, errors="ignore")
+    return "\n".join(
+        run.strip()
+        for run in _PRINTABLE_RUN.findall(decoded)
+        if run.strip()
+    )
 
 
 def _is_within_base_dir(target: Path, base_dir: Path) -> bool:
@@ -22,7 +39,7 @@ class ReadDocumentTool(BaseTool):
     def __init__(self, base_dir: str = "."):
         self.name = "read_document"
         self.description = (
-            "Extrae el texto de un documento. Soporta PDF, DOCX, XLSX y PPTX. "
+            "Extrae el texto de un documento. Soporta PDF, DOC/DOCX, XLS/XLSX y PPT/PPTX. "
             "Úsalo cuando el usuario adjunte un archivo binario y quieras leer su contenido."
         )
         self.parameters_schema = {
@@ -54,10 +71,16 @@ class ReadDocumentTool(BaseTool):
                 text = self._read_pdf(target)
             elif ext == ".docx":
                 text = self._read_docx(target)
+            elif ext == ".doc":
+                text = self._read_doc(target)
             elif ext == ".xlsx":
                 text = self._read_xlsx(target)
+            elif ext == ".xls":
+                text = self._read_xls(target)
             elif ext == ".pptx":
                 text = self._read_pptx(target)
+            elif ext == ".ppt":
+                text = self._read_ppt(target)
             else:
                 return ToolResult(
                     success=False, content="",
@@ -114,6 +137,30 @@ class ReadDocumentTool(BaseTool):
                 text += " | ".join(row_text) + "\n"
         return text
 
+    def _read_doc(self, path: Path) -> str:
+        with olefile.OleFileIO(str(path)) as ole:
+            data = ole.openstream("WordDocument").read()
+        # Word 97 guarda el texto en UTF-16LE o en páginas de 8 bits.
+        return _printable_runs(data, "utf-16-le") or _printable_runs(data, "latin-1")
+
+    def _read_xls(self, path: Path) -> str:
+        book = xlrd.open_workbook(str(path))
+        text = ""
+        for sheet in book.sheets():
+            text += f"--- Hoja: {sheet.name} ---\n"
+            for row in range(sheet.nrows):
+                values = []
+                for col in range(sheet.ncols):
+                    cell = sheet.cell(row, col)
+                    value = cell.value
+                    if cell.ctype == xlrd.XL_CELL_DATE:
+                        value = xlrd.xldate_as_datetime(value, book.datemode)
+                    values.append(str(value) if value != "" else "")
+                if any(values):
+                    text += " | ".join(values) + "\n"
+            text += "\n"
+        return text
+
     def _read_xlsx(self, path: Path) -> str:
         wb = load_workbook(str(path), data_only=True)
         text = ""
@@ -138,3 +185,9 @@ class ReadDocumentTool(BaseTool):
                     text += shape.text + "\n"
             text += "\n"
         return text
+
+    def _read_ppt(self, path: Path) -> str:
+        with olefile.OleFileIO(str(path)) as ole:
+            data = ole.openstream("PowerPoint Document").read()
+        # Los atoms de texto de PowerPoint 97 son UTF-16LE o de 8 bits.
+        return _printable_runs(data, "utf-16-le") or _printable_runs(data, "latin-1")

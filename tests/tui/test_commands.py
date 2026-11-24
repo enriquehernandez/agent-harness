@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from app.core.harness.memory.base import MemoryEntry
-from app.tui.commands import handle_command
+from app.tui.commands import handle_command, AVAILABLE_COMMANDS
 from app.core.harness.context import ContextManager
 from app.core.llm.base import LLMResponse
 
@@ -22,6 +22,8 @@ def mock_app():
     app.registry = MagicMock()
     app.registry.names.return_value = [
         "bash", "read_file", "delegate_to_reviewer"]
+    app.mcp_clients = []
+    app.initialize_agent = AsyncMock()
     mock_tool = MagicMock()
     mock_tool.description = "[MCP] Read a file"
     app.registry.get.return_value = mock_tool
@@ -51,6 +53,72 @@ async def test_cmd_help(mock_app, ctx):
 
 
 @pytest.mark.asyncio
+async def test_cmd_help_lists_reload(mock_app, ctx):
+    assert await handle_command("/help", ctx, {}, None, mock_app) is True
+    assert "`/reload [skills/permissions/tools]`" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_reload_usage(mock_app, ctx):
+    assert await handle_command("/reload", ctx, {}, None, mock_app) is True
+    assert "/reload [skills|permissions|tools]" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_reload_unknown_target(mock_app, ctx):
+    await handle_command("/reload other", ctx, {}, None, mock_app)
+    assert "desconocido" in mock_app.write_to_chat.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_cmd_reload_skills_updates_prompt_and_suggester(mock_app, ctx):
+    from app.tui.suggester import CombinedSuggester
+
+    mock_app.ctx = ctx
+    ctx.messages[0]["content"] = "Available skills: 'old'.\nResto del prompt"
+    input_box = MagicMock()
+    mock_app.query_one.return_value = input_box
+
+    with patch("app.tools.skills.LoadSkillTool.discover_skills", return_value=["browser", "report"]):
+        await handle_command("/reload skills", ctx, {}, None, mock_app)
+
+    assert "Available skills: 'browser', 'report'." in ctx.messages[0]["content"]
+    assert isinstance(input_box.suggester, CombinedSuggester)
+
+
+@pytest.mark.asyncio
+async def test_cmd_reload_permissions(mock_app, ctx):
+    mock_app.gate = MagicMock()
+
+    assert await handle_command("/reload permissions", ctx, {}, None, mock_app) is True
+    mock_app.gate.reload_persisted.assert_called_once()
+    assert "Permisos recargados" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_reload_tools_preserves_context(mock_app, ctx):
+    mock_app.ctx = ctx
+
+    assert await handle_command("/reload tools", ctx, {}, None, mock_app) is True
+    mock_app.initialize_agent.assert_awaited_once()
+    assert mock_app.ctx is ctx
+
+
+@pytest.mark.asyncio
+async def test_cmd_reload_tools_disconnects_mcp_clients(mock_app, ctx):
+    clients = [MagicMock(), MagicMock()]
+    clients[0].disconnect = AsyncMock()
+    clients[1].disconnect = AsyncMock(side_effect=Exception("MCP caído"))
+    mock_app.mcp_clients = clients
+
+    await handle_command("/reload tools", ctx, {}, None, mock_app)
+
+    assert mock_app.mcp_clients == []
+    for client in clients:
+        client.disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_cmd_shortcuts(mock_app, ctx):
     assert await handle_command("/shortcuts", ctx, {}, None, mock_app) is True
     assert "Atajos de Teclado" in mock_app.write_to_chat.call_args[0][0]
@@ -60,6 +128,21 @@ async def test_cmd_shortcuts(mock_app, ctx):
 async def test_cmd_tools(mock_app, ctx):
     assert await handle_command("/tools", ctx, {}, None, mock_app) is True
     assert "Herramientas Disponibles" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_tools_marks_mcp_tool_as_mcp(mock_app, ctx):
+    from app.mcp.client import MCPToolProxy
+
+    proxy = MCPToolProxy(
+        name="mcp_fs_read", description="Lee un archivo",
+        parameters_schema={}, client=MagicMock(), server_name="fs",
+    )
+    mock_app.registry.names.return_value = ["mcp_fs_read"]
+    mock_app.registry.get.return_value = proxy
+
+    assert await handle_command("/tools", ctx, {}, None, mock_app) is True
+    assert "| `mcp_fs_read` | MCP |" in mock_app.write_to_chat.call_args[0][0]
 
 
 @pytest.mark.asyncio
@@ -473,10 +556,10 @@ async def test_cmd_session_help(mock_app, ctx):
 
 @pytest.mark.asyncio
 async def test_cmd_reload_skills(mock_app, ctx):
-    """Cubre commands.py líneas 149-173: recargar skills."""
+    """Cubre el recorrido de recarga de skills."""
     mock_app.ctx = ctx
     with patch("app.tools.skills.LoadSkillTool.discover_skills", return_value=["skill1"]):
-        await handle_command("/reload-skills", ctx, {}, None, mock_app)
+        await handle_command("/reload skills", ctx, {}, None, mock_app)
         assert "Skills recargadas" in mock_app.write_to_chat.call_args[0][0]
 
 
@@ -759,7 +842,8 @@ async def test_cmd_memory_migrate_commit_and_preamble(mock_app, ctx):
         def preamble(self):
             return self._preamble
 
-    mock_app.ctx = ctx  # ContextManager real para poder inspeccionar messages[0]
+    # ContextManager real para poder inspeccionar messages[0]
+    mock_app.ctx = ctx
     mock_app.agent_loop = MagicMock()
 
     old_store = MagicMock()
@@ -861,3 +945,41 @@ async def test_cmd_session_new_without_previous_session(mock_app):
     assert mock_app.session_manager is new_sm
     assert plain_ctx.messages == [{"role": "system", "content": "System"}]
     assert "Nueva sesión creada" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.parametrize("command", [
+    "/truth", "/human", "/nofluff", "/devil", "/decode", "/genius",
+])
+@pytest.mark.asyncio
+async def test_cmd_response_modes_set_pending_mode(mock_app, ctx, command):
+    """Cada código queda armado para una sola pregunta."""
+    from app.tui.commands import MODE_INSTRUCTIONS
+
+    assert await handle_command(command, ctx, {}, None, mock_app) is True
+    assert mock_app.pending_mode == command
+    assert mock_app.pending_question is None
+    assert "una sola pregunta" in mock_app.write_to_chat.call_args[0][0]
+    assert MODE_INSTRUCTIONS[command]
+
+
+@pytest.mark.asyncio
+async def test_cmd_response_mode_with_inline_question(mock_app, ctx):
+    await handle_command("/devil ¿Qué fallos tiene?", ctx, {}, None, mock_app)
+
+    assert mock_app.pending_mode == "/devil"
+    assert mock_app.pending_question == "¿Qué fallos tiene?"
+    assert "`¿Qué fallos tiene?`" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_help_and_autocomplete_include_response_modes(mock_app, ctx):
+    from app.tui.commands import MODE_INSTRUCTIONS, mode_message
+
+    assert await handle_command("/help", ctx, {}, None, mock_app) is True
+    help_text = mock_app.write_to_chat.call_args[0][0]
+
+    for command, instruction in MODE_INSTRUCTIONS.items():
+        assert command in AVAILABLE_COMMANDS
+        assert f"`{command}`" in help_text
+        assert instruction in mode_message(command)
+    assert "no cambian las reglas" in mode_message("/truth")

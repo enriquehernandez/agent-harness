@@ -102,6 +102,98 @@ async def test_orchestrator_tool_supervisor_strategy(mock_llm, mock_registry):
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_passes_context_from_provider(mock_llm, mock_registry):
+    """El orchestrator entrega el contexto actual a la estrategia."""
+    ctx = ContextManager(system_prompt="Sistema")
+    ctx.add_user("Mensaje del padre")
+
+    with patch("app.core.config.settings.A2A_STRATEGY", "supervisor"):
+        with patch("app.core.harness.a2a.orchestrator.SupervisorStrategy") as MockStrategy:
+            mock_strategy = MagicMock()
+            mock_strategy.execute = AsyncMock(
+                return_value=MagicMock(success=True, content="ok"))
+            MockStrategy.return_value = mock_strategy
+
+            tool = OrchestratorTool(
+                mock_llm, mock_registry, permissions=None,
+                context_provider=lambda: ctx)
+            await tool.run("tarea")
+
+            mock_strategy.execute.assert_awaited_once_with("tarea", context=ctx)
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_fork_agent_receives_parent_history(mock_llm, mock_registry):
+    """Un agente en modo fork recibe el historial del contexto de la TUI."""
+    ctx = ContextManager(system_prompt="Sistema")
+    ctx.add_user("Contexto previo del padre")
+    mock_llm.chat.return_value = LLMResponse(content="writer")
+
+    with patch("app.core.config.settings.A2A_STRATEGY", "supervisor"):
+        with patch("app.core.harness.a2a.strategies.supervisor.AgentLoop") as MockLoop:
+            MockLoop.return_value.run = AsyncMock(
+                return_value=MagicMock(final_answer="Hecho"))
+            tool = OrchestratorTool(
+                mock_llm, mock_registry, permissions=None,
+                context_provider=lambda: ctx)
+            await tool.run("tarea")
+
+            agent_ctx = MockLoop.return_value.run.call_args.kwargs["context"]
+            assert [m["content"] for m in agent_ctx.messages] == [
+                "Eres un escritor",
+                "Contexto previo del padre",
+                "Continúas la tarea iniciada por el agente principal. "
+                "El historial anterior es contexto heredado; tu tarea "
+                "se indica en el siguiente mensaje.",
+            ]
+
+
+def test_fork_context_marks_inherited_history(mock_llm, mock_registry):
+    """El fork distingue el historial heredado de la tarea que llega después."""
+    strategy = SupervisorStrategy(mock_llm, mock_registry, permissions=None)
+    ctx = ContextManager(system_prompt="Sistema")
+    ctx.add_user("Contexto previo del padre")
+    ctx.add_assistant("Respuesta previa")
+
+    agent_ctx = strategy._fork_context(mock_registry["writer"], ctx)
+
+    assert [m["role"] for m in agent_ctx.messages] == [
+        "system", "user", "assistant", "user"
+    ]
+    assert agent_ctx.messages[0]["content"] == "Eres un escritor"
+    assert agent_ctx.messages[-1]["content"] == (
+        "Continúas la tarea iniciada por el agente principal. "
+        "El historial anterior es contexto heredado; tu tarea "
+        "se indica en el siguiente mensaje."
+    )
+
+
+def test_fork_context_without_history_has_no_preamble(mock_llm, mock_registry):
+    """Sin historial heredado no se añade el preámbulo de continuación."""
+    strategy = SupervisorStrategy(mock_llm, mock_registry, permissions=None)
+    ctx = ContextManager(system_prompt="Sistema")
+
+    agent_ctx = strategy._fork_context(mock_registry["writer"], ctx)
+
+    assert agent_ctx.messages == [
+        {"role": "system", "content": "Eres un escritor"}
+    ]
+
+
+def test_isolated_context_ignores_parent_history(mock_llm, mock_registry):
+    """El modo isolated no hereda mensajes ni añade preámbulo."""
+    strategy = SupervisorStrategy(mock_llm, mock_registry, permissions=None)
+    ctx = ContextManager(system_prompt="Sistema")
+    ctx.add_user("Contexto previo del padre")
+
+    agent_ctx = strategy._fork_context(mock_registry["analyst"], ctx)
+
+    assert agent_ctx.messages == [
+        {"role": "system", "content": "Eres un analista"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_orchestrator_unknown_strategy(mock_llm, mock_registry):
     """Cubre estrategia desconocida."""
     with patch("app.core.config.settings.A2A_STRATEGY", "inventada"):
@@ -389,6 +481,65 @@ async def test_parallel_strategy(mock_llm, mock_registry):
         assert "analyst" in result.content
         assert "writer" in result.content
         assert mock_instance.run.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_parallel_loads_persisted_permissions(tmp_path, monkeypatch, mock_llm, mock_registry):
+    """Un permiso aprobado con 'a' no debe volver a preguntarse en parallel."""
+    from app.core.harness.a2a.strategies.parallel import ParallelStrategy
+    from app.core.harness.permissions import Decision, PermissionGate
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".harness").mkdir()
+    (tmp_path / ".harness" / "permissions.json").write_text(
+        '{"session_allowed": ["bash:ls"]}', encoding="utf-8")
+
+    ask_user = AsyncMock(return_value="n")
+    parent_gate = PermissionGate(ask_user=ask_user)
+    strategy = ParallelStrategy(
+        mock_llm, mock_registry, permissions=parent_gate,
+        agents_to_run=["analyst"]
+    )
+
+    with patch("app.core.harness.a2a.strategies.parallel.AgentLoop") as MockLoop:
+        MockLoop.return_value.run = AsyncMock(
+            return_value=MagicMock(final_answer="Hecho"))
+        await strategy.execute("Tarea")
+
+    sub_gate = MockLoop.call_args.kwargs["permissions"]
+    assert await sub_gate.check("bash", {"command": "ls"}) == Decision.ALLOW
+    ask_user.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_parallel_subagents_share_parent_gate_state(tmp_path, monkeypatch, mock_llm, mock_registry):
+    """Una aprobación en un subagente paralelo alcanza al padre y a sus hermanos."""
+    from app.core.harness.a2a.strategies.parallel import ParallelStrategy
+    from app.core.harness.permissions import Decision, PermissionGate
+
+    monkeypatch.chdir(tmp_path)
+    ask_user = AsyncMock(return_value="a")
+    parent_gate = PermissionGate(ask_user=ask_user)
+    strategy = ParallelStrategy(
+        mock_llm, mock_registry, permissions=parent_gate,
+        agents_to_run=["analyst", "writer"]
+    )
+
+    with patch("app.core.harness.a2a.strategies.parallel.AgentLoop") as MockLoop:
+        MockLoop.return_value.run = AsyncMock(side_effect=[
+            MagicMock(final_answer="Análisis"),
+            MagicMock(final_answer="Documentación"),
+        ])
+        await strategy.execute("Tarea")
+
+    gates = [call.kwargs["permissions"] for call in MockLoop.call_args_list]
+    assert await gates[0].check("bash", {"command": "ls"}) == Decision.ALLOW
+    ask_user.assert_awaited_once()
+    ask_user.reset_mock()
+
+    assert await gates[1].check("bash", {"command": "ls"}) == Decision.ALLOW
+    assert await parent_gate.check("bash", {"command": "ls"}) == Decision.ALLOW
+    ask_user.assert_not_awaited()
 
 
 @pytest.mark.asyncio

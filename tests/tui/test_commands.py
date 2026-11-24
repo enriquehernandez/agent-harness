@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from app.core.harness.memory.base import MemoryEntry
-from app.tui.commands import handle_command
+from app.tui.commands import handle_command, AVAILABLE_COMMANDS
 from app.core.harness.context import ContextManager
 from app.core.llm.base import LLMResponse
 
@@ -945,3 +945,41 @@ async def test_cmd_session_new_without_previous_session(mock_app):
     assert mock_app.session_manager is new_sm
     assert plain_ctx.messages == [{"role": "system", "content": "System"}]
     assert "Nueva sesión creada" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.parametrize("command", [
+    "/truth", "/human", "/nofluff", "/devil", "/decode", "/genius",
+])
+@pytest.mark.asyncio
+async def test_cmd_response_modes_set_pending_mode(mock_app, ctx, command):
+    """Cada código queda armado para una sola pregunta."""
+    from app.tui.commands import MODE_INSTRUCTIONS
+
+    assert await handle_command(command, ctx, {}, None, mock_app) is True
+    assert mock_app.pending_mode == command
+    assert mock_app.pending_question is None
+    assert "una sola pregunta" in mock_app.write_to_chat.call_args[0][0]
+    assert MODE_INSTRUCTIONS[command]
+
+
+@pytest.mark.asyncio
+async def test_cmd_response_mode_with_inline_question(mock_app, ctx):
+    await handle_command("/devil ¿Qué fallos tiene?", ctx, {}, None, mock_app)
+
+    assert mock_app.pending_mode == "/devil"
+    assert mock_app.pending_question == "¿Qué fallos tiene?"
+    assert "`¿Qué fallos tiene?`" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_help_and_autocomplete_include_response_modes(mock_app, ctx):
+    from app.tui.commands import MODE_INSTRUCTIONS, mode_message
+
+    assert await handle_command("/help", ctx, {}, None, mock_app) is True
+    help_text = mock_app.write_to_chat.call_args[0][0]
+
+    for command, instruction in MODE_INSTRUCTIONS.items():
+        assert command in AVAILABLE_COMMANDS
+        assert f"`{command}`" in help_text
+        assert instruction in mode_message(command)
+    assert "no cambian las reglas" in mode_message("/truth")

@@ -10,10 +10,50 @@ from app.core.llm.base import BaseLLM
 from app.core.llm import get_llm
 
 
+# Códigos de respuesta de un solo uso: se inyectan en la siguiente pregunta y
+# se consumen automáticamente. Son instrucciones de estilo, no permisos.
+MODE_INSTRUCTIONS = {
+    "/truth": (
+        "Modo TRUTH: sé directo y crítico. Apaga la cortesía, señala fallas y "
+        "evita dar la razón cuando los hechos no la respaldan."
+    ),
+    "/human": (
+        "Modo HUMAN: responde con un tono natural y cercano, como una persona "
+        "hablando con otra; evita el estilo de manual corporativo."
+    ),
+    "/nofluff": (
+        "Modo NOFLUFF: ve al grano. Omite saludos, rodeos y relleno; entrega "
+        "solo lo esencial."
+    ),
+    "/devil": (
+        "Modo DEVIL: actúa como abogado del diablo. Cuestiona la idea y enumera "
+        "sus puntos débiles, riesgos y alternativas."
+    ),
+    "/decode": (
+        "Modo DECODE: traduce el lenguaje técnico o legal a lenguaje claro; "
+        "explica la letra pequeña y los términos complejos."
+    ),
+    "/genius": (
+        "Modo GENIUS: razona paso a paso y muestra pasos verificables antes de "
+        "concluir, especialmente en problemas lógicos, matemáticos o análisis profundo."
+    ),
+}
+
+
+def mode_message(command: str) -> str:
+    """Texto del mensaje temporal que se inyecta antes de la pregunta."""
+    return (
+        f"{MODE_INSTRUCTIONS[command]}\n\n"
+        "Estas instrucciones son de estilo para esta pregunta: no cambian las "
+        "reglas de AGENTS.md ni los permisos."
+    )
+
+
 AVAILABLE_COMMANDS = [
     "/help", "/shortcuts", "/model", "/provider", "/tools", "/subagents",
     "/skills", "/reload", "/tokens", "/compact", "/verbose", "/clear", "/debug",
-    "/permissions", "/export", "/session", "/memory", "/doctor", "/trace", "/cost", "/quit"
+    "/permissions", "/export", "/session", "/memory", "/doctor", "/trace", "/cost", "/quit",
+    *MODE_INSTRUCTIONS,
 ]
 
 
@@ -24,6 +64,15 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
     if cmd in ("/quit", "/exit"):
         await app.write_to_chat("👋 Saliendo del Harness...", type="system")
         app.exit()
+        return True
+
+    elif cmd in MODE_INSTRUCTIONS:
+        question = " ".join(parts[1:]).strip()
+        app.pending_mode = cmd
+        app.pending_question = question or None
+        suffix = f" y enviaré `{question}`" if question else ""
+        await app.write_to_chat(
+            f"🎮 Modo `{cmd}` activado para una sola pregunta{suffix}.", type="system")
         return True
 
     elif cmd == "/help":
@@ -52,6 +101,16 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `/doctor` | 🩺 Diagnóstico del estado del sistema |\n"
             "| `/trace` | 📊 Muestra el uso de tokens real de la última llamada |\n"
             "| `/quit` | Sale del programa |\n"
+            "\n### 🎮 Códigos de respuesta (un solo uso)\n\n"
+            "| Código | Efecto |\n"
+            "| :--- | :--- |\n"
+            "| `/truth` | Sin cortesía; crítica honesta y fallas. |\n"
+            "| `/human` | Tono natural y cercano. |\n"
+            "| `/nofluff` | Sin saludos, rodeos ni relleno. |\n"
+            "| `/devil` | Abogado del diablo; busca puntos débiles. |\n"
+            "| `/decode` | Traduce lenguaje técnico o legal. |\n"
+            "| `/genius` | Pasos verificables antes de concluir. |\n"
+            "Ejemplo: `/devil ¿Qué fallos tiene este plan?`\n"
             "\n### 💡 Skills\n\n"
             "Escribe `@` seguido del nombre de la skill para cargarla automáticamente.\n"
             "Ejemplo: `@improve-codebase-architecture ¿Cómo está mi proyecto?`\n"

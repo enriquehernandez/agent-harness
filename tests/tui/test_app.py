@@ -1267,3 +1267,98 @@ async def test_stream_to_chat_error_event():
             texts = [str(getattr(child, "renderable", getattr(child, "content", "")))
                      for child in app.query_one("#chat-scroll").children]
             assert any("Fallo del agente" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_app_process_input_one_shot_mode_is_consumed():
+    """El código solo afecta a la primera pregunta y no queda en el historial."""
+    from app.tui.commands import mode_message
+
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+        snapshots = []
+
+        async def mock_stream(user_input, **kwargs):
+            ctx = kwargs["context"]
+            if user_input:
+                ctx.add_user(user_input)
+            snapshots.append(list(ctx.messages))
+            yield "Respuesta"
+
+        app.agent_loop = MagicMock(stream=mock_stream)
+        app.pending_mode = "/truth"
+
+        async with app.run_test() as pilot:
+            app.process_input("Primera")
+            await pilot.pause()
+            assert app.pending_mode is None
+            app.process_input("Segunda")
+            await pilot.pause()
+
+    assert snapshots[0][-2]["content"] == mode_message("/truth")
+    assert snapshots[0][-1]["content"] == "Primera"
+    assert snapshots[1][-1]["content"] == "Segunda"
+    assert mode_message("/truth") not in [m["content"] for m in snapshots[1]]
+    assert [m["content"] for m in app.ctx.messages] == [
+        "System", "Primera", "Segunda"]
+
+
+@pytest.mark.asyncio
+async def test_app_process_input_mode_with_inline_question():
+    """/codigo <pregunta> se procesa en el mismo turno."""
+    from app.tui.commands import mode_message
+
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+        snapshots = []
+
+        async def mock_stream(user_input, **kwargs):
+            ctx = kwargs["context"]
+            if user_input:
+                ctx.add_user(user_input)
+            snapshots.append(list(ctx.messages))
+            yield "ok"
+
+        app.agent_loop = MagicMock(stream=mock_stream)
+
+        async with app.run_test() as pilot:
+            app.process_input("/devil ¿Fallos?")
+            await pilot.pause()
+
+    assert snapshots[0][-2]["content"] == mode_message("/devil")
+    assert snapshots[0][-1]["content"] == "¿Fallos?"
+    assert app.pending_mode is None
+    assert app.pending_question is None
+    assert [m["content"] for m in app.ctx.messages] == ["System", "¿Fallos?"]
+
+
+@pytest.mark.asyncio
+async def test_app_on_input_submitted_with_images_and_mode():
+    """El modo también se aplica (y se retira) en la rama de imágenes."""
+    from app.tui.commands import mode_message
+
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+        app.attached_images = ["data:image/png;base64,fake_base64"]
+        app.pending_mode = "/nofluff"
+        snapshots = []
+
+        async def mock_stream(*args, **kwargs):
+            snapshots.append(list(kwargs["context"].messages))
+            yield "ok"
+
+        app.agent_loop = MagicMock(stream=mock_stream)
+        mock_event = MagicMock(value="¿Qué ves?", input=MagicMock())
+
+        async with app.run_test() as pilot:
+            await app.on_input_submitted(mock_event)
+            await pilot.pause()
+
+    assert snapshots[0][1]["content"] == mode_message("/nofluff")
+    assert any(isinstance(m["content"], list) for m in snapshots[0])
+    assert app.pending_mode is None
+    assert len(app.ctx.messages) == 2
+    assert mode_message("/nofluff") not in [m["content"] for m in app.ctx.messages]

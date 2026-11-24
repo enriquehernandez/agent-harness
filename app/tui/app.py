@@ -600,6 +600,8 @@ class AgentHarnessApp(App):
         self.process_input(final_message)
 
     async def action_clear_chat(self) -> None:
+        if self.ctx:
+            self.ctx.clear()
         scroll = self.query_one("#chat-scroll", VerticalScroll)
         await scroll.remove_children()
         await self.write_to_chat("🧹 Chat limpiado (Ctrl+L)", type="system")

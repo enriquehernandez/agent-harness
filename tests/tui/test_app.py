@@ -5,6 +5,7 @@ from app.tui.app import AgentHarnessApp, FileAwareInput, run_tui
 from textual.widgets import Input, Static, ListView, Tree
 from textual.worker import NoActiveWorker
 from app.core.harness.loop import LoopResult
+from app.core.harness.context import ContextManager
 from pathlib import Path
 
 
@@ -64,6 +65,20 @@ async def test_app_clear_chat():
             await pilot.press("ctrl+l")
             await pilot.pause()
             assert len(app.query_one("#chat-scroll").children) <= 1
+
+
+@pytest.mark.asyncio
+async def test_app_clear_chat_clears_context():
+    """Ctrl+L debe vaciar el historial como /clear, conservando el system prompt."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            app.ctx = ContextManager(system_prompt="Reglas")
+            app.ctx.add_user("Historial anterior")
+            await pilot.press("ctrl+l")
+            await pilot.pause()
+            assert [m["role"] for m in app.ctx.messages] == ["system"]
+            assert app.ctx.messages[0]["content"] == "Reglas"
 
 
 @pytest.mark.asyncio

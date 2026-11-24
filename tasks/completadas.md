@@ -19,3 +19,9 @@
 
 - **Objetivo:** que el reviewer legacy y los agentes A2A reciban tools presentes en el registry.
 - **Estado:** Completada. La TUI (`app/tui/app.py`) copia ahora `read_file` y `bash` en lugar de los nombres inexistentes `read_text_file` y `list_directory`. Cubierto por `tests/tui/test_app.py::test_app_subagents_receive_registered_tools`.
+
+## Registrar una tool `edit_file`
+
+- **Objetivo:** permitir cambios puntuales con `path` + `edits` (`oldText`/`newText`), reutilizando el diff que ya genera `PermissionGate`.
+- **Diseño elegido:** `EditFileTool` en `app/tools/filesystem.py`, registrada por `register_core_tools()`. Valida `base_dir`, existencia del archivo y coincidencia exacta de cada `oldText`; aplica las sustituciones en orden.
+- **Estado:** Completada. Cubierto por `tests/core/test_tools.py` (éxito, registro y casos de error) y documentado en `AGENTS.md`, `README.md`, `docs/herramientas.md` y `PRODUCT_BLUEPRINT/02_COMPONENTS/01_harness_loop.md`.

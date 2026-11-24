@@ -17,6 +17,10 @@ Bucle (max_iteraciones):
   4. Repetir.
 ```
 
+## Herramientas Locales de Archivos
+
+`register_core_tools()` (`app/tools/__init__.py`) registra `read_file`, `write_file` y `edit_file` sobre un `base_dir` común. `EditFileTool` (`app/tools/filesystem.py`) recibe `path` y una lista `edits` de pares `oldText`/`newText`: valida que la ruta esté dentro de `base_dir`, que el archivo exista y que cada `oldText` aparezca en el contenido; aplica las sustituciones en orden y escribe el resultado. Rechaza `oldText` vacío o no encontrado devolviendo `ToolResult(success=False)`. `PermissionGate` usa ese mismo formato para generar el diff mostrado al pedir confirmación (`app/core/harness/permissions.py`).
+
 ## Manejo de Errores y Límites
 
 - **Max Iteraciones**: Si el agente entra en un bucle infinito (ej. llamar a la misma herramienta 10 veces), el bucle se detiene y devuelve un error de control.

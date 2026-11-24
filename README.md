@@ -15,7 +15,7 @@ Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible 
 ## ✨ Características Principales
 
 - **🧠 LLM Agnóstico (Registry Pattern):** Conecta `openai`, `openrouter` o `groq` modificando una sola variable de entorno. `fake` está disponible para pruebas locales sin coste.
-- **🛠️ Tool Calling Local & Remoto (MCP):** Herramientas locales (`bash`, `read_file`, `write_file`, `read_document`) e integración nativa con el **Model Context Protocol**. Las tools MCP se registran con el prefijo `mcp_<servidor>_` y ejecutan con `TOOL_TIMEOUT` (30 s por defecto).
+- **🛠️ Tool Calling Local & Remoto (MCP):** Herramientas locales (`bash`, `read_file`, `write_file`, `edit_file`, `read_document`) e integración nativa con el **Model Context Protocol**. Las tools MCP se registran con el prefijo `mcp_<servidor>_` y ejecutan con `TOOL_TIMEOUT` (30 s por defecto).
 - **🤖 Subagentes Delegados:** El agente principal puede delegar tareas complejas a subagentes aislados con sus propias herramientas.
 - **🛡️ Permission Gate con Diff-First:** Interfaz visual que muestra un *diff* de los cambios propuestos antes de aprobar.
 - **🔄 Context Compaction (Estrategias):** Tres estrategias (`summarize`, `sliding`, `none`) para mantener la conversación viva sin exceder el límite de tokens.

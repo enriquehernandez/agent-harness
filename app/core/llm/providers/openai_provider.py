@@ -5,6 +5,16 @@ from ..base import BaseLLM, LLMResponse
 from app.core.logger import logger
 
 
+def _supports_prompt_caching(model: str) -> bool:
+    """`cache_control` es una extension de los modelos Claude/Anthropic.
+
+    El proveedor usa la API compatible con OpenAI, pero ese campo no es parte
+    del contrato OpenAI: enviarlo a otros modelos puede provocar un 400.
+    """
+    normalized = model.lower()
+    return "claude" in normalized or "anthropic" in normalized
+
+
 class OpenAICompatibleProvider(BaseLLM):
     """Works with OpenAI, OpenRouter, Groq, etc. (same API)."""
 
@@ -34,7 +44,11 @@ class OpenAICompatibleProvider(BaseLLM):
 
         # 🔥 PROMPT CACHING LOGIC
         from app.core.config import settings
-        if getattr(settings, "ENABLE_PROMPT_CACHING", False) and messages:
+        if (
+            getattr(settings, "ENABLE_PROMPT_CACHING", False)
+            and _supports_prompt_caching(self.model)
+            and messages
+        ):
             messages = [dict(m) for m in messages]
             if messages[0].get("role") == "system" and isinstance(messages[0].get("content"), str):
                 messages[0] = {

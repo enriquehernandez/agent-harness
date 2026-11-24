@@ -1,12 +1,6 @@
 # Tarea Actual
 
-Estas son las 3 tareas en ejecución, en este orden. Cada una debe implementarse con test primero (`uv run tom test` al terminar).
-
-- [ ] **Unificar el formato de descripción de las tools MCP.** `MCPToolProxy` usa
-      `"[MCP:<servidor>] …"` (`app/mcp/client.py`), mientras `/tools`
-      (`app/tui/commands.py`) y `export_observations`
-      (`app/tools/observations.py`) buscan `"[MCP]"`: las tools remotas se clasifican
-      como «Locales».
+Estas son las 2 tareas en ejecución, en este orden. Cada una debe implementarse con test primero (`uv run tom test` al terminar).
 
 - [ ] **Corregir las tools copiadas a los subagentes.** En la TUI se intentan copiar
       `read_text_file`, `list_directory` y `bash` (`app/tui/app.py`),

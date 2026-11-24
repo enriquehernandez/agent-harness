@@ -1,9 +1,7 @@
-import json
 from app.core.harness.a2a.base import A2AStrategy, AgentCard
 from app.core.harness.loop import AgentLoop
 from app.core.harness.tool import ToolResult
 from app.core.harness.context import ContextManager
-from app.core.harness.permissions import PermissionGate
 from app.core.logger import logger, log_agent_flow
 from app.core.config import settings
 from app.core.llm import get_llm
@@ -19,23 +17,12 @@ class SwarmStrategy(A2AStrategy):
         super().__init__(llm, registry, permissions)
         self.start_agent = start_agent or list(registry.keys())[0]
 
-    def _load_persisted_permissions(self) -> set[str]:
-        perm_file = settings.permissions_file
-        if not perm_file.exists():
-            return set()
-        try:
-            data = json.loads(perm_file.read_text())
-            return set(data.get("session_allowed", []))
-        except Exception:
-            return set()
-
     async def execute(self, task: str, context: ContextManager = None) -> ToolResult:
         current_agent_name = self.start_agent
         current_input = task
         history = []
         visited = set()
         max_hops = 5
-        persisted = self._load_persisted_permissions()
 
         for hop in range(max_hops):
             agent = self.agents.get(current_agent_name)
@@ -63,13 +50,8 @@ class SwarmStrategy(A2AStrategy):
                     f"Historial de la tarea hasta ahora:\n{chr(10).join(history)}"
                 )
 
-            # Creamos un PermissionGate específico para este subagente
-            sub_gate = PermissionGate(
-                ask_user=self.permissions.ask_user if self.permissions else None)
-            if self.permissions and hasattr(self.permissions, "policies"):
-                sub_gate.policies = self.permissions.policies.copy()
-            for pattern in persisted:
-                sub_gate.session_allowed.add(pattern)
+            # Gate del subagente: comparte aprobaciones con el padre
+            sub_gate = self._child_gate()
 
             # Resolvemos el LLM (específico del agente o el del padre)
             if agent.model:

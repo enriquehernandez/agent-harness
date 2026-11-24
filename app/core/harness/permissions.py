@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.core.logger import logger
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, Iterable
 
 
 class Decision(str, Enum):
@@ -53,6 +53,24 @@ class PermissionGate:
         """Vuelve a leer `.harness/permissions.json`, descartando aprobaciones en memoria."""
         self.session_allowed.clear()
         self._load_persisted_permissions()
+
+    def child(self, allow: Iterable[str] = ()) -> "PermissionGate":
+        """Crea un gate de subagente que comparte aprobaciones y persistencia.
+
+        Las `policies` se copian para que el hijo pueda añadir excepciones propias
+        (p. ej. las tools del reviewer) sin alterar la política del padre.
+        `session_allowed` se comparte por referencia: una aprobación con `a` en
+        cualquier subagente vale también para el padre y para sus hermanos.
+        """
+        child = PermissionGate(
+            policies=self.policies.copy(),
+            session_allowed=self.session_allowed,
+            ask_user=self.ask_user,
+            persist_file=self.persist_file,
+        )
+        for tool in allow:
+            child.policies[tool] = Decision.ALLOW
+        return child
 
     def _save_persisted_permissions(self):
         data = {"session_allowed": list(self.session_allowed)}

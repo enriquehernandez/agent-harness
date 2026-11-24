@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch, mock_open
+from unittest.mock import MagicMock, patch, mock_open
 
 import pytest
 from app.core.harness.permissions import PermissionGate, Decision
@@ -22,6 +22,30 @@ def test_permission_gate_reload_persisted(tmp_path):
     gate.reload_persisted()
 
     assert gate.session_allowed == {"bash:ls"}
+
+
+def test_permission_gate_child_shares_state_and_copies_policies(tmp_path):
+    gate = PermissionGate(
+        ask_user=MagicMock(), persist_file=tmp_path / "permissions.json")
+    gate.session_allowed.add("bash:ls")
+    gate.policies["bash"] = Decision.ASK
+
+    child = gate.child(allow=["read_file"])
+
+    assert child.session_allowed is gate.session_allowed
+    assert child.ask_user is gate.ask_user
+    assert child.persist_file == gate.persist_file
+    assert child.policies["read_file"] == Decision.ALLOW
+    assert child.policies["bash"] == Decision.ASK
+
+    child.session_allowed.add("bash:pwd")
+    assert "bash:pwd" in gate.session_allowed
+    child.policies["bash"] = Decision.DENY
+    assert gate.policies["bash"] == Decision.ASK
+
+    plain_child = gate.child()
+    assert plain_child.policies == gate.policies
+    assert plain_child.session_allowed is gate.session_allowed
 
 
 @pytest.mark.asyncio

@@ -194,6 +194,7 @@ class AgentHarnessApp(App):
             llm=get_llm(self.state["provider"]),
             tools=reviewer_tools,
             system_prompt="You are an expert code reviewer. Be concise.",
+            permissions=self.gate,
         )
         self.registry.register(reviewer_tool)
 

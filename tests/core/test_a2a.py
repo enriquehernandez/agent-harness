@@ -392,6 +392,65 @@ async def test_parallel_strategy(mock_llm, mock_registry):
 
 
 @pytest.mark.asyncio
+async def test_parallel_loads_persisted_permissions(tmp_path, monkeypatch, mock_llm, mock_registry):
+    """Un permiso aprobado con 'a' no debe volver a preguntarse en parallel."""
+    from app.core.harness.a2a.strategies.parallel import ParallelStrategy
+    from app.core.harness.permissions import Decision, PermissionGate
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".harness").mkdir()
+    (tmp_path / ".harness" / "permissions.json").write_text(
+        '{"session_allowed": ["bash:ls"]}', encoding="utf-8")
+
+    ask_user = AsyncMock(return_value="n")
+    parent_gate = PermissionGate(ask_user=ask_user)
+    strategy = ParallelStrategy(
+        mock_llm, mock_registry, permissions=parent_gate,
+        agents_to_run=["analyst"]
+    )
+
+    with patch("app.core.harness.a2a.strategies.parallel.AgentLoop") as MockLoop:
+        MockLoop.return_value.run = AsyncMock(
+            return_value=MagicMock(final_answer="Hecho"))
+        await strategy.execute("Tarea")
+
+    sub_gate = MockLoop.call_args.kwargs["permissions"]
+    assert await sub_gate.check("bash", {"command": "ls"}) == Decision.ALLOW
+    ask_user.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_parallel_subagents_share_parent_gate_state(tmp_path, monkeypatch, mock_llm, mock_registry):
+    """Una aprobación en un subagente paralelo alcanza al padre y a sus hermanos."""
+    from app.core.harness.a2a.strategies.parallel import ParallelStrategy
+    from app.core.harness.permissions import Decision, PermissionGate
+
+    monkeypatch.chdir(tmp_path)
+    ask_user = AsyncMock(return_value="a")
+    parent_gate = PermissionGate(ask_user=ask_user)
+    strategy = ParallelStrategy(
+        mock_llm, mock_registry, permissions=parent_gate,
+        agents_to_run=["analyst", "writer"]
+    )
+
+    with patch("app.core.harness.a2a.strategies.parallel.AgentLoop") as MockLoop:
+        MockLoop.return_value.run = AsyncMock(side_effect=[
+            MagicMock(final_answer="Análisis"),
+            MagicMock(final_answer="Documentación"),
+        ])
+        await strategy.execute("Tarea")
+
+    gates = [call.kwargs["permissions"] for call in MockLoop.call_args_list]
+    assert await gates[0].check("bash", {"command": "ls"}) == Decision.ALLOW
+    ask_user.assert_awaited_once()
+    ask_user.reset_mock()
+
+    assert await gates[1].check("bash", {"command": "ls"}) == Decision.ALLOW
+    assert await parent_gate.check("bash", {"command": "ls"}) == Decision.ALLOW
+    ask_user.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_parallel_no_valid_agents(mock_llm, mock_registry):
     """Cubre el caso de parallel sin agentes válidos."""
     from app.core.harness.permissions import PermissionGate

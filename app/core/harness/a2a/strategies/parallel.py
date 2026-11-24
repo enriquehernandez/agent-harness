@@ -3,7 +3,6 @@ from app.core.harness.a2a.base import A2AStrategy, AgentCard
 from app.core.harness.loop import AgentLoop
 from app.core.harness.tool import ToolResult
 from app.core.harness.context import ContextManager
-from app.core.harness.permissions import PermissionGate
 from app.core.logger import logger, log_agent_flow
 from app.core.llm import get_llm
 
@@ -23,11 +22,8 @@ class ParallelStrategy(A2AStrategy):
         else:
             agent_ctx = ContextManager(system_prompt=agent.system_prompt)
 
-        # Creamos un PermissionGate específico para este subagente
-        sub_gate = PermissionGate(
-            ask_user=self.permissions.ask_user if self.permissions else None)
-        if self.permissions and hasattr(self.permissions, "policies"):
-            sub_gate.policies = self.permissions.policies.copy()
+        # Gate del subagente: comparte aprobaciones con el padre
+        sub_gate = self._child_gate()
 
         # Resolvemos el LLM (específico del agente o el del padre)
         if agent.model:

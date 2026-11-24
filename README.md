@@ -30,7 +30,7 @@ Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible 
 - **🛡️ MCP Resiliente:** Reconexión automática con backoff exponencial si un servidor MCP cae.
 - **🤖 Agent-to-Agent (A2A):** Orquestación multi-agente con 4 estrategias (supervisor, sequential, parallel, swarm) configurable via `.env`.
 - **🖼️ Renderizado de Imágenes:** Las imágenes pegadas/arrastradas se muestran en el chat con `HalfcellImage` si `TERM_PROGRAM=WarpTerminal`, y con `TerminalImage` en el resto de terminales.
-- **📄 Lectura de Documentos:** `read_document` extrae texto de `.pdf`, `.docx`, `.xlsx` y `.pptx`, con un límite de `MAX_DOCUMENT_CHARS=15000`. Los formatos antiguos `.doc`, `.xls` y `.ppt` se adjuntan a la conversación, pero no se extraen.
+- **📄 Lectura de Documentos:** `read_document` extrae texto de `.pdf`, `.docx`, `.xlsx` y `.pptx`, y también de los formatos antiguos `.doc`, `.xls` y `.ppt` (estos últimos con `olefile`/`xlrd`, de forma best-effort), con un límite de `MAX_DOCUMENT_CHARS=15000`.
 - **🪞 Auto-Reflexión con Crítico:** La tool `critic_review` revisa la respuesta propuesta contra las reglas del proyecto y puede forzar hasta 2 reintentos, inyectando el feedback del crítico en el contexto. Usa `A2A_REVIEWER_MODEL` como modelo del crítico si está configurado.
 - **🔬 Observabilidad con Langfuse:** Si hay `LANGFUSE_PUBLIC_KEY` y `LANGFUSE_SECRET_KEY`, cada stream se registra como una generación con su entrada, uso de tokens y coste.
 - **📂 Rutas Centralizadas:** `DATA_DIR` (por defecto `.harness`) es la raíz de `memory.db`, `vector.db`, `permissions.json`, `logs/`, `sessions/` y `pricing_cache.json`.

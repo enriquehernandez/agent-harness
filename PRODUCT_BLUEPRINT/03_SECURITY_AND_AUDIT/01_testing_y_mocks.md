@@ -114,4 +114,4 @@ Las estrategias tienen ramas de error (agente no encontrado, límite de saltos, 
 - Parchea `get_llm` para simular modelos específicos.
 
 ## 15. Mocking de Document Parsers
-Para testear `read_document`, mockea las librerías de extracción (`PdfReader`, `Document`, `load_workbook`, `Presentation`) para evitar depender de archivos reales y mantener los tests rápidos.
+Para testear `read_document`, mockea las librerías de extracción (`PdfReader`, `Document`, `load_workbook`, `Presentation`, `xlrd.open_workbook` y `olefile.OleFileIO`) para evitar depender de archivos reales y mantener los tests rápidos. Para los formatos legacy se puede mockear el stream OLE devolviendo bytes UTF-16LE con texto conocido.

@@ -70,3 +70,9 @@
 
 - **Objetivo:** que `cp .env.example .env` no cambie el proveedor respecto al default del código.
 - **Estado:** Completada. `.env.example` usa ahora `LLM_PROVIDER=fake`, igual que `Settings.LLM_PROVIDER`, y explica cómo cambiar a un proveedor real. Actualizado `README.md` y el comentario sobre los modelos por agente A2A. Cubierto por `tests/core/test_llm_factory.py::test_env_example_provider_matches_settings_default`.
+
+## Extraer texto de `.doc`, `.xls` y `.ppt`
+
+- **Objetivo:** que los formatos Office 97-2003 que acepta `FileAwareInput` puedan leerse con `read_document`.
+- **Diseño elegido:** previa aprobación, se añadieron `xlrd` y `olefile` con `uv`. `.xls` se lee con `xlrd` (conversión de celdas de fecha); `.doc` y `.ppt` se leen de los streams OLE `WordDocument` y `PowerPoint Document`, extrayendo cadenas imprimibles en UTF-16LE con fallback a Latin-1. Es best-effort: sin formato y con posible texto de metadatos.
+- **Estado:** Completada. Cubierto por `tests/core/test_tools.py::test_read_document_legacy_formats` y `test_read_document_legacy_text_fallback`; documentado en `PRODUCT_BLUEPRINT/02_COMPONENTS/10_document_reading.md`, `docs/herramientas.md`, `README.md` y `PRODUCT_BLUEPRINT/03_SECURITY_AND_AUDIT/01_testing_y_mocks.md`.

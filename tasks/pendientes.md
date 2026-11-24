@@ -3,7 +3,7 @@
 > Recopilado tras la auditoría de los commits del 16–24 de noviembre de 2026.
 > Cada item corresponde a una afirmación que tuvo que corregirse en la documentación
 > porque el código **no implementa** esa funcionalidad (o la implementa de forma distinta).
-> Las 4 tareas en ejecución están en `tasks/actual.md`; las completadas, en `tasks/completadas.md`.
+> Las tareas en ejecución están en `tasks/actual.md`; las completadas, en `tasks/completadas.md`.
 
 ## Prioridad alta — Tools y TUI
 
@@ -13,16 +13,6 @@
       limpio aunque el doc diga lo contrario. Ver `PRODUCT_BLUEPRINT/02_COMPONENTS/08_a2a.md`.
 
 ## Prioridad media — Permisos, contexto y comandos
-
-- [ ] **Cargar permisos persistidos en `ParallelStrategy`.** Las estrategias `supervisor`,
-      `sequential` y `swarm` leen `.harness/permissions.json`; `parallel` crea un gate nuevo
-      sin hacerlo (`app/core/harness/a2a/strategies/parallel.py`). Escenario: aprobar
-      una tool con `a` y que la estrategia paralela vuelva a preguntar.
-
-- [ ] **Unificar el `PermissionGate` de los subagentes.** Cada estrategia crea uno nuevo
-      copiando `ask_user`/`policies`, y el `DelegateTool` legacy usa uno propio en `Decision.ALLOW`
-      (`app/core/harness/subagents.py`). No heredan la instancia del padre.
-      Ver `PRODUCT_BLUEPRINT/03_SECURITY_AND_AUDIT/02_a2a_security.md`.
 
 - [ ] **Inyectar `docs/` y `checks/` en el system prompt, o quitar la afirmación del prompt.**
       `app/tui/app.py` solo lee `AGENTS.md`, `tasks/actual.md` y el `preamble()` de

@@ -45,3 +45,8 @@
 
 - **Objetivo:** sustituir `/reload-skills` por un comando genérico con objetivos y arreglar el marcador `Available skills:` del system prompt.
 - **Estado:** Completada. `/reload skills` actualiza el prompt y el autocompletado; `/reload permissions` recarga `.harness/permissions.json` vía `PermissionGate.reload_persisted()`; `/reload tools` desconecta los clientes MCP, reinicializa herramientas y conserva el contexto. La lista de comandos del autocompletado vive en `AVAILABLE_COMMANDS` (`app/tui/commands.py`). Cubierto por tests en `tests/tui/test_commands.py`, `tests/tui/test_app.py` y `tests/core/test_permissions.py`.
+
+## Permisos persistidos y gate compartido en subagentes A2A
+
+- **Objetivo:** que `ParallelStrategy` respete las aprobaciones persistidas y que los subagentes (A2A y `DelegateTool`) no pierdan las aprobaciones del padre.
+- **Estado:** Completada. `A2AStrategy._child_gate()` centraliza la creación del gate para las cuatro estrategias y carga `.harness/permissions.json` en todas, incluida `parallel`. `PermissionGate.child()` comparte `session_allowed`, `ask_user` y `persist_file` con el padre, copia las `policies` y permite `allow=` para las tools propias del reviewer. La TUI pasa su gate a `DelegateTool`. Nota: el test de regresión mostró que el constructor de `PermissionGate` ya cargaba el archivo, así que el fallo real era la copia aislada de `session_allowed`, no la carga en `parallel`. Cubierto por tests en `tests/core/test_a2a.py`, `tests/core/test_permissions.py` y `tests/core/test_subagents.py`.

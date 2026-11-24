@@ -29,6 +29,8 @@ dependencies = [
     "python-pptx>=1.0.2",
     "pandas>=3.1.1",
     "langfuse>=5.2.0",
+    "xlrd>=2.0.2",
+    "olefile>=0.47",
 ]
 
 [build-system]

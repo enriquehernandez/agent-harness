@@ -505,6 +505,68 @@ async def test_read_document_empty_and_truncated(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_read_document_legacy_formats(tmp_path):
+    """Los formatos legacy .xls, .doc y .ppt extraen texto."""
+    from app.tools.documents import ReadDocumentTool
+    import xlrd
+
+    tool = ReadDocumentTool(base_dir=str(tmp_path))
+    assert "DOC" in tool.description and "XLS" in tool.description and "PPT" in tool.description
+
+    # .xls con celda de fecha
+    (tmp_path / "test.xls").write_text("fake")
+    sheet = MagicMock()
+    sheet.name = "Ventas"
+    sheet.nrows = 2
+    sheet.ncols = 2
+    cell_text = MagicMock(ctype=xlrd.XL_CELL_TEXT, value="Producto")
+    cell_number = MagicMock(ctype=xlrd.XL_CELL_NUMBER, value=3)
+    cell_date = MagicMock(ctype=xlrd.XL_CELL_DATE, value=45000)
+    cell_empty = MagicMock(ctype=xlrd.XL_CELL_EMPTY, value="")
+    sheet.cell.side_effect = [
+        cell_text, cell_number, cell_date, cell_empty]
+    book = MagicMock()
+    book.sheets.return_value = [sheet]
+    with patch("app.tools.documents.xlrd.open_workbook", return_value=book):
+        with patch("app.tools.documents.xlrd.xldate_as_datetime", return_value="2023-01-01"):
+            res = await tool.run("test.xls")
+    assert res.success is True
+    assert "Producto | 3" in res.content
+    assert "2023-01-01" in res.content
+
+    # .doc: el texto está en UTF-16LE dentro del stream WordDocument
+    (tmp_path / "test.doc").write_text("fake")
+    with patch("app.tools.documents.olefile.OleFileIO") as MockOle:
+        ole = MockOle.return_value.__enter__.return_value
+        ole.openstream.return_value.read.return_value = (
+            "Informe legacy".encode("utf-16-le"))
+        res = await tool.run("test.doc")
+    assert res.success is True
+    assert "Informe legacy" in res.content
+    ole.openstream.assert_called_with("WordDocument")
+
+    # .ppt: el texto está en el stream PowerPoint Document
+    (tmp_path / "test.ppt").write_text("fake")
+    with patch("app.tools.documents.olefile.OleFileIO") as MockOle:
+        ole = MockOle.return_value.__enter__.return_value
+        ole.openstream.return_value.read.return_value = (
+            "Diapositiva legacy".encode("utf-16-le"))
+        res = await tool.run("test.ppt")
+    assert res.success is True
+    assert "Diapositiva legacy" in res.content
+    ole.openstream.assert_called_with("PowerPoint Document")
+
+
+def test_read_document_legacy_text_fallback():
+    """Las cadenas se extraen en UTF-16LE o, si no hay, en Latin-1."""
+    from app.tools.documents import _printable_runs
+
+    assert _printable_runs("Informe legacy".encode("utf-16-le"), "utf-16-le") == "Informe legacy"
+    assert _printable_runs(b"\x00\x01Texto Latin-1\x00", "latin-1") == "Texto Latin-1"
+    assert _printable_runs(b"corto", "latin-1") == ""
+
+
+@pytest.mark.asyncio
 async def test_read_document_pptx(tmp_path):
     """Cubre líneas 94-97 de documents.py (_read_pptx)."""
     from app.tools.documents import ReadDocumentTool

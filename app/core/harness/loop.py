@@ -60,6 +60,7 @@ class AgentLoop:
         self.critic_tool = critic_tool
         self.agent_rules = agent_rules
         self.provider_name = provider_name
+        self.last_hook_denial: str | None = None
 
     async def run(
         self,
@@ -247,6 +248,11 @@ class AgentLoop:
 
                 for tc in tool_calls:
                     success, tool_result = await self._execute_tool(tc, ctx)
+                    if self.last_hook_denial:
+                        denial = self.last_hook_denial
+                        self.last_hook_denial = None
+                        yield AgentEvent(type="hook_denied", data={
+                            "tool": tc["name"], "message": denial})
                     # 🔥 siempre, no solo success
                     tools_used.append(tc["name"])
                     yield AgentEvent(type="tool_end", data={
@@ -329,8 +335,20 @@ class AgentLoop:
         args = tc["arguments"]
         tool_call_id = tc["id"]
 
-        await emit_hook(HookEvent(
+        self.last_hook_denial = None
+        hook_outcome = await emit_hook(HookEvent(
             hook_event_name="PreToolUse", tool_name=tool_name, tool_input=args))
+        if hook_outcome.denied is True:
+            self.last_hook_denial = (
+                hook_outcome.reason
+                or f"El hook bloqueó la herramienta '{tool_name}'."
+            )
+            ctx.add_tool_result(tool_call_id, f"ERROR: {self.last_hook_denial}")
+            await emit_hook(HookEvent(
+                hook_event_name="PostToolUse", tool_name=tool_name,
+                tool_input=args, success=False))
+            return False, None
+
         decision = await self.permissions.check(tool_name, args)
         if decision == Decision.DENY:
             ctx.add_tool_result(

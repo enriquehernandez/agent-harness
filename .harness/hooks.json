@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .harness/hooks/no_delete.py"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "edit_file|write_file",

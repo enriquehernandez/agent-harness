@@ -1,20 +1,24 @@
 import asyncio
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.core.harness import hooks as hooks_module
-from app.core.harness.hooks import HookEvent, HookManager, HookRegistry, emit_hook
+from app.core.harness.hooks import (
+    HookEvent, HookManager, HookOutcome, HookRegistry, emit_hook,
+)
 
 
-def _fake_process(returncode=0, stderr=b"", communicate=None):
+def _fake_process(returncode=0, stderr=b"", stdout=b"", communicate=None):
     process = MagicMock()
     process.returncode = returncode
     process.communicate = AsyncMock(
-        return_value=(b"", stderr)) if communicate is None else communicate
+        return_value=(stdout, stderr)) if communicate is None else communicate
     process.kill = MagicMock()
     process.wait = AsyncMock()
     return process
@@ -273,6 +277,208 @@ async def test_emit_hook_delegates_to_module_manager():
         await emit_hook(event)
 
     manager.emit.assert_awaited_once_with(event)
+
+
+def test_hook_outcome_defaults_to_allow():
+    outcome = HookOutcome()
+
+    assert outcome.denied is False
+    assert outcome.reason == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stderr,expected", [
+    (b"No se pueden borrar archivos", "No se pueden borrar archivos"),
+    (b"", "El hook bloqueó la acción (código 2)."),
+])
+async def test_manager_denies_on_exit_code_two(tmp_path, stderr, expected):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "PreToolUse": [{"matcher": "bash", "hooks": [
+            {"command": "guardia"}]}]
+    }})
+    manager = HookManager(config_file=config_file)
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(return_value=_fake_process(2, stderr))):
+        with patch.object(hooks_module.logger, "warning"):
+            outcome = await manager.emit(HookEvent(
+                "PreToolUse", tool_name="bash",
+                tool_input={"command": "rm archivo.txt"}))
+
+    assert outcome.denied is True
+    assert outcome.reason == expected
+
+
+@pytest.mark.asyncio
+async def test_manager_denies_on_json_permission_decision(tmp_path):
+    payload = json.dumps({
+        "hookSpecificOutput": {
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "Borrado prohibido",
+        }
+    }).encode("utf-8")
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "PreToolUse": [{"hooks": [{"command": "guardia"}]}]
+    }})
+    manager = HookManager(config_file=config_file)
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(return_value=_fake_process(stdout=payload))):
+        outcome = await manager.emit(HookEvent("PreToolUse", tool_name="bash"))
+
+    assert outcome.denied is True
+    assert outcome.reason == "Borrado prohibido"
+
+
+@pytest.mark.asyncio
+async def test_manager_denies_on_generic_block_decision(tmp_path):
+    payload = json.dumps({
+        "decision": "block", "reason": "Bloqueado por política"}).encode("utf-8")
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "Stop": [{"hooks": [{"command": "guardia"}]}]
+    }})
+    manager = HookManager(config_file=config_file)
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(return_value=_fake_process(stdout=payload))):
+        outcome = await manager.emit(HookEvent("Stop"))
+
+    assert outcome.denied is True
+    assert outcome.reason == "Bloqueado por política"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stdout", [
+    b"",
+    b"no es json",
+    b"\xff",
+    b"{}",
+    json.dumps({"hookSpecificOutput": {
+        "permissionDecision": "allow"}}).encode("utf-8"),
+])
+async def test_manager_allows_when_there_is_no_deny(tmp_path, stdout):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "PreToolUse": [{"hooks": [{"command": "observador"}]}]
+    }})
+    manager = HookManager(config_file=config_file)
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(return_value=_fake_process(stdout=stdout))):
+        outcome = await manager.emit(HookEvent("PreToolUse", tool_name="bash"))
+
+    assert outcome.denied is False
+
+
+@pytest.mark.asyncio
+async def test_manager_prefers_deny_among_hooks(tmp_path):
+    deny_payload = json.dumps({
+        "hookSpecificOutput": {
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "El segundo_hook dice no",
+        }
+    }).encode("utf-8")
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "PreToolUse": [{"hooks": [
+            {"command": "permite"},
+            {"command": "niega"},
+        ]}]
+    }})
+    manager = HookManager(config_file=config_file)
+    processes = [
+        _fake_process(stdout=b""),
+        _fake_process(stdout=deny_payload),
+    ]
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(side_effect=processes)) as spawn:
+        with patch.object(hooks_module.logger, "warning"):
+            outcome = await manager.emit(HookEvent(
+                "PreToolUse", tool_name="bash"))
+
+    assert spawn.await_count == 2
+    assert outcome.denied is True
+    assert outcome.reason == "El segundo_hook dice no"
+
+
+@pytest.mark.asyncio
+async def test_manager_stops_after_first_deny(tmp_path):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "Stop": [{"hooks": [
+            {"command": "niega"},
+            {"command": "no_deberia_ejecutarse"},
+        ]}]
+    }})
+    manager = HookManager(config_file=config_file)
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(return_value=_fake_process(2, b"alto"))) as spawn:
+        with patch.object(hooks_module.logger, "warning"):
+            outcome = await manager.emit(HookEvent("Stop"))
+
+    assert spawn.await_count == 1
+    assert outcome.denied is True
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+NO_DELETE_SCRIPT = REPO_ROOT / ".harness" / "hooks" / "no_delete.py"
+
+
+def _run_no_delete(command: str, tool_name: str = "bash"):
+    payload = json.dumps({
+        "hook_event_name": "PreToolUse",
+        "cwd": str(REPO_ROOT),
+        "tool_name": tool_name,
+        "tool_input": {"command": command},
+    })
+    return subprocess.run(
+        [sys.executable, str(NO_DELETE_SCRIPT)],
+        input=payload, capture_output=True, text=True, cwd=REPO_ROOT,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("command", [
+    "rm archivo.txt",
+    "rm -rf ./carpeta",
+    "rmdir vieja",
+    "unlink archivo.txt",
+    "shred -u secreto.txt",
+    "git rm -f archivo.txt",
+    "find . -name '*.py' -delete",
+    "python3 -c \"import os; os.remove('x.txt')\"",
+    "python3 -c \"from pathlib import Path; Path('x').unlink()\"",
+    "ls && rm -f temporal.txt",
+])
+def test_no_delete_script_denies_destructive_commands(command):
+    result = _run_no_delete(command)
+
+    assert result.returncode == 0
+    decision = json.loads(result.stdout)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    assert "eliminar" in decision["permissionDecisionReason"].lower()
+
+
+@pytest.mark.parametrize("command,tool_name", [
+    ("ls -la", "bash"),
+    ("git status", "bash"),
+    ("echo rm no es borrado", "write_file"),
+])
+def test_no_delete_script_allows_safe_commands(command, tool_name):
+    result = _run_no_delete(command, tool_name=tool_name)
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == ""
+
+
+def test_no_delete_script_survives_invalid_payload():
+    result = subprocess.run(
+        [sys.executable, str(NO_DELETE_SCRIPT)],
+        input="no es json", capture_output=True, text=True,
+        cwd=REPO_ROOT, check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == ""
 
 
 def test_settings_exposes_hooks_file():

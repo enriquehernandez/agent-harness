@@ -1,4 +1,7 @@
 import asyncio
+import json
+import sys
+from pathlib import Path
 from typing import AsyncIterator
 
 import pytest
@@ -10,6 +13,7 @@ from app.core.llm.base import BaseLLM, LLMResponse
 from app.core.harness.context import ContextManager
 from app.core.llm.providers.fake import FakeLLM
 from app.core.harness.events import AgentEvent
+from app.core.harness.hooks import HookManager, HookOutcome
 
 
 class HangingLLM(BaseLLM):
@@ -465,3 +469,115 @@ async def test_loop_max_iterations_emits_stop(fake_llm, basic_registry):
 
     assert events[-1].type == "result"
     assert [call.args[0].hook_event_name for call in emit.await_args_list][-1] == "Stop"
+
+
+@pytest.mark.asyncio
+async def test_loop_hook_denial_blocks_tool(fake_llm, basic_registry):
+    """Un hook PreToolUse con deny impide ejecutar la herramienta."""
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+    tool = basic_registry.get("add")
+    tool._func = MagicMock(return_value=3)
+    ctx = ContextManager()
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "PreToolUse":
+            return HookOutcome(denied=True, reason="Borrado prohibido por hook")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook",
+               side_effect=emit_side_effect) as emit:
+        success, result = await loop._execute_tool(
+            {"id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}, ctx)
+
+    assert (success, result) == (False, None)
+    tool._func.assert_not_called()
+    assert loop.last_hook_denial == "Borrado prohibido por hook"
+    assert "Borrado prohibido por hook" in ctx.messages[-1]["content"]
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "PreToolUse", "PostToolUse"]
+    assert emit.await_args_list[1].args[0].success is False
+
+
+@pytest.mark.asyncio
+async def test_loop_hook_denial_without_reason_uses_default(fake_llm, basic_registry):
+    """Si el hook no da motivo, se ofrece uno genérico."""
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "PreToolUse":
+            return HookOutcome(denied=True, reason="")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        success, _ = await loop._execute_tool(
+            {"id": "c1", "name": "add", "arguments": {}}, ContextManager())
+
+    assert success is False
+    assert loop.last_hook_denial == "El hook bloqueó la herramienta 'add'."
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_yields_hook_denied(fake_llm, basic_registry):
+    """El stream entrega el aviso y no ejecuta la herramienta bloqueada."""
+    async def mock_stream(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "add",
+               "arguments": {"a": 1, "b": 2}}
+
+    tool = basic_registry.get("add")
+    tool._func = MagicMock(return_value=3)
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "PreToolUse":
+            return HookOutcome(denied=True, reason="No se pueden borrar archivos")
+        return HookOutcome()
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry,
+                         permissions=gate, max_iterations=1)
+        with patch("app.core.harness.loop.emit_hook",
+                   side_effect=emit_side_effect):
+            events = [event async for event in loop.stream("Hola")]
+
+    denials = [event for event in events if event.type == "hook_denied"]
+    assert len(denials) == 1
+    assert denials[0].data == {
+        "tool": "add", "message": "No se pueden borrar archivos"}
+    assert tool._func.assert_not_called() is None
+    assert loop.last_hook_denial is None
+
+
+@pytest.mark.asyncio
+async def test_real_no_delete_hook_blocks_bash_rm(fake_llm, tmp_path):
+    """Integración real: el script del hook bloquea un `rm` antes de la tool."""
+    script = Path(__file__).resolve().parents[2] / ".harness" / "hooks" / "no_delete.py"
+    config_file = tmp_path / "hooks.json"
+    config_file.write_text(json.dumps({"hooks": {
+        "PreToolUse": [{"matcher": "bash", "hooks": [
+            {"command": f"{sys.executable} {script}"}]}]
+    }}), encoding="utf-8")
+    manager = HookManager(config_file=config_file)
+
+    async def delete_file(**kwargs):
+        return "borrado"
+
+    registry = ToolRegistry()
+    registry.register(FunctionTool(
+        name="bash", description="Exec", parameters_schema={}, func=delete_file))
+    func_spy = MagicMock(wraps=delete_file)
+    registry._tools["bash"]._func = func_spy
+
+    async def mock_stream(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "bash",
+               "arguments": {"command": "rm -f archivo.txt"}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        with patch("app.core.harness.hooks.hook_manager", manager):
+            loop = AgentLoop(llm=fake_llm, tools=registry, max_iterations=1)
+            events = [event async for event in loop.stream("Borra el archivo")]
+
+    denials = [event for event in events if event.type == "hook_denied"]
+    assert len(denials) == 1
+    assert "eliminar" in denials[0].data["message"].lower()
+    func_spy.assert_not_called()

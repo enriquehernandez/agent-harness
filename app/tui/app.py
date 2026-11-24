@@ -576,6 +576,11 @@ class AgentHarnessApp(App):
                     self.update_dashboard("Listo", tokens=tokens)
                     break
 
+                elif event.type == "hook_denied":
+                    msg = event.data.get("message") or "Acción bloqueada por un hook."
+                    await self.write_to_chat(
+                        f"🚫 **Bloqueado por un hook:** {msg}", type="system")
+
                 elif event.type == "error":
                     self.update_dashboard("Error")
                     loading.display = False

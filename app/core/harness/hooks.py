@@ -2,8 +2,8 @@
 
 Los hooks se leen de ``.harness/hooks.json`` al arrancar y se disparan
 automáticamente desde los puntos de extensión del harness. Solo se aceptan
-handlers ``command``: reciben el evento como JSON por stdin y su salida se
-ignora (fase observadora). Un hook roto nunca interrumpe al agente.
+handlers ``command``: reciben el evento como JSON por stdin. Un hook roto nunca
+interrumpe al agente (fail-open), pero sus decisiones de bloqueo se respetan.
 """
 
 import asyncio
@@ -65,6 +65,38 @@ class HookEvent:
         if self.agent_depth:
             payload["agent_depth"] = self.agent_depth
         return payload
+
+
+@dataclass
+class HookOutcome:
+    """Resultado de un evento: ``denied`` bloquea la herramienta en curso."""
+
+    denied: bool = False
+    reason: str = ""
+
+    @classmethod
+    def from_process(
+        cls, returncode: int, stdout: bytes, stderr: bytes
+    ) -> "HookOutcome":
+        # Convención Claude Code: exit 2 + motivo en stderr = bloqueo.
+        if returncode == 2:
+            reason = stderr.decode("utf-8", errors="replace").strip()
+            return cls(denied=True, reason=reason or "El hook bloqueó la acción (código 2).")
+
+        if stdout:
+            try:
+                payload = json.loads(stdout.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                payload = None
+            if isinstance(payload, dict):
+                specific = payload.get("hookSpecificOutput")
+                if isinstance(specific, dict) and specific.get("permissionDecision") == "deny":
+                    reason = specific.get("permissionDecisionReason") or "El hook bloqueó la acción."
+                    return cls(denied=True, reason=str(reason))
+                if payload.get("decision") == "block":
+                    reason = payload.get("reason") or "El hook bloqueó la acción."
+                    return cls(denied=True, reason=str(reason))
+        return cls()
 
 
 class HookRegistry:
@@ -149,16 +181,20 @@ class HookManager:
             return
         self.registry.load(config if isinstance(config, dict) else {})
 
-    async def emit(self, event: HookEvent) -> None:
+    async def emit(self, event: HookEvent) -> HookOutcome:
+        """Ejecuta los hooks del evento; el primer deny gana y corta la cadena."""
         for handler in self.registry.for_event(
             event.hook_event_name, event.tool_name
         ):
-            await self._launch(handler["command"], event)
+            outcome = await self._launch(handler["command"], event)
+            if outcome.denied:
+                return outcome
+        return HookOutcome()
 
-    async def _launch(self, command: str, event: HookEvent) -> None:
+    async def _launch(self, command: str, event: HookEvent) -> HookOutcome:
         payload = json.dumps(event.to_dict(), ensure_ascii=False).encode("utf-8")
         process = None
-        stderr_output = b""
+        stdout_output, stderr_output = b"", b""
         try:
             process = await asyncio.create_subprocess_shell(
                 command,
@@ -167,26 +203,27 @@ class HookManager:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=event.cwd or os.getcwd(),
             )
-            _, stderr_output = await asyncio.wait_for(
+            stdout_output, stderr_output = await asyncio.wait_for(
                 process.communicate(payload), self.timeout)
         except (OSError, asyncio.TimeoutError, TimeoutError) as exc:
             if process is not None and process.returncode is None:
                 process.kill()
                 await process.wait()
             logger.warning(f"Hook '{command}' falló: {exc}")
-            return
+            return HookOutcome()
 
         if process.returncode != 0:
             stderr = stderr_output.decode("utf-8", errors="replace")
             logger.warning(
                 f"Hook '{command}' terminó con código {process.returncode}: {stderr}"
             )
-        # La salida se ignora en la fase observadora.
+        return HookOutcome.from_process(
+            process.returncode, stdout_output, stderr_output)
 
 
 hook_manager = HookManager()
 
 
-async def emit_hook(event: HookEvent) -> None:
+async def emit_hook(event: HookEvent) -> HookOutcome:
     """Dispara un evento; reutilizable desde el loop, el contexto y la TUI."""
-    await hook_manager.emit(event)
+    return await hook_manager.emit(event)

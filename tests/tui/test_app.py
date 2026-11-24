@@ -742,6 +742,38 @@ async def test_app_stream_to_chat_with_result():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("message,expected", [
+    ("No se pueden borrar archivos", "No se pueden borrar archivos"),
+    ("", "Acción bloqueada por un hook."),
+])
+async def test_app_stream_to_chat_shows_hook_denial(message, expected):
+    """El aviso del hook llega al chat aunque la herramienta no se ejecute."""
+    from app.core.harness.events import AgentEvent
+
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def mock_stream():
+                yield AgentEvent(type="hook_denied", data={
+                    "tool": "bash", "message": message})
+                yield AgentEvent(type="result", data={
+                    "final_answer": "No lo borré",
+                    "steps": 1,
+                    "tools_used": ["bash"],
+                    "usage_total": {"total_tokens": 10},
+                    "cost_usd": 0.0,
+                })
+
+            await app.stream_to_chat(mock_stream())
+            await pilot.pause()
+
+            texts = [str(getattr(child, "renderable", getattr(child, "content", "")))
+                     for child in app.query_one("#chat-scroll").children]
+            assert any("Bloqueado por un hook" in text and expected in text
+                       for text in texts)
+
+
+@pytest.mark.asyncio
 async def test_app_stream_to_chat_fallback_tokens():
     """Cubre el fallback de tokens."""
     app = AgentHarnessApp()

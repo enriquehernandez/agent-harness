@@ -1,10 +1,7 @@
-import json
-from pathlib import Path
 from app.core.harness.a2a.base import A2AStrategy, AgentCard
 from app.core.harness.loop import AgentLoop
 from app.core.harness.tool import ToolResult
 from app.core.harness.context import ContextManager
-from app.core.harness.permissions import PermissionGate, Decision
 from app.core.logger import logger, log_agent_flow
 from app.core.config import settings
 from app.core.llm import get_llm
@@ -12,17 +9,6 @@ from app.core.llm import get_llm
 
 class SupervisorStrategy(A2AStrategy):
     """Estrategia dinámica: un LLM router decide a qué agente delegar."""
-
-    def _load_persisted_permissions(self) -> set[str]:
-        """Lee los permisos persistidos de .harness/permissions.json."""
-        perm_file = settings.permissions_file
-        if not perm_file.exists():
-            return set()
-        try:
-            data = json.loads(perm_file.read_text())
-            return set(data.get("session_allowed", []))
-        except Exception:
-            return set()
 
     async def execute(self, task: str, context: ContextManager = None) -> ToolResult:
         # 1. Construimos el prompt de enrutamiento
@@ -59,26 +45,10 @@ class SupervisorStrategy(A2AStrategy):
         log_agent_flow(chosen_agent.name, "start")
 
         # Preparamos el contexto según el modo del agente
-        if chosen_agent.mode == "fork" and context:
-            agent_ctx = ContextManager(
-                system_prompt=chosen_agent.system_prompt)
-            agent_ctx.messages = context.messages.copy()
-        else:
-            agent_ctx = ContextManager(
-                system_prompt=chosen_agent.system_prompt)
+        agent_ctx = self._fork_context(chosen_agent, context)
 
-        # 4. Creamos un PermissionGate específico para el subagente
-        sub_gate = PermissionGate(
-            ask_user=self.permissions.ask_user if self.permissions else None)
-
-        # Heredamos las políticas del padre
-        if self.permissions and hasattr(self.permissions, "policies"):
-            sub_gate.policies = self.permissions.policies.copy()
-
-        # Leemos los permisos persistidos
-        persisted = self._load_persisted_permissions()
-        for pattern in persisted:
-            sub_gate.session_allowed.add(pattern)
+        # 4. Gate del subagente: comparte aprobaciones con el padre
+        sub_gate = self._child_gate()
 
         # 5. Resolvemos el LLM (específico del agente o el del padre)
         if chosen_agent.model:

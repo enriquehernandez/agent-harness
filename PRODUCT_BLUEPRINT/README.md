@@ -18,5 +18,11 @@ A diferencia de otros proyectos, este Harness no está atado a un solo LLM ni a 
    - [Context Compaction (Memoria)](02_COMPONENTS/03_context_compaction.md)
    - [Integración MCP](02_COMPONENTS/04_mcp_integration.md)
    - [Subagentes Delegados](02_COMPONENTS/05_subagents.md)
+   - [Pricing (Costes)](02_COMPONENTS/06_pricing.md)
+   - [Renderizado Rico: tablas, árboles y JSON](02_COMPONENTS/07_rich_rendering.md)
+   - [Agent-to-Agent (A2A)](02_COMPONENTS/08_a2a.md)
+   - [Renderizado de Imágenes en la TUI](02_COMPONENTS/09_rich_rendering.md)
+   - [Document Reading](02_COMPONENTS/10_document_reading.md)
 4. **Seguridad y Auditoría**
    - [Estrategia de Testing con Textual](03_SECURITY_AND_AUDIT/01_testing_y_mocks.md)
+   - [Seguridad en A2A](03_SECURITY_AND_AUDIT/02_a2a_security.md)

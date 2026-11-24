@@ -1,5 +1,5 @@
 from app.core.harness.tool import ToolRegistry
-from .filesystem import ReadFileTool, WriteFileTool
+from .filesystem import ReadFileTool, WriteFileTool, EditFileTool
 from .shell import BashTool
 from .memory import MemorySaveTool, MemoryRecallTool
 from .skills import LoadSkillTool
@@ -10,6 +10,7 @@ from .documents import ReadDocumentTool
 def register_core_tools(registry: ToolRegistry, base_dir: str = ".", memory_store=None, mcp_clients=None) -> None:
     registry.register(ReadFileTool(base_dir=base_dir))
     registry.register(WriteFileTool(base_dir=base_dir))
+    registry.register(EditFileTool(base_dir=base_dir))
 
     # 🔥 Creamos ExportObservationsTool primero
     export_tool = ExportObservationsTool(

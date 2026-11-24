@@ -44,7 +44,7 @@ async def test_mcp_client_full_flow(mock_session_class, mock_stdio_client):
     )
 
     tool = registry.get(expected_name)
-    assert tool.description == "[MCP:fs] Una tool"
+    assert tool.description == "[MCP] (fs) Una tool"
     assert tool.original_name == "test_tool"  # 🔥 el nombre original se conserva
 
 

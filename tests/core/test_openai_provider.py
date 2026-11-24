@@ -115,7 +115,8 @@ async def test_openai_provider_prompt_caching_and_error(mock_async_openai):
 
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-    provider = OpenAICompatibleProvider(api_key="key", model="model")
+    provider = OpenAICompatibleProvider(
+        api_key="key", model="anthropic/claude-3-5-sonnet-20241022")
     messages = [{"role": "system", "content": "System prompt"}]
     original = json.dumps(messages)
 
@@ -137,6 +138,43 @@ async def test_openai_provider_prompt_caching_and_error(mock_async_openai):
 
     # Y el caller sigue teniendo el original
     assert messages[0]["content"] == "System prompt"
+
+
+@pytest.mark.asyncio
+@patch("app.core.llm.providers.openai_provider.AsyncOpenAI")
+async def test_openai_provider_prompt_caching_skipped_for_unsupported_model(mock_async_openai):
+    """Un modelo que no es Claude no debe recibir la extension cache_control."""
+    mock_client = mock_async_openai.return_value
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content="Sin cache", tool_calls=None))]
+    mock_response.usage = None
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+    provider = OpenAICompatibleProvider(api_key="key", model="gpt-4o")
+    messages = [{"role": "system", "content": "System prompt"}]
+    original = json.dumps(messages)
+
+    with patch("app.core.config.settings.ENABLE_PROMPT_CACHING", True):
+        res = await provider.chat(messages)
+
+    assert res.content == "Sin cache"
+    sent_messages = mock_client.chat.completions.create.call_args.kwargs["messages"]
+    assert sent_messages[0]["content"] == "System prompt"
+    assert "cache_control" not in json.dumps(sent_messages)
+    assert json.dumps(messages) == original
+
+
+def test_prompt_caching_model_support():
+    """Solo los modelos Claude/Anthropic soportan la extension de caching."""
+    from app.core.llm.providers.openai_provider import _supports_prompt_caching
+
+    assert _supports_prompt_caching("anthropic/claude-3-5-sonnet-20241022")
+    assert _supports_prompt_caching("claude-3-opus")
+    assert _supports_prompt_caching("Claude-3-Haiku")
+    assert not _supports_prompt_caching("gpt-4o")
+    assert not _supports_prompt_caching("model")
+    assert not _supports_prompt_caching("llama-3.3-70b-versatile")
 
 
 @pytest.mark.asyncio

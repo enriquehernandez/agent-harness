@@ -2,25 +2,25 @@
 
 [![codecov](https://codecov.io/github/enriquehernandez/agent-harness/graph/badge.svg?token=NXCPH1ESNN)](https://codecov.io/github/enriquehernandez/agent-harness)
 
-![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white) ![Textual](https://img.shields.io/badge/Textual-TUI-FF4B4B?style=for-the-badge&logo=textual&logoColor=white) 
+![Python](https://img.shields.io/badge/Python-3.11--3.12-3776AB?style=for-the-badge&logo=python&logoColor=white) ![Textual](https://img.shields.io/badge/Textual-TUI-FF4B4B?style=for-the-badge&logo=textual&logoColor=white)
 ![OpenRouter](https://img.shields.io/badge/OpenRouter-Provider--Agnostic-6467F2?style=for-the-badge) 
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=for-the-badge) ![Skills](https://img.shields.io/badge/Skills-Markdown-blue?style=for-the-badge)
 ![Memory](https://img.shields.io/badge/Memory-SQLite-green?style=for-the-badge)
 
-Un **Agent Harness** de nivel producción construido desde cero. Este proyecto no es solo un "chatbot con herramientas"; es un motor de ejecución que gestiona el ciclo de vida completo de un agente autónomo: razonamiento, ejecución de herramientas locales y remotas (**MCP**), delegación a **subagentes**, multimodalidad (**imágenes**), gestión de permisos con **diff-first**, streaming en tiempo real y una interfaz de terminal (**TUI**) moderna construida con Textual.
+Un **Agent Harness** de nivel producción construido desde cero. Este proyecto no es solo un "chatbot con herramientas"; es un motor de ejecución que gestiona el ciclo de vida completo de un agente autónomo: razonamiento, ejecución de herramientas locales y remotas (**MCP**), delegación a **subagentes**, multimodalidad (**imágenes**), gestión de permisos con **diff-first**, streaming en tiempo real, auto-reflexión con un crítico, observabilidad con **Langfuse** y una interfaz de terminal (**TUI**) moderna construida con Textual.
 
 Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible y con **cobertura de tests del 100%**.
 
 ## ✨ Características Principales
 
-- **🧠 LLM Agnóstico (Registry Pattern):** Conecta OpenAI, OpenRouter o Groq modificando una sola variable de entorno.
-- **🛠️ Tool Calling Local & Remoto (MCP):** Herramientas locales (`bash`, `read_file`) e integración nativa con el **Model Context Protocol**.
+- **🧠 LLM Agnóstico (Registry Pattern):** Conecta `openai`, `openrouter` o `groq` modificando una sola variable de entorno. `fake` está disponible para pruebas locales sin coste.
+- **🛠️ Tool Calling Local & Remoto (MCP):** Herramientas locales (`bash`, `read_file`, `write_file`, `edit_file`, `read_document`) e integración nativa con el **Model Context Protocol**. Las tools MCP se registran con el prefijo `mcp_<servidor>_` y ejecutan con `TOOL_TIMEOUT` (30 s por defecto).
 - **🤖 Subagentes Delegados:** El agente principal puede delegar tareas complejas a subagentes aislados con sus propias herramientas.
 - **🛡️ Permission Gate con Diff-First:** Interfaz visual que muestra un *diff* de los cambios propuestos antes de aprobar.
 - **🔄 Context Compaction (Estrategias):** Tres estrategias (`summarize`, `sliding`, `none`) para mantener la conversación viva sin exceder el límite de tokens.
-- **💾 Memoria Persistente:** El agente puede guardar y recuperar hechos importantes del proyecto (`summary.md`).
-- **🚀 Streaming en Tiempo Real:** Las respuestas del agente se renderizan token por token en la TUI.
+- **💾 Memoria Persistente:** Por defecto usa SQLite con FTS5 en `.harness/memory.db`. `summary.md` solo se genera en los backends `files` y `fanout`.
+- **🚀 Streaming en Tiempo Real:** `AgentLoop.stream` emite eventos `AgentEvent` (`text_chunk`, `tool_start`, `tool_end`, `result`, `error`) y la TUI renderiza el texto token por token.
 - **🖼️ Multimodalidad:** Soporte para arrastrar y pegar imágenes (codificadas en Base64) que el LLM puede analizar.
 - **💻 TUI con Textual:** Una interfaz moderna con temas oscuros, autocompletado, *modales* interactivos, panel de debug (F1) y barra de adjuntos.
 - **🧪 100% de Cobertura:** Suite de tests robusta con `pytest` y `textual.pilot`.
@@ -29,10 +29,12 @@ Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible 
 - **🎨 Renderizado Rico:** La TUI renderiza tablas, árboles y bloques de código con Rich, no solo Markdown.
 - **🛡️ MCP Resiliente:** Reconexión automática con backoff exponencial si un servidor MCP cae.
 - **🤖 Agent-to-Agent (A2A):** Orquestación multi-agente con 4 estrategias (supervisor, sequential, parallel, swarm) configurable via `.env`.
-- **🎨 Renderizado Rico:** La TUI renderiza tablas, árboles y bloques de código con Rich, no solo Markdown.
-- **🖼️ Renderizado de Imágenes:** Las imágenes pegadas/arrastradas se muestran en el chat con `textual-image`.
-- **💰 Telemetría de Costes:** Calcula el coste real en USD de cada llamada usando la API del proveedor (OpenRouter) o un JSON manual (OpenAI/Groq). Caché configurable por `.env`.
-- **📄 Lectura de Documentos:** El agente puede leer y resumir PDFs, Word, Excel y PowerPoint usando la tool `read_document`.
+- **🖼️ Renderizado de Imágenes:** Las imágenes pegadas/arrastradas se muestran en el chat con `HalfcellImage` si `TERM_PROGRAM=WarpTerminal`, y con `TerminalImage` en el resto de terminales.
+- **📄 Lectura de Documentos:** `read_document` extrae texto de `.pdf`, `.docx`, `.xlsx` y `.pptx`, y también de los formatos antiguos `.doc`, `.xls` y `.ppt` (estos últimos con `olefile`/`xlrd`, de forma best-effort), con un límite de `MAX_DOCUMENT_CHARS=15000`.
+- **🪞 Auto-Reflexión con Crítico:** La tool `critic_review` revisa la respuesta propuesta contra las reglas del proyecto y puede forzar hasta 2 reintentos, inyectando el feedback del crítico en el contexto. Usa `A2A_REVIEWER_MODEL` como modelo del crítico si está configurado.
+- **🔬 Observabilidad con Langfuse:** Si hay `LANGFUSE_PUBLIC_KEY` y `LANGFUSE_SECRET_KEY`, cada stream se registra como una generación con su entrada, uso de tokens y coste.
+- **📂 Rutas Centralizadas:** `DATA_DIR` (por defecto `.harness`) es la raíz de `memory.db`, `vector.db`, `permissions.json`, `logs/`, `sessions/` y `pricing_cache.json`.
+- **💡 Skill `token-budget-guard`:** Primera skill vendible del proyecto: analiza el consumo de tokens y costes por sesión/modelo, avisa al superar presupuestos y sugiere modelos más baratos o prompt caching.
 
 
 ### 📦 Skills (Habilidades)
@@ -42,7 +44,8 @@ arquitectura, generar reportes HTML, etc.).
 
 - **Descubrimiento automático:** El agente detecta las skills al arrancar.
 - **Carga con `@`:** Escribe `@nombre-de-skill` en el input para cargarla.
-- **Autocompletado:** Presiona `Tab` después de `@` para ver las skills disponibles.
+- **Autocompletado:** Tras escribir `@`, la sugerencia se acepta con la **flecha derecha**.
+- **`token-budget-guard`:** Incluida en el repositorio como primera skill vendible; se invoca con `@token-budget-guard` y guarda sus informes en `.harness/token-budget-guard/reports/`.
 
 **Ejemplo:**
 ```text
@@ -53,17 +56,19 @@ arquitectura, generar reportes HTML, etc.).
 
 El agente recuerda hechos importantes entre sesiones. Backends soportados:
 
-- **`sqlite`** (por defecto): FTS5 para búsqueda por palabras.
-- **`vector`**: Búsqueda semántica usando `sqlite-vec` + `fastembed`. Guarda en `.harness/vector.db`.
-- **`files`**: Archivos Markdown legibles por humanos.
+- **`sqlite`** (por defecto): FTS5 en `DATA_DIR/memory.db` (`.harness/memory.db` con el `DATA_DIR` por defecto).
+- **`vector`**: Búsqueda semántica usando `sqlite-vec` + `fastembed`. Guarda en `DATA_DIR/vector.db` (`.harness/vector.db`).
+- **`files`**: Archivos Markdown legibles por humanos en `DATA_DIR/memory/`; mantiene un `summary.md` agregado.
 - **`memory`**: RAM (se pierde al reiniciar).
-- **`fanout`**: Escribe en archivos y SQLite a la vez.
+- **`fanout`**: Escribe en archivos y SQLite a la vez; también genera `summary.md` en la parte de archivos.
+
+Todas estas rutas cuelgan de `DATA_DIR`, configurable en `.env`.
 
 ### 📁 Sesiones Guardadas
-El Harness guarda el historial completo de cada conversación en `.harness/sessions/`
+El Harness guarda el historial completo de cada conversación en `DATA_DIR/sessions/` (`.harness/sessions/` por defecto)
 como archivos JSON. Al reiniciar la TUI, **carga automáticamente la última sesión**.
 
-Comandos: `/session list`, `/session load <id>`, `/session save`, `/session delete <id>`.
+Comandos: `/session list`, `/session load <id>`, `/session save`, `/session delete <id>`, `/session new`.
 
 ### 💰 Pricing y Costes
 
@@ -89,6 +94,7 @@ graph TD
         Loop -->|3. Ejecución| Tools[ToolRegistry]
         Loop <-->|4. Memoria| Context[ContextManager]
         Context <-->|Compactación| Compactor[SummarizationStrategy]
+        Loop -.->|5. Auto-reflexión| Critic[critic_review]
     end
     
     subgraph Adaptadores
@@ -96,6 +102,7 @@ graph TD
         Tools -.->|Local| LocalTools[Bash, File, Memory]
         Tools -.->|MCP Client| MCP[Servidores MCP Externos]
         Tools -.->|Delegate| Subagent[Subagente Reviewer]
+        Loop -.->|Observabilidad| Langfuse[Langfuse]
     end
 ```
 
@@ -103,13 +110,14 @@ graph TD
 
 ## 🛠️ Stack Tecnológico
 
-- **Lenguaje**: Python 3.11+
+- **Lenguaje**: Python 3.11–3.12 (`>=3.11,<3.13`)
 - **Gestión de paquetes**: `uv` (ultrarrápido y reproducible)
 - **Integración IA**: `openai` SDK (compatible con OpenRouter/Groq)
 - **Protocolo de Herramientas**: `mcp` (Model Context Protocol)
-- **Interfaz de Terminal**: `textual`, `rich`, `textual-image`
+- **Interfaz de Terminal**: `textual` (>=8.2.8), `rich`, `textual-image`
 - **Orquestación**: `AgentLoop` + A2A (Supervisor, Sequential, Parallel, Swarm)
 - **Memoria Vectorial**: `sqlite-vec`, `fastembed`
+- **Observabilidad**: `langfuse`
 - **Resiliencia**: `tenacity`
 - **Testing**: `pytest`, `pytest-asyncio`, `pytest-cov`
 - **Contenedores**: Docker, Docker Compose
@@ -127,7 +135,7 @@ uv sync
 
 2. Configurar variables de entorno:
 
-Copia el archivo de ejemplo y configura tu proveedor de IA (por defecto usa `fake` para pruebas locales sin coste):
+Copia el archivo de ejemplo. El proveedor por defecto es `fake`, tanto en `app/core/config.py` como en `.env.example`, así que la TUI arranca sin API key. Para usar un proveedor real, cambia `LLM_PROVIDER` y añade su clave:
 
 ```bash
 cp .env.example .env
@@ -136,10 +144,13 @@ cp .env.example .env
 Edita el `.env`:
 
 ```env
-# Puedes usar OPENAI, OPENROUTER, GROQ o FAKE
-LLM_PROVIDER=OPENROUTER
-OPENROUTER_API_KEY=sk-or-v1-tu_api_key_aqui
-OPENROUTER_MODEL=openai/gpt-4o
+# Puedes usar openai, openrouter, groq o fake; `fake` no necesita API key
+LLM_PROVIDER=fake
+
+# Para usar OpenRouter, cambia lo anterior y rellena la key:
+# LLM_PROVIDER=openrouter
+# OPENROUTER_API_KEY=sk-or-v1-tu_api_key_aqui
+# OPENROUTER_MODEL=openai/gpt-4o
 ```
 
 3. Levantar la TUI:
@@ -168,15 +179,34 @@ Escribe /help para ver los comandos.
 
 🐚 > /help
 Comandos disponibles:
-  /help          Muestra esta ayuda
-  /model         Muestra o cambia el LLM actual
-  /tools         Lista las herramientas disponibles
-  /subagents     Lista los subagentes registrados
-  /compact       Fuerza la compactación (sliding/summarize/none)
-  /debug         Controla el panel de debug (on/off/clear)
-  /permissions   Gestiona permisos guardados
-  /export        Exporta la conversación (markdown/json)
-  /quit          Sale del programa
+  /help                  Muestra esta ayuda
+  /shortcuts             Muestra los atajos de teclado (alias: /hotkeys)
+  /model [nombre]        Muestra o cambia el LLM actual
+  /provider [nombre]     Muestra o cambia el proveedor (openai/openrouter/groq/fake)
+  /tools                 Lista las herramientas disponibles en el Registry
+  /subagents             Lista los subagentes registrados
+  /skills                Lista tools, subagentes y skills instaladas
+  /tokens                Muestra el uso estimado de tokens
+  /cost                  Muestra el coste real (USD) de la última llamada
+  /compact [estrategia]  Fuerza la compactación (sliding/summarize/none)
+  /verbose [on/off]      Muestra/oculta los detalles de la compactación
+  /clear                 Limpia el historial de conversación
+  /debug [on/off/clear]  Controla el panel de debug
+  /permissions           Gestiona permisos guardados
+  /export [formato]      Exporta la conversación (markdown/json)
+  /memory [clear/migrate [backend]]      Gestiona la memoria persistente
+  /session [list/load/delete/save/new]   Gestiona las sesiones guardadas
+  /doctor                🩺 Diagnóstico del estado del sistema
+  /trace                 📊 Muestra el uso real de tokens de la última llamada
+  /quit                  Sale del programa (alias: /exit)
+
+  Códigos de respuesta (solo la pregunta siguiente):
+  /truth                 Sin cortesía; crítica honesta y fallas
+  /human                 Tono natural y cercano
+  /nofluff               Sin saludos, rodeos ni relleno
+  /devil                 Abogado del diablo; busca puntos débiles
+  /decode                Traduce lenguaje técnico o legal
+  /genius                Muestra pasos verificables antes de concluir
 
 🐚 > ¿Qué ves en esta imagen?
 [Arrastra una imagen a la terminal]
@@ -184,12 +214,16 @@ Comandos disponibles:
 🤖 Agente: Veo una factura comercial con un sello de "RECHAZADO"...
 ```
 
+`/session new` guarda la sesión actual y crea una nueva; `/memory migrate sqlite` cambia el backend de memoria; `/reload [skills|permissions|tools]` recarga las skills, los permisos persistidos o las herramientas y conexiones MCP (conservando el contexto).
+
+Los códigos de respuesta cambian solo el estilo de la siguiente pregunta y se consumen automáticamente: escribe `/devil` y luego tu pregunta, o `/devil ¿Qué fallos tiene este plan?` en una sola línea. No hay que desactivarlos; la pregunta siguiente vuelve al tono normal. No modifican las reglas de `AGENTS.md` ni los permisos.
+
 ## 🛡️ El Guardián de Seguridad (Permission Gate)
 
 Si el agente intenta ejecutar una herramienta sensible, el Harness pausará la ejecución y te mostrará un panel interactivo con los argumentos y, si aplica, un **diff de los cambios**:
 
 ```text
-🛠️  El agente quiere usar: edit_file
+🛠️  El agente quiere usar: write_file
 ╭───────────────────────────────────────────────╮
 │ path: app/core/config.py                      │
 │                                               │
@@ -203,7 +237,7 @@ Si el agente intenta ejecutar una herramienta sensible, el Harness pausará la e
 ```
 
 - y: Permitir una vez.
-- a: Permitir siempre en esta sesión.
+- a: Permitir siempre: guarda la firma de la tool en `.harness/permissions.json` (o `DATA_DIR/permissions.json`) y **persiste entre sesiones**, no solo durante la sesión actual.
 - n: Denegar (el agente recibirá un mensaje de error y buscará otra forma).
 
 ## 🔌 Integración con MCP (Model Context Protocol)
@@ -221,22 +255,25 @@ El Harness puede conectarse a cualquier servidor MCP. El archivo `mcp_config.jso
 }
 ```
 
-Al arrancar la TUI, el agente descubrirá e integrará automáticamente las herramientas expuestas por el servidor.
+Al arrancar la TUI, el agente descubrirá e integrará automáticamente las herramientas expuestas por el servidor, con nombres `mcp_<servidor>_<tool>`. Cada llamada remota usa `TOOL_TIMEOUT` (30 s por defecto) y, si el servidor cae, se reconecta con backoff exponencial.
 
 ## 🧪 Testing y Calidad
 
 El proyecto cuenta con una suite de pruebas robusta. Para evitar el consumo de tokens y la dependencia de red, se utiliza un `FakeLLM` inyectable.
 
 ```bash
-# Ejecutar todos los tests con cobertura
+# Ejecutar tests unitarios con cobertura. OJO: `addopts` en pyproject.toml
+# incluye --ignore=tests/integration, así que NO incluye los tests de integración.
 uv run pytest tests/ --cov=app --cov-report=term-missing
 
-# Ejecutar todos los tests con cobertura
+# Equivalente: tampoco incluye tests/integration
 uv run tom test
+
+# Tests de integración (los excluidos arriba):
+uv run tom test-integration
 ```
 
 🧑‍💻 Autor
 Enrique Hernández Leiva
 * [LinkedIn](https://www.linkedin.com/in/enrique-hernandez-leiva/)
 * [GitHub](https://github.com/enriquehernandez)
-

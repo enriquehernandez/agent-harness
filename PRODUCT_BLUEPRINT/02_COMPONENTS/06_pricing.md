@@ -11,4 +11,4 @@ El `PricingProvider` calcula el coste usando una `PricingSource`:
 - **FakePricingSource**: Sin coste (tests).
 
 ## Integración
-`AgentLoop._calculate_cost()` llama al provider al final de cada step y acumula el coste en `usage_total` + `cost_usd`. La TUI muestra el acumulado en el dashboard.
+El coste se calcula **al terminar el bucle**, no en cada step: `AgentLoop._calculate_total_cost()` consulta al provider (`get_cost()`) al devolver la respuesta final y al agotar `max_iterations`, tanto en `run()` como en `stream()`, y guarda el importe en `cost_usd` junto al `usage_total` acumulado. Existe un método `_calculate_cost()` (`get_cost_pricing()`), pero el loop no lo invoca. La TUI muestra el acumulado en el dashboard.

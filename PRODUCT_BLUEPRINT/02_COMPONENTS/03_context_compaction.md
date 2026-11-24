@@ -14,4 +14,4 @@ En lugar de simplemente "borrar" los mensajes más antiguos (lo que hace que el 
 5. Mantiene los mensajes recientes intactos.
 
 ## Patrón Strategy
-La clase `ContextManager` no sabe *cómo* se compacta. Delega la tarea a una interfaz `CompactionStrategy`. Esto permite a los desarrolladores inyectar nuevas estrategias en el futuro (ej. `TruncationStrategy` para solo borrar, o estrategias basadas en grafos como LCM).
+La clase `ContextManager` no sabe *cómo* se compacta. Delega la tarea a una interfaz `CompactionStrategy`. Las estrategias implementadas son `SummarizationStrategy` (por defecto), `SlidingWindowStrategy` y `NoneStrategy` (`compaction.py`); `set_strategy()` permite seleccionar `summarization`, `sliding` o `none` en caliente.

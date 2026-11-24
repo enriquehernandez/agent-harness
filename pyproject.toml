@@ -29,6 +29,8 @@ dependencies = [
     "python-pptx>=1.0.2",
     "pandas>=3.1.1",
     "langfuse>=5.2.0",
+    "xlrd>=2.0.2",
+    "olefile>=0.47",
 ]
 
 [build-system]
@@ -59,7 +61,7 @@ filterwarnings = [
 [tool.tomlscript]
 # Scripts de desarrollo
 dev = "uv run python -m app.main" # Asumiendo que main.py lanza la TUI
-test = "uv run pytest tests/ --cov=app --cov-report=term-missing --cache-clear"
+test = "uv run pytest tests/ --cov=app --cov-report=term-missing --cache-clear --cov-fail-under=100"
 test-integration = "uv run pytest tests/integration/* -v -s"
 
 [tool.coverage.report]

@@ -8,7 +8,7 @@
 ## 2. Strategy Pattern (Compactación)
 **Problema:** Las conversaciones largas superan el límite de tokens.
 **Solución:** La clase `ContextManager` delega la tarea a una interfaz `CompactionStrategy`.
-**Beneficio:** Podemos implementar `SummarizationStrategy` (resumir), `TruncationStrategy` (cortar lo más viejo) o `LCMStrategy` (Lossless Context Management) y cambiarlas en caliente.
+**Beneficio:** Las implementaciones reales en `app/core/harness/compaction.py` son `SummarizationStrategy` (resumir los mensajes antiguos), `SlidingWindowStrategy` (conservar solo los últimos N mensajes, 6 por defecto) y `NoneStrategy` (no compactar). `ContextManager.set_strategy()` permite cambiar entre `summarization`, `sliding` y `none` en caliente.
 
 ## 3. MCP (Model Context Protocol)
 **Problema:** Crear herramientas locales es útil, pero limita al agente al filesystem local.

@@ -2,7 +2,7 @@ from typing import Any
 from .tool import BaseTool, ToolResult, ToolRegistry
 from .loop import AgentLoop
 from .context import ContextManager
-from .permissions import PermissionGate, Decision
+from .permissions import PermissionGate
 from ..llm.base import BaseLLM
 
 
@@ -15,7 +15,8 @@ class DelegateTool(BaseTool):
         description: str,
         llm: BaseLLM,
         tools: ToolRegistry,
-        system_prompt: str
+        system_prompt: str,
+        permissions: PermissionGate | None = None,
     ):
         self.name = name
         self.description = description
@@ -32,13 +33,14 @@ class DelegateTool(BaseTool):
         self.llm = llm
         self.tools = tools
         self.system_prompt = system_prompt
+        self.permissions = permissions
 
     async def run(self, task: str) -> ToolResult:
         ctx = ContextManager(system_prompt=self.system_prompt)
 
-        gate = PermissionGate()
-        for tool in self.tools.names():
-            gate.policies[tool] = Decision.ALLOW
+        # Comparte las aprobaciones del padre; solo añade sus propias excepciones
+        gate = (self.permissions or PermissionGate()).child(
+            allow=self.tools.names())
 
         loop = AgentLoop(llm=self.llm, tools=self.tools,
                          permissions=gate, max_iterations=5)

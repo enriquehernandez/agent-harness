@@ -30,6 +30,64 @@ async def test_read_file_traversal_protection(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_edit_file_applies_edits(tmp_path):
+    from app.tools.filesystem import EditFileTool
+
+    target = tmp_path / "note.txt"
+    target.write_text("uno\ndos\nuno\n", encoding="utf-8")
+    tool = EditFileTool(base_dir=str(tmp_path))
+
+    result = await tool.run(path="note.txt", edits=[
+        {"oldText": "uno", "newText": "UNO"},
+        {"oldText": "dos", "newText": "DOS"},
+    ])
+
+    assert result.success is True
+    assert target.read_text(encoding="utf-8") == "UNO\nDOS\nUNO\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_is_registered_in_core_tools():
+    from app.core.harness.tool import ToolRegistry
+    from app.tools import register_core_tools
+
+    registry = ToolRegistry()
+    register_core_tools(registry)
+
+    assert registry.get("edit_file") is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path, edits, expected", [
+    ("../fuera.txt", [{"oldText": "a", "newText": "b"}], "Access denied"),
+    ("missing.txt", [{"oldText": "a", "newText": "b"}], "does not exist"),
+    ("note.txt", [{"oldText": "", "newText": "b"}], "oldText"),
+    ("note.txt", [{"oldText": "no está", "newText": "b"}], "not found"),
+])
+async def test_edit_file_rejects_invalid_input(tmp_path, path, edits, expected):
+    from app.tools.filesystem import EditFileTool
+
+    (tmp_path / "note.txt").write_text("contenido", encoding="utf-8")
+    result = await EditFileTool(base_dir=str(tmp_path)).run(path=path, edits=edits)
+
+    assert result.success is False
+    assert expected in result.error
+
+
+@pytest.mark.asyncio
+async def test_edit_file_read_error(tmp_path):
+    from app.tools.filesystem import EditFileTool
+
+    (tmp_path / "note.txt").write_text("contenido", encoding="utf-8")
+    with patch.object(Path, "read_text", side_effect=OSError("boom")):
+        result = await EditFileTool(base_dir=str(tmp_path)).run(
+            path="note.txt", edits=[{"oldText": "a", "newText": "b"}])
+
+    assert result.success is False
+    assert "boom" in result.error
+
+
+@pytest.mark.asyncio
 async def test_bash_tool_success():
     tool = BashTool()
     result = await tool.run(command="echo 'Hello'")
@@ -289,6 +347,28 @@ async def test_observations_tool(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_observations_classifies_real_mcp_tool(tmp_path):
+    """Una tool MCP real debe exportarse con origin='MCP'."""
+    import json
+    from app.tools.observations import ExportObservationsTool
+    from app.core.harness.tool import ToolRegistry
+    from app.mcp.client import MCPToolProxy
+
+    registry = ToolRegistry()
+    registry.register(MCPToolProxy(
+        name="mcp_fs_read", description="Lee un archivo",
+        parameters_schema={}, client=MagicMock(), server_name="fs",
+    ))
+    tool = ExportObservationsTool(registry=registry, mcp_clients=[])
+
+    out_file = tmp_path / "out.json"
+    await tool.run(str(out_file))
+
+    data = json.loads(out_file.read_text())
+    assert data["tools"][0]["origin"] == "MCP"
+
+
+@pytest.mark.asyncio
 async def test_read_document_tool(tmp_path):
     """Cubre ReadDocumentTool para todos los formatos."""
     from app.tools.documents import ReadDocumentTool
@@ -422,6 +502,68 @@ async def test_read_document_empty_and_truncated(tmp_path):
         res = await tool.run("table.docx")
         assert res.success is True
         assert "Celda 1 | Celda 2" in res.content
+
+
+@pytest.mark.asyncio
+async def test_read_document_legacy_formats(tmp_path):
+    """Los formatos legacy .xls, .doc y .ppt extraen texto."""
+    from app.tools.documents import ReadDocumentTool
+    import xlrd
+
+    tool = ReadDocumentTool(base_dir=str(tmp_path))
+    assert "DOC" in tool.description and "XLS" in tool.description and "PPT" in tool.description
+
+    # .xls con celda de fecha
+    (tmp_path / "test.xls").write_text("fake")
+    sheet = MagicMock()
+    sheet.name = "Ventas"
+    sheet.nrows = 2
+    sheet.ncols = 2
+    cell_text = MagicMock(ctype=xlrd.XL_CELL_TEXT, value="Producto")
+    cell_number = MagicMock(ctype=xlrd.XL_CELL_NUMBER, value=3)
+    cell_date = MagicMock(ctype=xlrd.XL_CELL_DATE, value=45000)
+    cell_empty = MagicMock(ctype=xlrd.XL_CELL_EMPTY, value="")
+    sheet.cell.side_effect = [
+        cell_text, cell_number, cell_date, cell_empty]
+    book = MagicMock()
+    book.sheets.return_value = [sheet]
+    with patch("app.tools.documents.xlrd.open_workbook", return_value=book):
+        with patch("app.tools.documents.xlrd.xldate_as_datetime", return_value="2023-01-01"):
+            res = await tool.run("test.xls")
+    assert res.success is True
+    assert "Producto | 3" in res.content
+    assert "2023-01-01" in res.content
+
+    # .doc: el texto está en UTF-16LE dentro del stream WordDocument
+    (tmp_path / "test.doc").write_text("fake")
+    with patch("app.tools.documents.olefile.OleFileIO") as MockOle:
+        ole = MockOle.return_value.__enter__.return_value
+        ole.openstream.return_value.read.return_value = (
+            "Informe legacy".encode("utf-16-le"))
+        res = await tool.run("test.doc")
+    assert res.success is True
+    assert "Informe legacy" in res.content
+    ole.openstream.assert_called_with("WordDocument")
+
+    # .ppt: el texto está en el stream PowerPoint Document
+    (tmp_path / "test.ppt").write_text("fake")
+    with patch("app.tools.documents.olefile.OleFileIO") as MockOle:
+        ole = MockOle.return_value.__enter__.return_value
+        ole.openstream.return_value.read.return_value = (
+            "Diapositiva legacy".encode("utf-16-le"))
+        res = await tool.run("test.ppt")
+    assert res.success is True
+    assert "Diapositiva legacy" in res.content
+    ole.openstream.assert_called_with("PowerPoint Document")
+
+
+def test_read_document_legacy_text_fallback():
+    """Las cadenas se extraen en UTF-16LE o, si no hay, en Latin-1."""
+    from app.tools.documents import _printable_runs
+
+    assert _printable_runs("Informe legacy".encode("utf-16-le"), "utf-16-le") == "Informe legacy"
+    assert _printable_runs(b"\x00\x01Texto Latin-1\x00", "latin-1") == "Texto Latin-1"
+    assert _printable_runs(b"corto", "latin-1") == ""
 
 
 @pytest.mark.asyncio

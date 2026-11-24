@@ -120,7 +120,7 @@ class MCPToolProxy(BaseTool):
         original_name: str | None = None,
     ):
         self.name = name
-        self.description = f"[MCP:{server_name}] {description}"
+        self.description = f"[MCP] ({server_name}) {description}"
         self.parameters_schema = parameters_schema
         self.client = client
         self.server_name = server_name

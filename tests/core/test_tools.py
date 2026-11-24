@@ -289,6 +289,28 @@ async def test_observations_tool(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_observations_classifies_real_mcp_tool(tmp_path):
+    """Una tool MCP real debe exportarse con origin='MCP'."""
+    import json
+    from app.tools.observations import ExportObservationsTool
+    from app.core.harness.tool import ToolRegistry
+    from app.mcp.client import MCPToolProxy
+
+    registry = ToolRegistry()
+    registry.register(MCPToolProxy(
+        name="mcp_fs_read", description="Lee un archivo",
+        parameters_schema={}, client=MagicMock(), server_name="fs",
+    ))
+    tool = ExportObservationsTool(registry=registry, mcp_clients=[])
+
+    out_file = tmp_path / "out.json"
+    await tool.run(str(out_file))
+
+    data = json.loads(out_file.read_text())
+    assert data["tools"][0]["origin"] == "MCP"
+
+
+@pytest.mark.asyncio
 async def test_read_document_tool(tmp_path):
     """Cubre ReadDocumentTool para todos los formatos."""
     from app.tools.documents import ReadDocumentTool

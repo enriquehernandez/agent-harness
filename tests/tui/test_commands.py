@@ -63,6 +63,21 @@ async def test_cmd_tools(mock_app, ctx):
 
 
 @pytest.mark.asyncio
+async def test_cmd_tools_marks_mcp_tool_as_mcp(mock_app, ctx):
+    from app.mcp.client import MCPToolProxy
+
+    proxy = MCPToolProxy(
+        name="mcp_fs_read", description="Lee un archivo",
+        parameters_schema={}, client=MagicMock(), server_name="fs",
+    )
+    mock_app.registry.names.return_value = ["mcp_fs_read"]
+    mock_app.registry.get.return_value = proxy
+
+    assert await handle_command("/tools", ctx, {}, None, mock_app) is True
+    assert "| `mcp_fs_read` | MCP |" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
 async def test_cmd_tools_no_registry(mock_app, ctx):
     mock_app.registry = None
     assert await handle_command("/tools", ctx, {}, None, mock_app) is True

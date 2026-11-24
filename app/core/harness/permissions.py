@@ -49,6 +49,11 @@ class PermissionGate:
             except Exception:
                 pass
 
+    def reload_persisted(self) -> None:
+        """Vuelve a leer `.harness/permissions.json`, descartando aprobaciones en memoria."""
+        self.session_allowed.clear()
+        self._load_persisted_permissions()
+
     def _save_persisted_permissions(self):
         data = {"session_allowed": list(self.session_allowed)}
         try:

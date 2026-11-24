@@ -11,6 +11,19 @@ def isolated_permissions_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
 
+def test_permission_gate_reload_persisted(tmp_path):
+    gate = PermissionGate()
+    gate.session_allowed.add("old:permiso")
+    (tmp_path / ".harness" / "permissions.json").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".harness" / "permissions.json").write_text(
+        json.dumps({"session_allowed": ["bash:ls"]}), encoding="utf-8"
+    )
+
+    gate.reload_persisted()
+
+    assert gate.session_allowed == {"bash:ls"}
+
+
 @pytest.mark.asyncio
 async def test_permission_gate_allow():
     gate = PermissionGate()

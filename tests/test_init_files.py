@@ -34,6 +34,38 @@ def test_register_core_tools_with_memory():
     assert "memory_recall" in registry.names()
 
 
+def test_tom_test_enforces_full_coverage():
+    """El script de tests debe fallar si la cobertura baja del 100%."""
+    import tomllib
+    from pathlib import Path
+
+    config = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    test_command = config["tool"]["tomlscript"]["test"]
+
+    assert "--cov-fail-under=100" in test_command
+
+
+def test_no_known_unused_imports():
+    """Los imports señalados en la auditoría deben estar eliminados."""
+    import ast
+    from pathlib import Path
+
+    def imported_names(path: Path) -> set[str]:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        names: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.update(a.asname or a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                names.update(a.asname or a.name for a in node.names)
+        return names
+
+    app_imports = imported_names(Path("app/tui/app.py"))
+    assert "UnicodeImage" not in app_imports
+    assert "unquote" not in app_imports
+    assert "pd" not in imported_names(Path("app/tools/documents.py"))
+
+
 def test_no_print_in_production_code():
     """Verifica que no se use print() en el código de producción."""
     import os

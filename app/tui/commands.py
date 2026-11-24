@@ -10,6 +10,13 @@ from app.core.llm.base import BaseLLM
 from app.core.llm import get_llm
 
 
+AVAILABLE_COMMANDS = [
+    "/help", "/shortcuts", "/model", "/provider", "/tools", "/subagents",
+    "/skills", "/reload", "/tokens", "/compact", "/verbose", "/clear", "/debug",
+    "/permissions", "/export", "/session", "/memory", "/doctor", "/trace", "/cost", "/quit"
+]
+
+
 async def handle_command(command: str, ctx: ContextManager, state: dict, llm: BaseLLM, app) -> bool:
     parts = command.strip().split()
     cmd = parts[0].lower()
@@ -31,6 +38,7 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `/tools` | Lista las herramientas disponibles en el Registry |\n"
             "| `/subagents` | Lista los subagentes registrados |\n"
             "| `/skills` | Lista todas las habilidades (tools + subagents) |\n"
+            "| `/reload [skills/permissions/tools]` | Recarga `skills`, `permissions` o `tools` |\n"
             "| `/tokens` | Muestra el uso estimado de tokens |\n"
             "| `/cost` | 💰 Muestra el coste real (USD) de la última llamada |\n"
             "| `/compact [estrategia]` | Fuerza la compactación (sliding/summarize/none) |\n"
@@ -320,31 +328,54 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
         await app.write_to_chat(txt, type="agent")
         return True
 
-    elif cmd == "/reload-skills":
-        from app.tools.skills import LoadSkillTool
-        from app.tui.suggester import SkillSuggester
+    elif cmd == "/reload":
+        target = parts[1].lower() if len(parts) > 1 else None
 
-        skill_tool = LoadSkillTool()
-        skills = skill_tool.discover_skills()
+        if target == "skills":
+            import re
+            from app.tools.skills import LoadSkillTool
+            from app.tui.suggester import CombinedSuggester
 
-        # Actualizamos el system_prompt del contexto
-        skills_list = ", ".join(
-            [f"'{s}'" for s in skills]) if skills else "ninguna"
-        current_prompt = app.ctx.messages[0]["content"]
-        # Buscamos la línea de "Available skills:" y la actualizamos
-        import re
-        new_prompt = re.sub(
-            r"Available skills:.*?\. ",
-            f"Available skills: {skills_list}. ",
-            current_prompt
-        )
-        app.ctx.messages[0]["content"] = new_prompt
+            skills = LoadSkillTool().discover_skills()
+            skills_list = ", ".join(
+                f"'{s}'" for s in skills) if skills else "ninguna"
+            if getattr(app, "ctx", None) and app.ctx.messages:
+                current_prompt = app.ctx.messages[0]["content"]
+                app.ctx.messages[0]["content"] = re.sub(
+                    r"Available skills:.*",
+                    f"Available skills: {skills_list}.",
+                    current_prompt,
+                    count=1,
+                    flags=re.MULTILINE,
+                )
+            app.query_one(
+                "#input-box").suggester = CombinedSuggester(AVAILABLE_COMMANDS)
+            await app.write_to_chat(
+                f"✅ Skills recargadas: {', '.join(skills) or 'ninguna'}", type="system")
 
-        # Actualizamos el SkillSuggester
-        input_box = app.query_one("#input-box")
-        # (El SkillSuggester se recrea en el próximo on_mount, pero podemos forzar)
+        elif target == "permissions":
+            app.gate.reload_persisted()
+            await app.write_to_chat(
+                f"✅ Permisos recargados desde `{settings.permissions_file}`.", type="system")
 
-        await app.write_to_chat(f"✅ Skills recargadas: {', '.join(skills)}", type="system")
+        elif target == "tools":
+            previous_ctx = app.ctx
+            for client in reversed(getattr(app, "mcp_clients", [])):
+                try:
+                    await client.disconnect()
+                except Exception:
+                    logger.warning(
+                        "Error desconectando cliente MCP al recargar tools", exc_info=True)
+            app.mcp_clients.clear()
+            await app.initialize_agent()
+            app.ctx = previous_ctx
+            await app.write_to_chat(
+                "✅ Herramientas y conexiones MCP recargadas (contexto conservado).", type="system")
+
+        else:
+            suffix = f" Objetivo desconocido: `{target}`." if target else ""
+            await app.write_to_chat(
+                f"❌{suffix} Uso: `/reload [skills|permissions|tools]`", type="system")
         return True
 
     elif cmd == "/tokens":

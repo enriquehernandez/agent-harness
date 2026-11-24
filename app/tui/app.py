@@ -1,6 +1,5 @@
 import os
-from textual_image.widget import HalfcellImage, UnicodeImage
-from urllib.parse import unquote
+from textual_image.widget import HalfcellImage
 import asyncio
 import base64
 import json
@@ -24,7 +23,7 @@ from app.core.harness.subagents import DelegateTool
 from app.core.harness.memory.factory import create_memory_store
 from app.core.harness.session import SessionManager
 from app.tools import register_core_tools
-from app.tui.commands import handle_command
+from app.tui.commands import AVAILABLE_COMMANDS, handle_command
 from app.mcp.client import MCPClient
 from app.core.config import settings
 from app.tui.suggester import SkillSuggester, CombinedSuggester
@@ -119,14 +118,8 @@ class AgentHarnessApp(App):
         await self.write_to_chat("🤖 Agent Harness iniciado. Escribe /help para ver comandos.", type="system")
         await self.write_to_chat("💡 Puedes pegar imágenes o archivos. Escribe @ para cargar una skill.", type="system")
 
-        available_commands = [
-            "/help", "/shortcuts", "/model", "/provider", "/tools", "/subagents",
-            "/skills", "/tokens", "/compact", "/verbose", "/clear", "/debug",
-            "/permissions", "/export", "/session", "/memory", "/doctor", "/trace", "/cost", "/quit"
-        ]
-
         input_box = self.query_one("#input-box", FileAwareInput)
-        input_box.suggester = CombinedSuggester(available_commands)
+        input_box.suggester = CombinedSuggester(AVAILABLE_COMMANDS)
         input_box.focus()
 
     async def initialize_agent(self):
@@ -135,6 +128,10 @@ class AgentHarnessApp(App):
         self.memory_store = memory_store
         memory_context = f"\n\n[Long-term memory]:\n{memory_store.preamble()}" if memory_store.preamble(
         ) else ""
+
+        from app.tools.skills import LoadSkillTool
+        skills = LoadSkillTool().discover_skills()
+        skills_list = ", ".join(f"'{s}'" for s in skills) if skills else "ninguna"
 
         context_files = ["AGENTS.md", "tasks/actual.md"]
         context_text = ""
@@ -152,6 +149,7 @@ class AgentHarnessApp(App):
                 "Never volunteer, mention or try to resume pending tasks unless the user explicitly "
                 "asks about project tasks or status; in that case, answer using tasks/actual.md.\n"
                 "Always answer the user's actual message directly.\n"
+                f"Available skills: {skills_list}.\n"
                 f"{context_text}\n"
                 f"{memory_context}"
             )

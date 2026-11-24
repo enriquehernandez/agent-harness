@@ -234,6 +234,7 @@ async def test_app_initialize_agent_real():
                 assert app.registry is not None
                 assert app.agent_loop is not None
                 assert app.gate is not None
+                assert "Available skills:" in app.ctx.messages[0]["content"]
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,4 @@
 from pathlib import Path
-import pandas as pd
 from pypdf import PdfReader
 from docx import Document
 from openpyxl import load_workbook

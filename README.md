@@ -200,6 +200,14 @@ Comandos disponibles:
   /trace                 📊 Muestra el uso real de tokens de la última llamada
   /quit                  Sale del programa (alias: /exit)
 
+  Códigos de respuesta (solo la pregunta siguiente):
+  /truth                 Sin cortesía; crítica honesta y fallas
+  /human                 Tono natural y cercano
+  /nofluff               Sin saludos, rodeos ni relleno
+  /devil                 Abogado del diablo; busca puntos débiles
+  /decode                Traduce lenguaje técnico o legal
+  /genius                Muestra pasos verificables antes de concluir
+
 🐚 > ¿Qué ves en esta imagen?
 [Arrastra una imagen a la terminal]
 🖼️ Imagen adjunta: rejected_invoice.png
@@ -207,6 +215,8 @@ Comandos disponibles:
 ```
 
 `/session new` guarda la sesión actual y crea una nueva; `/memory migrate sqlite` cambia el backend de memoria; `/reload [skills|permissions|tools]` recarga las skills, los permisos persistidos o las herramientas y conexiones MCP (conservando el contexto).
+
+Los códigos de respuesta cambian solo el estilo de la siguiente pregunta y se consumen automáticamente: escribe `/devil` y luego tu pregunta, o `/devil ¿Qué fallos tiene este plan?` en una sola línea. No hay que desactivarlos; la pregunta siguiente vuelve al tono normal. No modifican las reglas de `AGENTS.md` ni los permisos.
 
 ## 🛡️ El Guardián de Seguridad (Permission Gate)
 

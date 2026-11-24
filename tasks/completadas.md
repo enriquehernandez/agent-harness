@@ -81,3 +81,8 @@
 
 - **Objetivo:** no enviar `cache_control` a modelos que no soportan esa extensión de la API compatible con OpenAI.
 - **Estado:** Completada. `_supports_prompt_caching(model)` comprueba que el nombre contenga `claude` o `anthropic` (sin distinción de mayúsculas); `OpenAICompatibleProvider.chat()` solo reescribe el mensaje `system` cuando la guardia pasa, sin mutar los mensajes del caller. Actualizado `docs/herramientas.md` y `.env.example`. Cubierto por `tests/core/test_openai_provider.py::test_prompt_caching_model_support` y `::test_openai_provider_prompt_caching_skipped_for_unsupported_model`, además del test de caching con `anthropic/claude-3-5-sonnet-20241022`.
+
+## Códigos de respuesta de un solo uso
+
+- **Objetivo:** añadir `/truth`, `/human`, `/nofluff`, `/devil`, `/decode` y `/genius` como códigos que cambian el estilo solo de la siguiente pregunta, sin `/normal`.
+- **Estado:** Completada (flujo de entrada de `app/tui/app.py` autorizado por el usuario). `MODE_INSTRUCTIONS` y `mode_message()` viven en `app/tui/commands.py`; el comando fija `pending_mode` (y `pending_question` si lleva texto inline). `_begin_pending_mode()`/`_end_pending_mode()` inyectan el mensaje temporal y lo retiran en `_stream_user_message()` y en la rama de imágenes de `on_input_submitted()`, por lo que no queda en el historial y la pregunta siguiente vuelve al tono normal. Los códigos están en `AVAILABLE_COMMANDS` y `/help`. Cubierto por tests parametrizados en `tests/tui/test_commands.py` y por `tests/tui/test_app.py` (texto, inline e imágenes); documentado en `README.md` y `docs/herramientas.md`.

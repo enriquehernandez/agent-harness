@@ -3,38 +3,14 @@
 > Recopilado tras la auditoría de los commits del 16–24 de noviembre de 2026.
 > Cada item corresponde a una afirmación que tuvo que corregirse en la documentación
 > porque el código **no implementa** esa funcionalidad (o la implementa de forma distinta).
-> No es el estado de la tarea actual: ver `tasks/actual.md`.
+> Las 4 tareas en ejecución están en `tasks/actual.md`; las completadas, en `tasks/completadas.md`.
 
 ## Prioridad alta — Tools y TUI
-
-- [ ] **Registrar una tool `edit_file` (o quitarla de las políticas).** La documentación
-      (`AGENTS.md`, `README.md`, `docs/herramientas.md`) y `app/core/harness/permissions.py`
-      mencionan `edit_file`, pero `register_core_tools()` (`app/tools/__init__.py`) no la registra.
-      Hoy un cambio puntual exige reescribir el archivo completo con `write_file`.
-      Escenario: el agente recibe una instrucción de edición quirúrgica y no puede hacerla
-      con el diff-first existente (`permissions.py`), que sí sabe generar diffs para `write_file`.
-
-- [ ] **Corregir las tools copiadas a los subagentes.** En la TUI se intentan copiar
-      `read_text_file`, `list_directory` y `bash` (`app/tui/app.py`),
-      pero los dos primeros no están en el registry: en la práctica el reviewer legacy y las
-      tools base A2A se quedan solo con `bash`. Implica usar `read_file` / `list_dir` o
-      registrar alias. Ver `PRODUCT_BLUEPRINT/02_COMPONENTS/05_subagents.md`.
 
 - [ ] **Heredar el contexto en el modo A2A `fork` desde la TUI.** Las estrategias copian
       `context.messages` cuando reciben un contexto, pero `OrchestratorTool.run()` pasa
       `context=None` (`app/core/harness/a2a/orchestrator.py`). El subagente arranca
       limpio aunque el doc diga lo contrario. Ver `PRODUCT_BLUEPRINT/02_COMPONENTS/08_a2a.md`.
-
-- [ ] **`Ctrl+L` debe limpiar también el `ContextManager`.** `action_clear_chat()`
-      limpia los widgets de la TUI, pero a diferencia de `/clear` no vacía el historial
-      (`app/tui/app.py`). Escenario: el usuario cree que empezó de cero y el LLM siga
-      recibiendo el contexto anterior.
-
-- [ ] **Unificar el formato de descripción de las tools MCP.** `MCPToolProxy` usa
-      `"[MCP:<servidor>] …"` (`app/mcp/client.py`), mientras `/tools`
-      (`app/tui/commands.py`) y `export_observations`
-      (`app/tools/observations.py`) buscan `"[MCP]"`: las tools remotas se clasifican
-      como «Locales».
 
 ## Prioridad media — Permisos, contexto y comandos
 

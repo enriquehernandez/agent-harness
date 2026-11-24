@@ -7,7 +7,7 @@ Cuando un agente usa herramientas muy pesadas (como leer 10 archivos para revisa
 Implementamos el patrón **Subagents-as-Tools**. El agente principal (Orquestador) tiene acceso a una herramienta llamada `delegate_to_reviewer`. 
 
 Cuando el Orquestador la invoca:
-1.  Se instancia un **nuevo AgentLoop** con su propio `ContextManager` y un `ToolRegistry` restringido (ej. solo puede leer archivos, no escribir).
+1.  Se instancia un **nuevo AgentLoop** con su propio `ContextManager` y un `ToolRegistry` restringido. En la TUI se intentan copiar `read_text_file`, `list_directory` y `bash` (`app/tui/app.py`), pero `read_text_file` y `list_directory` no están registrados (`register_core_tools()` registra `read_file`, `write_file`, `bash`, etc.), así que en la práctica solo queda `bash`. Además, `DelegateTool.run()` crea su propio `PermissionGate` y marca esas tools como `Decision.ALLOW` (`app/core/harness/subagents.py`): no usa el gate interactivo del padre.
 2.  El Subagente ejecuta la tarea de forma aislada.
 3.  Al terminar, devuelve **solo un resumen** al agente principal.
 

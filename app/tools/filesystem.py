@@ -48,6 +48,71 @@ class ReadFileTool(BaseTool):
             return ToolResult(success=False, content="", error=str(e))
 
 
+class EditFileTool(BaseTool):
+    def __init__(self, base_dir: str = "."):
+        self.name = "edit_file"
+        self.description = (
+            "Replace exact text in an existing file with a list of edits. "
+            "Each edit has 'oldText' and 'newText'."
+        )
+        self.parameters_schema = {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Relative path of the file to edit.",
+                },
+                "edits": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "oldText": {"type": "string"},
+                            "newText": {"type": "string"},
+                        },
+                        "required": ["oldText", "newText"],
+                    },
+                },
+            },
+            "required": ["path", "edits"],
+        }
+        self.base_dir = Path(base_dir).resolve()
+
+    async def run(self, path: str, edits: list[dict], **kwargs) -> ToolResult:
+        try:
+            target = (self.base_dir / path).resolve()
+            if not _is_within_base_dir(target, self.base_dir):
+                return ToolResult(success=False, content="", error="Access denied: outside base directory.")
+
+            if not target.is_file():
+                return ToolResult(success=False, content="", error=f"File '{path}' does not exist.")
+
+            content = target.read_text(encoding="utf-8")
+            for edit in edits:
+                old_text = edit.get("oldText", "")
+                new_text = edit.get("newText", "")
+                if not old_text:
+                    return ToolResult(
+                        success=False, content="",
+                        error="Empty 'oldText': no se puede editar el archivo."
+                    )
+                if old_text not in content:
+                    return ToolResult(
+                        success=False, content="",
+                        error=f"Text to replace not found: {old_text[:20]}..."
+                    )
+                content = content.replace(old_text, new_text)
+
+            target.write_text(content, encoding="utf-8")
+            return ToolResult(
+                success=True, content=f"File '{path}' updated with {len(edits)} edit(s)."
+            )
+        except Exception as e:
+            logger.error(f"EditFileTool: error editando '{path}': {e}")
+            return ToolResult(success=False, content="", error=str(e))
+
+
 class WriteFileTool(BaseTool):
     def __init__(self, base_dir: str = "."):
         self.name = "write_file"

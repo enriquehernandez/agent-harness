@@ -30,6 +30,64 @@ async def test_read_file_traversal_protection(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_edit_file_applies_edits(tmp_path):
+    from app.tools.filesystem import EditFileTool
+
+    target = tmp_path / "note.txt"
+    target.write_text("uno\ndos\nuno\n", encoding="utf-8")
+    tool = EditFileTool(base_dir=str(tmp_path))
+
+    result = await tool.run(path="note.txt", edits=[
+        {"oldText": "uno", "newText": "UNO"},
+        {"oldText": "dos", "newText": "DOS"},
+    ])
+
+    assert result.success is True
+    assert target.read_text(encoding="utf-8") == "UNO\nDOS\nUNO\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_is_registered_in_core_tools():
+    from app.core.harness.tool import ToolRegistry
+    from app.tools import register_core_tools
+
+    registry = ToolRegistry()
+    register_core_tools(registry)
+
+    assert registry.get("edit_file") is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path, edits, expected", [
+    ("../fuera.txt", [{"oldText": "a", "newText": "b"}], "Access denied"),
+    ("missing.txt", [{"oldText": "a", "newText": "b"}], "does not exist"),
+    ("note.txt", [{"oldText": "", "newText": "b"}], "oldText"),
+    ("note.txt", [{"oldText": "no está", "newText": "b"}], "not found"),
+])
+async def test_edit_file_rejects_invalid_input(tmp_path, path, edits, expected):
+    from app.tools.filesystem import EditFileTool
+
+    (tmp_path / "note.txt").write_text("contenido", encoding="utf-8")
+    result = await EditFileTool(base_dir=str(tmp_path)).run(path=path, edits=edits)
+
+    assert result.success is False
+    assert expected in result.error
+
+
+@pytest.mark.asyncio
+async def test_edit_file_read_error(tmp_path):
+    from app.tools.filesystem import EditFileTool
+
+    (tmp_path / "note.txt").write_text("contenido", encoding="utf-8")
+    with patch.object(Path, "read_text", side_effect=OSError("boom")):
+        result = await EditFileTool(base_dir=str(tmp_path)).run(
+            path="note.txt", edits=[{"oldText": "a", "newText": "b"}])
+
+    assert result.success is False
+    assert "boom" in result.error
+
+
+@pytest.mark.asyncio
 async def test_bash_tool_success():
     tool = BashTool()
     result = await tool.run(command="echo 'Hello'")

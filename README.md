@@ -225,17 +225,23 @@ Puedes ejecutar tus propios comandos cuando ocurre un evento (envío de un promp
 ```json
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "bash",
+        "hooks": [{ "type": "command", "command": "python3 .harness/hooks/no_delete.py" }]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "edit_file|write_file",
-        "hooks": [{ "type": "command", "command": "echo 'archivo editado' >> .harness/logs/hooks.log" }]
+        "hooks": [{ "type": "command", "command": "python3 .harness/hooks/audit.py" }]
       }
     ]
   }
 }
 ```
 
-Cada hook recibe el evento como JSON por stdin y tiene un timeout de `TOOL_TIMEOUT`. En esta fase solo observan: no pueden bloquear herramientas ni cambiar el contexto; si fallan, se registra un aviso y el agente sigue. `disableAllHooks: true` los apaga todos. Ver `PRODUCT_BLUEPRINT/02_COMPONENTS/11_hooks.md`.
+Cada hook recibe el evento como JSON por stdin y tiene un timeout de `TOOL_TIMEOUT`. Los hooks incluidos hacen dos cosas: `audit.py` registra las ediciones en `.harness/hooks/audit.log`, y `no_delete.py` impide que `bash` elimine archivos del proyecto. Cuando un hook devuelve `deny` (JSON con `hookSpecificOutput.permissionDecision`, o código 2 con el motivo en stderr), la herramienta **no se ejecuta** y el chat muestra `🚫 Bloqueado por un hook` con el motivo, aunque los permisos la hubieran permitido. Si el hook falla o devuelve una salida no válida, el agente sigue (fail-open). `disableAllHooks: true` los apaga todos. Ver `PRODUCT_BLUEPRINT/02_COMPONENTS/11_hooks.md`.
 
 ## 🛡️ El Guardián de Seguridad (Permission Gate)
 

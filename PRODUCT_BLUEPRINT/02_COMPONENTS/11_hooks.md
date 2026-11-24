@@ -10,47 +10,67 @@ La configuración vive en `.harness/hooks.json` (`settings.hooks_file`) y se car
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "bash",
         "hooks": [
-          { "type": "command", "command": "python .claude/hooks/audit.py" }
+          { "type": "command", "command": "python3 .harness/hooks/no_delete.py" }
         ]
       }
     ],
-    "Stop": [
-      { "hooks": [{ "type": "command", "command": "echo 'turno terminado' >> .harness/logs/hooks.log" }] }
+    "PostToolUse": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [
+          { "type": "command", "command": "python3 .harness/hooks/audit.py" }
+        ]
+      }
     ]
   }
 }
 ```
 
 - `matcher` admite alternativas separadas por `|` y solo filtra `PreToolUse`/`PostToolUse` por nombre de herramienta; vacío significa «todas». En el resto de eventos se ignora.
-- Solo se aceptan handlers `type: command` (fase 1). Los tipos `http`, `prompt` y `agent` quedan para fases posteriores.
+- Solo se aceptan handlers `type: command` (fase 1). Los tipos `http`, `prompt` y `agent` quedan para la fase 3.
 - `disableAllHooks: true` desactiva todos los hooks sin borrar la configuración.
+- Los scripts de hooks van en `.harness/hooks/` y se versionan; los logs que generan (`audit.log`) quedan ignorados.
 
 ## Arquitectura
 
-`app/core/harness/hooks.py` contiene tres piezas:
+`app/core/harness/hooks.py` contiene cuatro piezas:
 
-- `HookEvent`: payload con `hook_event_name`, `session_id`, `cwd`, `prompt`, `tool_name`, `tool_input`, `success`, `trigger`, `agent_name` y `agent_depth`. Los campos vacíos se omiten al serialize.
+- `HookEvent`: payload con `hook_event_name`, `session_id`, `cwd`, `prompt`, `tool_name`, `tool_input`, `success`, `trigger`, `agent_name` y `agent_depth`. Los campos vacíos se omiten al serializar.
+- `HookOutcome`: resultado del evento (`denied`, `reason`). Lo produce `from_process()` a partir de la salida del comando.
 - `HookRegistry`: carga y filtra los handlers por evento y herramienta, siguiendo el Registry Pattern.
 - `HookManager`: lee el JSON, lanza cada comando con `asyncio.create_subprocess_shell()` y pasa el evento por **stdin** como JSON. El comando sale de la configuración (archivo de confianza); los datos del evento nunca se interpolan en la cadena. Se aplica `settings.TOOL_TIMEOUT` y, si expira, se mata el proceso.
 
 `emit_hook(event)` es la única fachada pública; el módulo mantiene un `hook_manager` compartido.
 
-## Puntos de disparo (fase 1)
+## Puntos de disparo
 
 | Evento | Dónde se dispara |
 | :--- | :--- |
 | `UserPromptSubmit` | Envío de prompts de la TUI (`_stream_user_message()` y rama de imágenes de `on_input_submitted()`) y en `AgentLoop.run()` para el modo headless |
-| `PreToolUse` / `PostToolUse` | `AgentLoop._execute_tool()`, antes de permisos y al terminar (éxito, denegación, tool no encontrada o fallo) |
+| `PreToolUse` / `PostToolUse` | `AgentLoop._execute_tool()`, antes de permisos y al terminar (éxito, denegación, bloqueo por hook, tool no encontrada o fallo) |
 | `PreCompact` / `PostCompact` | `ContextManager.maybe_compact()` (`trigger: auto`) y `force_compact()` (`trigger: manual`) |
 | `Stop` | Final de `AgentLoop.run()` y de `AgentLoop.stream()` (respuesta final o máximo de iteraciones) |
 | `StopFailure` | Ramas de timeout y excepción de `AgentLoop.stream()` |
 
 Los eventos de subagentes A2A incluyen `agent_name`/`agent_depth` para poder filtrarlos.
 
-## Contrato de la fase 1
+## Decisiones: bloqueo de herramientas
 
-- **Observación pura:** la salida del hook se ignora; no puede bloquear herramientas ni inyectar contexto. Esas decisiones se reservan para la fase 2.
-- **Fail-open:** un JSON inválido, un comando que no existe, un código de salida distinto de cero o un timeout solo generan un aviso con `logger.warning` y no interrumpen al agente.
+Un handler `command` puede impedir la ejecución de la herramienta en dos formatos compatibles con Claude Code:
+
+1. Terminar con **código 2** y escribir el motivo en `stderr` (si stderr está vacío se usa un motivo genérico).
+2. Escribir en `stdout` un JSON con `hookSpecificOutput.permissionDecision: "deny"` y `hookSpecificOutput.permissionDecisionReason`. También se reconoce el formato genérico `decision: "block"` con `reason`.
+
+`HookManager.emit()` ejecuta los hooks en orden y devuelve el **primer deny**, sin lanzar los restantes. `AgentLoop._execute_tool()` consulta el resultado **antes de `PermissionGate.check()`**, de modo que el deny prevalece sobre `allow`: no llama a la herramienta, escribe el motivo en el resultado de la tool y marca `last_hook_denial`. En `stream()`, ese estado produce el evento `AgentEvent(type="hook_denied", data={"tool": ..., "message": ...})`; `stream_to_chat()` lo muestra como `🚫 **Bloqueado por un hook:** ...` sin interrumpir el turno.
+
+### Guardia `no_delete.py`
+
+`.harness/hooks/no_delete.py` es un hook `PreToolUse` con matcher `bash`. Lee el evento por stdin y, si `tool_input.command` contiene `rm`, `rmdir`, `unlink`, `shred`, `git rm`, `find ... -delete`, `os.remove`, `os.unlink`, `Path(...).unlink()` o `shutil.rmtree()`, devuelve el JSON `deny` con el comando bloqueado en el motivo. El análisis es conservador: ante la duda, bloquea. Las órdenes sin borrado no escriben nada y la herramienta continúa.
+
+## Fail-open y límites
+
+- Un JSON de configuración inválido, un comando que no existe, un código de salida distinto de cero (salvo el 2 con motivo), un stdout vacío o no parseable y un timeout solo generan `logger.warning` y permiten la acción.
 - La compactación y el Permission Gate siguen funcionando igual: los hooks son aditivos.
+- Resto de la fase 2 (feed-back de `Stop`/`PostToolUse` e `additionalContext`) y fase 3 (tipos avanzados, matchers completos y `/hooks`) siguen pendientes en `tasks/pendientes.md`.

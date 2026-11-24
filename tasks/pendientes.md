@@ -5,18 +5,6 @@
 > porque el código **no implementa** esa funcionalidad (o la implementa de forma distinta).
 > Las tareas en ejecución están en `tasks/actual.md`; las completadas, en `tasks/completadas.md`.
 
-## Prioridad media — Permisos, contexto y comandos
-
-- [ ] **Inyectar `docs/` y `checks/` en el system prompt, o quitar la afirmación del prompt.**
-      `app/tui/app.py` solo lee `AGENTS.md`, `tasks/actual.md` y el `preamble()` de
-      memoria; el texto del prompt afirma que «everything else below (docs, …) is background
-      context» aunque esos archivos no se cargan. Escenario: el agente intente responder sobre
-      `docs/arquitectura.md` sin herramientas de lectura disponibles.
-
-- [ ] **Alinear el proveedor por defecto.** `settings.LLM_PROVIDER` es `fake`
-      (`app/core/config.py`), pero `.env.example` fija `openrouter`. Tras
-      `cp .env.example .env`, el default efectivo es OpenRouter y requiere API key.
-
 ## Prioridad media — Documentos y calidad
 
 - [ ] **Extraer texto de `.doc`, `.xls` y `.ppt`.** `FileAwareInput`

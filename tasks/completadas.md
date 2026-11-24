@@ -3,7 +3,7 @@
 ## Refactorización de contexto en texto plano
 
 - **Objetivo:** Refactorizar el proyecto para usar la estructura de contexto en texto plano (`AGENTS.md`, `docs/`, `tasks/`, `checks/`).
-- **Estado:** Completada en el arranque del contexto: `app/tui/app.py` lee `AGENTS.md` y `tasks/actual.md` y añade el `preamble()` de la memoria al System Prompt (`[Long-term memory]`). `docs/` y `checks/` **no** se leen ni se inyectan: el texto del prompt solo los menciona como «everything else below … is BACKGROUND CONTEXT»; el agente debe consultarlos con herramientas cuando los necesita.
+- **Estado:** Completada en el arranque del contexto: `app/tui/app.py` lee `AGENTS.md` y `tasks/actual.md` y añade el `preamble()` de la memoria al System Prompt (`[Long-term memory]`). `docs/` y `checks/` **no** se leen ni se inyectan: el agente debe consultarlos con herramientas cuando los necesita. El prompt mencionaba `docs/` como «everything else below … is BACKGROUND CONTEXT»; se corrigió después (ver entrada «Corrección del system prompt sobre docs/»).
 
 ## Ctrl+L limpia también el `ContextManager`
 
@@ -60,3 +60,13 @@
 
 - **Objetivo:** que el subagente distinga el historial heredado de la tarea que debe ejecutar.
 - **Estado:** Completada. `A2AStrategy._fork_context()` añade un mensaje `user` de continuación justo después del historial heredado (solo si hay mensajes heredados); `AgentLoop.run()` añade la tarea en el mensaje siguiente. No se añade nada en modo `isolated` ni cuando el contexto no tiene historial. Cubierto por tests en `tests/core/test_a2a.py`.
+
+## Corrección del system prompt sobre `docs/`
+
+- **Objetivo:** que el prompt no afirme que `docs/` se inyecta como BACKGROUND CONTEXT cuando solo se cargan `AGENTS.md`, `tasks/actual.md` y la memoria.
+- **Estado:** Completada. Se quitó `docs,` de la frase del system prompt en `app/tui/app.py`; se optó por corregir la afirmación en lugar de cargar `docs/` y `checks/`, porque `AGENTS.md` ya indica leerlos bajo demanda. Actualizado `docs/herramientas.md`. Cubierto por `tests/tui/test_app.py::test_system_prompt_does_not_claim_docs_are_injected`.
+
+## Alinear el proveedor por defecto
+
+- **Objetivo:** que `cp .env.example .env` no cambie el proveedor respecto al default del código.
+- **Estado:** Completada. `.env.example` usa ahora `LLM_PROVIDER=fake`, igual que `Settings.LLM_PROVIDER`, y explica cómo cambiar a un proveedor real. Actualizado `README.md` y el comentario sobre los modelos por agente A2A. Cubierto por `tests/core/test_llm_factory.py::test_env_example_provider_matches_settings_default`.

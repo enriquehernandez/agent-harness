@@ -135,7 +135,7 @@ uv sync
 
 2. Configurar variables de entorno:
 
-Copia el archivo de ejemplo y configura tu proveedor de IA. Ojo: el valor por defecto en el código es `fake` (`app/core/config.py`), pero `.env.example` fija `openrouter`; al copiarlo, pon tu API key o cambia el proveedor a `fake` si quieres trabajar sin coste:
+Copia el archivo de ejemplo. El proveedor por defecto es `fake`, tanto en `app/core/config.py` como en `.env.example`, así que la TUI arranca sin API key. Para usar un proveedor real, cambia `LLM_PROVIDER` y añade su clave:
 
 ```bash
 cp .env.example .env
@@ -144,10 +144,13 @@ cp .env.example .env
 Edita el `.env`:
 
 ```env
-# Puedes usar openai, openrouter, groq o fake
-LLM_PROVIDER=openrouter
-OPENROUTER_API_KEY=sk-or-v1-tu_api_key_aqui
-OPENROUTER_MODEL=openai/gpt-4o
+# Puedes usar openai, openrouter, groq o fake; `fake` no necesita API key
+LLM_PROVIDER=fake
+
+# Para usar OpenRouter, cambia lo anterior y rellena la key:
+# LLM_PROVIDER=openrouter
+# OPENROUTER_API_KEY=sk-or-v1-tu_api_key_aqui
+# OPENROUTER_MODEL=openai/gpt-4o
 ```
 
 3. Levantar la TUI:

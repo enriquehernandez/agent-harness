@@ -66,22 +66,13 @@ test-integration = "uv run pytest tests/integration/* -v -s"
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
-    "raise NotImplementedError",
     '^\s*\.\.\.\s*$',
-    '@abstractmethod',
-    '^\s*return self\._max_tokens$',
-    '^\s*return len\(text\) // 4$',
     '^\s*except.*:\s*$',
-    '^\s*pass\s*$',
     '^\s*continue\s*$',
     '^\s*def on_',
-    '^\s*def action_',
     '^\s*def watch_',
     '^\s*def compose',
-    '^\s*BINDINGS =',
-    '^\s*CSS =',
-    # 🔥 Exclusiones para las líneas que el intérprete no alcanza en los tests
-    '^\s*if not event',
+    # 🔥 Líneas que el intérprete no alcanza en los tests
     '^\s*return$',
 ]
 

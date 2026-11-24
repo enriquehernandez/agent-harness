@@ -23,6 +23,7 @@ A diferencia de otros proyectos, este Harness no está atado a un solo LLM ni a 
    - [Agent-to-Agent (A2A)](02_COMPONENTS/08_a2a.md)
    - [Renderizado de Imágenes en la TUI](02_COMPONENTS/09_rich_rendering.md)
    - [Document Reading](02_COMPONENTS/10_document_reading.md)
+   - [Hooks del ciclo de vida](02_COMPONENTS/11_hooks.md)
 4. **Seguridad y Auditoría**
    - [Estrategia de Testing con Textual](03_SECURITY_AND_AUDIT/01_testing_y_mocks.md)
    - [Seguridad en A2A](03_SECURITY_AND_AUDIT/02_a2a_security.md)

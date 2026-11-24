@@ -218,6 +218,25 @@ Comandos disponibles:
 
 Los códigos de respuesta cambian solo el estilo de la siguiente pregunta y se consumen automáticamente: escribe `/devil` y luego tu pregunta, o `/devil ¿Qué fallos tiene este plan?` en una sola línea. No hay que desactivarlos; la pregunta siguiente vuelve al tono normal. No modifican las reglas de `AGENTS.md` ni los permisos.
 
+## 🪝 Hooks del ciclo de vida
+
+Puedes ejecutar tus propios comandos cuando ocurre un evento (envío de un prompt, antes y después de usar una herramienta, antes y después de compactar, fin del turno). Se configuran una vez en `.harness/hooks.json` y se disparan solos; no hay que escribir ningún comando en la TUI:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [{ "type": "command", "command": "echo 'archivo editado' >> .harness/logs/hooks.log" }]
+      }
+    ]
+  }
+}
+```
+
+Cada hook recibe el evento como JSON por stdin y tiene un timeout de `TOOL_TIMEOUT`. En esta fase solo observan: no pueden bloquear herramientas ni cambiar el contexto; si fallan, se registra un aviso y el agente sigue. `disableAllHooks: true` los apaga todos. Ver `PRODUCT_BLUEPRINT/02_COMPONENTS/11_hooks.md`.
+
 ## 🛡️ El Guardián de Seguridad (Permission Gate)
 
 Si el agente intenta ejecutar una herramienta sensible, el Harness pausará la ejecución y te mostrará un panel interactivo con los argumentos y, si aplica, un **diff de los cambios**:

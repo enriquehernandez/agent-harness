@@ -1,6 +1,6 @@
 # Tarea Actual
 
-No quedan tareas en ejecución. Las tareas terminadas están en `tasks/completadas.md`; el resto del inventario, en `tasks/pendientes.md`.
+No quedan tareas en ejecución. La fase 1 de los hooks terminó y está en `tasks/completadas.md`; las fases 2 y 3 siguen en `tasks/pendientes.md`.
 
 ## Notas
 

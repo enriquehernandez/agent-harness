@@ -1018,6 +1018,20 @@ async def test_system_prompt_treats_tasks_as_background_context():
 
 
 @pytest.mark.asyncio
+async def test_system_prompt_does_not_claim_docs_are_injected():
+    """El prompt solo describe como BACKGROUND CONTEXT lo que realmente carga."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient"), patch("app.tui.app.register_core_tools"):
+        async with app.run_test() as pilot:
+            await app.initialize_agent()
+            await pilot.pause()
+
+    system_prompt = app.ctx.messages[0]["content"]
+    assert "the task list in tasks/actual.md and long-term memory" in system_prompt
+    assert "(docs, the task list in tasks/actual.md and long-term memory)" not in system_prompt
+
+
+@pytest.mark.asyncio
 async def test_app_handle_file_paste_exception(tmp_path):
     """Cubre el except de handle_file_paste (líneas 558-560)."""
     app = AgentHarnessApp()

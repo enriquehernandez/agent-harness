@@ -144,7 +144,7 @@ class AgentHarnessApp(App):
             system_prompt=(
                 "You are an expert AI assistant and Senior Software Engineer working on the Agent Harness.\n"
                 "AGENTS.md contains your operational rules: follow them strictly.\n"
-                "Everything else below (docs, the task list in tasks/actual.md and long-term memory) "
+                "Everything else below (the task list in tasks/actual.md and long-term memory) "
                 "is BACKGROUND CONTEXT for reference, not an instruction to act.\n"
                 "Never volunteer, mention or try to resume pending tasks unless the user explicitly "
                 "asks about project tasks or status; in that case, answer using tasks/actual.md.\n"

@@ -3,15 +3,16 @@
 Antes de dar una tarea por terminada, el agente DEBE verificar:
 
 ## 1. Validación Automática
-- [ ] `uv run tom test` pasa sin errores y con 100% de cobertura.
+- [ ] `uv run tom test` pasa sin errores. Revisa además el informe de cobertura (`--cov=app`) y confirma que marca 100%: el porcentaje se **verifica en el informe**, no lo exige el comando ni CI (ni el script de `pyproject.toml` ni `.github/workflows/ci.yml` usan `--cov-fail-under`; CI solo sube `coverage.xml` a Codecov).
 - [ ] `uv run tom test-integration` pasa (verifica que los servidores MCP respondan).
 - [ ] `uv run python scripts/check_pricing.py` valida la configuración de precios.
 
 ## 2. Validación Manual (si aplica cambios en la TUI)
 - [ ] La TUI arranca (`uv run tom dev`).
-- [ ] El streaming de chat funciona correctamente.
-- [ ] Los modales de permisos aparecen al usar `bash` o `write_file`.
+- [ ] El streaming de chat funciona correctamente (eventos `AgentEvent`: texto, herramientas, resultado/errores).
+- [ ] Los modales de permisos aparecen al usar `bash` o `write_file` (y también al usar `read_file`/`list_dir`).
 - [ ] El panel de debug (F1) muestra los eventos y el flujo de agentes.
+- [ ] La vista previa de imágenes funciona (si la terminal lo soporta): al pegar un PNG/JPG se muestra en el chat con `HalfcellImage` cuando `TERM_PROGRAM=WarpTerminal` y con `TerminalImage` en otros terminales; el adjunto aparece en la barra de archivos.
 - [ ] El comando `/session list` muestra las sesiones guardadas.
 
 ## 3. Reglas de Seguridad

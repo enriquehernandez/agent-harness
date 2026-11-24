@@ -50,3 +50,8 @@
 
 - **Objetivo:** que `ParallelStrategy` respete las aprobaciones persistidas y que los subagentes (A2A y `DelegateTool`) no pierdan las aprobaciones del padre.
 - **Estado:** Completada. `A2AStrategy._child_gate()` centraliza la creación del gate para las cuatro estrategias y carga `.harness/permissions.json` en todas, incluida `parallel`. `PermissionGate.child()` comparte `session_allowed`, `ask_user` y `persist_file` con el padre, copia las `policies` y permite `allow=` para las tools propias del reviewer. La TUI pasa su gate a `DelegateTool`. Nota: el test de regresión mostró que el constructor de `PermissionGate` ya cargaba el archivo, así que el fallo real era la copia aislada de `session_allowed`, no la carga en `parallel`. Cubierto por tests en `tests/core/test_a2a.py`, `tests/core/test_permissions.py` y `tests/core/test_subagents.py`.
+
+## Heredar el contexto en el modo A2A `fork`
+
+- **Objetivo:** que un subagente `fork` reciba la conversación de la TUI al delegar, sin cambiar la firma de `BaseTool.run()`.
+- **Estado:** Completada. `OrchestratorTool` acepta un `context_provider` opcional que la TUI resuelve en cada llamada (`lambda: self.ctx`), por lo que sobrevive a `/reload tools` y a `/session new`. `A2AStrategy._fork_context()` centraliza la preparación del contexto en las cuatro estrategias: hereda los mensajes no-`system` del padre y mantiene el `system_prompt` del `AgentCard`, evitando que las reglas del orquestador se conviertan en instrucciones del subagente. Cubierto por tests en `tests/core/test_a2a.py` y `tests/tui/test_app.py`.

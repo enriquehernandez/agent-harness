@@ -5,13 +5,6 @@
 > porque el código **no implementa** esa funcionalidad (o la implementa de forma distinta).
 > Las tareas en ejecución están en `tasks/actual.md`; las completadas, en `tasks/completadas.md`.
 
-## Prioridad alta — Tools y TUI
-
-- [ ] **Heredar el contexto en el modo A2A `fork` desde la TUI.** Las estrategias copian
-      `context.messages` cuando reciben un contexto, pero `OrchestratorTool.run()` pasa
-      `context=None` (`app/core/harness/a2a/orchestrator.py`). El subagente arranca
-      limpio aunque el doc diga lo contrario. Ver `PRODUCT_BLUEPRINT/02_COMPONENTS/08_a2a.md`.
-
 ## Prioridad media — Permisos, contexto y comandos
 
 - [ ] **Inyectar `docs/` y `checks/` en el system prompt, o quitar la afirmación del prompt.**

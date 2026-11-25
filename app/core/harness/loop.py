@@ -11,7 +11,9 @@ from ..llm.base import BaseLLM, LLMResponse
 from .tool import ToolRegistry, ToolResult
 from .permissions import PermissionGate, Decision
 from .context import ContextManager
-from .hooks import HookEvent, HookOutcome, emit_hook, hook_manager
+from .hooks import (
+    HookEvent, HookOutcome, emit_hook, hook_context_active, hook_manager,
+)
 
 
 def _init_langfuse():
@@ -90,6 +92,8 @@ class AgentLoop:
     @staticmethod
     def _inject_hook_context(ctx: ContextManager) -> None:
         """Inyecta el `additionalContext` pendiente antes de llamar al LLM."""
+        if not hook_context_active():
+            return
         context = hook_manager.drain_context()
         if context:
             ctx.append_hook_context(context)
@@ -97,6 +101,8 @@ class AgentLoop:
     @staticmethod
     def _finish_hook_context(ctx: ContextManager) -> None:
         """Retira el mensaje temporal y descarta contexto que no se usó."""
+        if not hook_context_active():
+            return
         ctx.remove_hook_context()
         hook_manager.drain_context()
 

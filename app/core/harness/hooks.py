@@ -1,17 +1,22 @@
 """Hooks de ciclo de vida estilo Claude Code.
 
 Los hooks se leen de ``.harness/hooks.json`` al arrancar y se disparan
-automáticamente desde los puntos de extensión del harness. Solo se aceptan
-handlers ``command``: reciben el evento como JSON por stdin. Un hook roto nunca
-interrumpe al agente (fail-open), pero sus decisiones de bloqueo se respetan.
+automáticamente desde los puntos de extensión del harness. Hay cuatro tipos:
+``command``, ``http``, ``prompt`` y ``agent``. Un hook roto nunca interrumpe
+al agente (fail-open), pero sus decisiones de bloqueo se respetan.
 """
 
 import asyncio
+import fnmatch
 import json
 import os
+import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from app.core.config import settings
 from app.core.logger import logger
@@ -28,6 +33,22 @@ SUPPORTED_EVENTS = frozenset({
 })
 TOOL_EVENTS = frozenset({"PreToolUse", "PostToolUse"})
 CONTEXT_EVENTS = frozenset({"UserPromptSubmit", "PreToolUse", "PostToolUse"})
+HOOK_TYPES = frozenset({"command", "http", "prompt", "agent"})
+AGENT_HOOK_TIMEOUT = 60.0
+PROMPT_HOOK_SYSTEM = (
+    "Decide si la acción del agente debe continuar. Responde solo un JSON con "
+    '{"ok": true|false, "reason": "...", "additionalContext": "..."}. '
+    '`ok: false` bloquea la acción; `additionalContext` se entrega al modelo.'
+)
+
+# Los hooks `agent` ejecutan un AgentLoop. Este guardián evita que sus propios
+# eventos vuelvan a disparar los hooks (doble disparo / recursión).
+_hook_depth: ContextVar[int] = ContextVar("hook_depth", default=0)
+
+
+def hook_context_active() -> bool:
+    """Falso dentro de un hook `agent`: su loop anidado no debe drenar contexto."""
+    return _hook_depth.get() == 0
 
 
 @dataclass
@@ -90,6 +111,45 @@ class HookOutcome:
         return str(value).strip() if value else ""
 
     @classmethod
+    def from_text(
+        cls, text: str | None, plain_is_context: bool = False
+    ) -> "HookOutcome":
+        """Parsea la salida de un hook (JSON o texto plano).
+
+        Acepta los formatos de Claude Code (``permissionDecision`` y
+        ``decision: block``), la clave ``ok: false`` de los hooks `prompt` y
+        ``additionalContext``. Si se espera JSON y llega texto plano, este se
+        conserva como contexto cuando ``plain_is_context`` es verdadero.
+        """
+        text = (text or "").strip()
+        if not text:
+            return cls()
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return cls(additional_context=text) if plain_is_context else cls()
+        if not isinstance(payload, dict):
+            return cls(additional_context=text) if plain_is_context else cls()
+
+        context = cls._extract_context(payload)
+        denied = False
+        reason = ""
+        if payload.get("ok") is False:
+            denied = True
+            reason = str(payload.get("reason") or "El hook no aprobó la acción.")
+        specific = payload.get("hookSpecificOutput")
+        if isinstance(specific, dict) and specific.get("permissionDecision") == "deny":
+            denied = True
+            reason = str(
+                specific.get("permissionDecisionReason")
+                or "El hook bloqueó la acción."
+            )
+        if payload.get("decision") == "block":
+            denied = True
+            reason = str(payload.get("reason") or "El hook bloqueó la acción.")
+        return cls(denied=denied, reason=reason, additional_context=context)
+
+    @classmethod
     def from_process(
         cls, returncode: int, stdout: bytes, stderr: bytes
     ) -> "HookOutcome":
@@ -100,32 +160,16 @@ class HookOutcome:
                 denied=True,
                 reason=reason or "El hook bloqueó la acción (código 2).",
             )
-
-        if stdout:
-            try:
-                payload = json.loads(stdout.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                payload = None
-            if isinstance(payload, dict):
-                context = cls._extract_context(payload)
-                specific = payload.get("hookSpecificOutput")
-                if isinstance(specific, dict) and specific.get("permissionDecision") == "deny":
-                    reason = specific.get("permissionDecisionReason") or "El hook bloqueó la acción."
-                    return cls(denied=True, reason=str(reason),
-                               additional_context=context)
-                if payload.get("decision") == "block":
-                    reason = payload.get("reason") or "El hook bloqueó la acción."
-                    return cls(denied=True, reason=str(reason),
-                               additional_context=context)
-                return cls(additional_context=context)
-        return cls()
+        if not stdout:
+            return cls()
+        return cls.from_text(stdout.decode("utf-8", errors="replace"))
 
 
 class HookRegistry:
-    """Registro de handlers por evento, con filtro por nombre de herramienta."""
+    """Registro de handlers por evento, con filtro por herramienta y regla `if`."""
 
     def __init__(self, config: dict | None = None):
-        self.handlers: dict[str, list[dict[str, str]]] = {}
+        self.handlers: dict[str, list[dict[str, Any]]] = {}
         self.disabled_all = False
         if config is not None:
             self.load(config)
@@ -140,7 +184,7 @@ class HookRegistry:
         for event_name, groups in events.items():
             if event_name not in SUPPORTED_EVENTS or not isinstance(groups, list):
                 continue
-            entries: list[dict[str, str]] = []
+            entries: list[dict[str, Any]] = []
             for group in groups:
                 if not isinstance(group, dict):
                     continue
@@ -148,17 +192,74 @@ class HookRegistry:
                 for handler in group.get("hooks", []):
                     if not isinstance(handler, dict):
                         continue
-                    if handler.get("type", "command") != "command":
+                    kind = handler.get("type", "command")
+                    if kind not in HOOK_TYPES:
                         continue
-                    command = handler.get("command", "")
-                    if command:
-                        entries.append({"matcher": matcher, "command": command})
+                    main_key = {"command": "command", "http": "url"}.get(
+                        kind, "prompt")
+                    value = handler.get(main_key, "")
+                    if not value:
+                        continue
+                    entry: dict[str, Any] = {"matcher": matcher}
+                    if kind != "command":
+                        entry["type"] = kind
+                    entry[main_key] = value
+                    for key in ("if", "model", "provider", "tools", "timeout"):
+                        if key in handler:
+                            entry[key] = handler[key]
+                    entries.append(entry)
             if entries:
                 self.handlers[event_name] = entries
 
+    @staticmethod
+    def _matches(matcher: str, tool_name: str | None) -> bool:
+        """Acepta nombres exactos, alternativas `|` y regex (`mcp__.*`)."""
+        if not matcher:
+            return True
+        for alternative in matcher.split("|"):
+            candidate = alternative.strip()
+            if not candidate:
+                continue
+            if any(char in candidate for char in "*^$[]()\\"):
+                try:
+                    if re.fullmatch(candidate, tool_name or ""):
+                        return True
+                except re.error as exc:
+                    logger.warning(f"Matcher de hook inválido '{candidate}': {exc}")
+            elif candidate == tool_name:
+                return True
+        return False
+
+    @staticmethod
+    def _signature(tool_name: str | None, tool_input: dict) -> str:
+        """Firma `herramienta:detalle`, igual que las reglas de permisos."""
+        if tool_name == "bash":
+            return f"bash:{tool_input.get('command', '').strip()}"
+        if tool_name in ("write_file", "edit_file"):
+            return f"{tool_name}:{tool_input.get('path', '')}"
+        return tool_name or ""
+
+    @classmethod
+    def _passes_if(
+        cls, entry: dict, tool_name: str | None, tool_input: dict | None
+    ) -> bool:
+        rule = entry.get("if")
+        if not rule:
+            return True
+        patterns = [rule] if isinstance(rule, str) else rule
+        if not isinstance(patterns, list):
+            return True
+        signature = cls._signature(tool_name, tool_input or {})
+        return any(
+            fnmatch.fnmatch(signature, str(pattern)) for pattern in patterns
+        )
+
     def for_event(
-        self, event_name: str, tool_name: str | None = None
-    ) -> list[dict[str, str]]:
+        self,
+        event_name: str,
+        tool_name: str | None = None,
+        tool_input: dict | None = None,
+    ) -> list[dict[str, Any]]:
         if self.disabled_all:
             return []
         entries = self.handlers.get(event_name, [])
@@ -166,10 +267,8 @@ class HookRegistry:
             return list(entries)
         return [
             entry for entry in entries
-            if not entry["matcher"]
-            or tool_name in {
-                name.strip() for name in entry["matcher"].split("|")
-            }
+            if self._matches(entry["matcher"], tool_name)
+            and self._passes_if(entry, tool_name, tool_input)
         ]
 
 
@@ -181,16 +280,42 @@ class HookManager:
         config_file: Path | None = None,
         registry: HookRegistry | None = None,
         timeout: float | None = None,
+        llm=None,
+        tools=None,
+        permissions=None,
     ):
         self.config_file = (
             Path(config_file) if config_file is not None else settings.hooks_file
         )
         self.registry = registry or HookRegistry()
         self.timeout = settings.TOOL_TIMEOUT if timeout is None else timeout
+        self.llm = llm
+        self.tools = tools
+        self.permissions = permissions
         self.pending_context = ""
+        self.errors: dict[str, str] = {}
+        self._mtime: float | None = None
         self.reload()
 
+    @staticmethod
+    def _handler_key(event_name: str, entry: dict) -> str:
+        target = (
+            entry.get("command") or entry.get("url") or entry.get("prompt") or "?"
+        )
+        return f"{event_name}|{entry.get('type', 'command')}|{target}"
+
+    def _record_error(self, event_name: str, entry: dict, message: Any) -> None:
+        self.errors[self._handler_key(event_name, entry)] = str(message)[:300]
+
+    def _stat_mtime(self) -> float | None:
+        try:
+            return self.config_file.stat().st_mtime
+        except OSError:
+            return None
+
     def reload(self) -> None:
+        self._mtime = self._stat_mtime()
+        self.errors.clear()
         if not self.config_file.exists():
             self.registry.load({})
             return
@@ -204,18 +329,27 @@ class HookManager:
             return
         self.registry.load(config if isinstance(config, dict) else {})
 
+    def reload_if_changed(self) -> bool:
+        """Hot-reload: vuelve a leer el archivo si cambió su mtime."""
+        mtime = self._stat_mtime()
+        if mtime == self._mtime:
+            return False
+        self.reload()
+        return True
+
     async def emit(self, event: HookEvent) -> HookOutcome:
         """Ejecuta los hooks en orden; el primer deny gana y corta la cadena.
 
         Los ``additionalContext`` se concatenan y quedan pendientes para la
         siguiente llamada al LLM en los eventos que lo permiten.
         """
+        self.reload_if_changed()
         contexts: list[str] = []
         denial: HookOutcome | None = None
-        for handler in self.registry.for_event(
-            event.hook_event_name, event.tool_name
+        for entry in self.registry.for_event(
+            event.hook_event_name, event.tool_name, event.tool_input
         ):
-            outcome = await self._launch(handler["command"], event)
+            outcome = await self._run_handler(entry, event)
             if outcome.additional_context:
                 contexts.append(outcome.additional_context)
             if outcome.denied:
@@ -232,13 +366,18 @@ class HookManager:
             additional_context=aggregated,
         )
 
-    def drain_context(self) -> str:
-        """Devuelve y limpia el contexto pendiente (un solo uso por turno)."""
-        context = self.pending_context
-        self.pending_context = ""
-        return context
+    async def _run_handler(self, entry: dict, event: HookEvent) -> HookOutcome:
+        kind = entry.get("type", "command")
+        if kind == "command":
+            return await self._launch(entry, event)
+        if kind == "http":
+            return await self._launch_http(entry, event)
+        if kind == "prompt":
+            return await self._launch_prompt(entry, event)
+        return await self._launch_agent(entry, event)
 
-    async def _launch(self, command: str, event: HookEvent) -> HookOutcome:
+    async def _launch(self, entry: dict, event: HookEvent) -> HookOutcome:
+        command = entry["command"]
         payload = json.dumps(event.to_dict(), ensure_ascii=False).encode("utf-8")
         process = None
         stdout_output, stderr_output = b"", b""
@@ -257,6 +396,7 @@ class HookManager:
                 process.kill()
                 await process.wait()
             logger.warning(f"Hook '{command}' falló: {exc}")
+            self._record_error(event.hook_event_name, entry, exc)
             return HookOutcome()
 
         if process.returncode != 0:
@@ -264,8 +404,132 @@ class HookManager:
             logger.warning(
                 f"Hook '{command}' terminó con código {process.returncode}: {stderr}"
             )
+            if process.returncode != 2:
+                self._record_error(
+                    event.hook_event_name, entry, stderr or f"código {process.returncode}")
         return HookOutcome.from_process(
             process.returncode, stdout_output, stderr_output)
+
+    async def _launch_http(self, entry: dict, event: HookEvent) -> HookOutcome:
+        url = entry["url"]
+        try:
+            async with httpx.AsyncClient(
+                timeout=entry.get("timeout", self.timeout)
+            ) as client:
+                response = await client.post(url, json=event.to_dict())
+        except Exception as exc:
+            logger.warning(f"Hook http '{url}' falló: {exc}")
+            self._record_error(event.hook_event_name, entry, exc)
+            return HookOutcome()
+        if response.status_code >= 400:
+            logger.warning(
+                f"Hook http '{url}' respondió HTTP {response.status_code}")
+            self._record_error(
+                event.hook_event_name, entry, f"HTTP {response.status_code}")
+            return HookOutcome()
+        return HookOutcome.from_text(response.text)
+
+    def _llm_for(self, entry: dict):
+        """LLM inyectado o construido desde la configuración del hook."""
+        if self.llm is not None:
+            return self.llm
+        from app.core.llm import get_llm
+
+        provider = entry.get("provider") or settings.LLM_PROVIDER
+        kwargs = {}
+        if entry.get("model"):
+            kwargs["model"] = entry["model"]
+        return get_llm(provider, **kwargs)
+
+    async def _launch_prompt(self, entry: dict, event: HookEvent) -> HookOutcome:
+        try:
+            llm = self._llm_for(entry)
+            messages = [
+                {"role": "system", "content": PROMPT_HOOK_SYSTEM},
+                {"role": "user", "content": (
+                    f"{entry['prompt']}\n\nEvento: "
+                    f"{json.dumps(event.to_dict(), ensure_ascii=False)}")},
+            ]
+            response = await asyncio.wait_for(llm.chat(messages), self.timeout)
+        except Exception as exc:
+            logger.warning(f"Hook prompt falló: {exc}")
+            self._record_error(event.hook_event_name, entry, exc)
+            return HookOutcome()
+        return HookOutcome.from_text(
+            response.content or "", plain_is_context=True)
+
+    async def _launch_agent(self, entry: dict, event: HookEvent) -> HookOutcome:
+        token = _hook_depth.set(_hook_depth.get() + 1)
+        try:
+            from .permissions import PermissionGate
+            from .subagents import DelegateTool
+            from .tool import ToolRegistry
+
+            llm = self._llm_for(entry)
+            tools = self.tools or ToolRegistry()
+            gate = (self.permissions or PermissionGate()).child(
+                allow=entry.get("tools") or [])
+            delegate = DelegateTool(
+                name="hook_agent",
+                description="Subagente invocado por un hook",
+                llm=llm,
+                tools=tools,
+                system_prompt=entry["prompt"],
+                permissions=gate,
+            )
+            task = (
+                f"{entry['prompt']}\n\nEvento: "
+                f"{json.dumps(event.to_dict(), ensure_ascii=False)}"
+            )
+            result = await asyncio.wait_for(
+                delegate.run(task), entry.get("timeout", AGENT_HOOK_TIMEOUT))
+        except Exception as exc:
+            logger.warning(f"Hook agent falló: {exc}")
+            self._record_error(event.hook_event_name, entry, exc)
+            return HookOutcome()
+        finally:
+            _hook_depth.reset(token)
+
+        if not result.success:
+            logger.warning(f"Hook agent devolvió error: {result.error}")
+            self._record_error(event.hook_event_name, entry, result.error)
+            return HookOutcome()
+        text = (result.content or "").split("Response:\n", 1)[-1]
+        return HookOutcome.from_text(text, plain_is_context=True)
+
+    def drain_context(self) -> str:
+        """Devuelve y limpia el contexto pendiente (un solo uso por turno)."""
+        context = self.pending_context
+        self.pending_context = ""
+        return context
+
+    def describe(self) -> str:
+        """Resumen legible de la configuración activa y sus errores."""
+        if not self.registry.handlers:
+            return "No hay hooks configurados. Revisa `.harness/hooks.json`."
+        lines = ["### 🪝 Hooks activos", ""]
+        for event_name, entries in self.registry.handlers.items():
+            lines.append(f"**{event_name}**")
+            for entry in entries:
+                kind = entry.get("type", "command")
+                target = (
+                    entry.get("command") or entry.get("url") or entry.get("prompt") or "?"
+                )
+                if len(target) > 50:
+                    target = target[:47] + "..."
+                details = [f"`{kind}`", f"`{target}`"]
+                if entry.get("matcher"):
+                    details.append(f"matcher `{entry['matcher']}`")
+                if entry.get("if"):
+                    details.append(f"if `{entry['if']}`")
+                line = "- " + " · ".join(details)
+                error = self.errors.get(self._handler_key(event_name, entry))
+                if error:
+                    line += f" ⚠️ {error}"
+                lines.append(line)
+            lines.append("")
+        lines.append(f"Config: `{self.config_file}`")
+        return "\n".join(lines)
 
 
 hook_manager = HookManager()
@@ -273,4 +537,6 @@ hook_manager = HookManager()
 
 async def emit_hook(event: HookEvent) -> HookOutcome:
     """Dispara un evento; reutilizable desde el loop, el contexto y la TUI."""
+    if _hook_depth.get() > 0:
+        return HookOutcome()
     return await hook_manager.emit(event)

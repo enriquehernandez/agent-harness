@@ -12,6 +12,8 @@ from app.core.harness import hooks as hooks_module
 from app.core.harness.hooks import (
     HookEvent, HookManager, HookOutcome, HookRegistry, emit_hook,
 )
+from app.core.llm.providers.fake import FakeLLM
+from app.core.harness.tool import ToolResult
 
 
 def _fake_process(returncode=0, stderr=b"", stdout=b"", communicate=None):
@@ -249,6 +251,27 @@ async def test_manager_kills_process_on_timeout(tmp_path):
     process.kill.assert_called_once()
     process.wait.assert_awaited_once()
     assert "lento" in warn.call_args[0][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stderr,expected", [
+    (b"fallo del hook", "fallo del hook"),
+    (b"", "código 3"),
+])
+async def test_manager_records_nonzero_exit_without_blocking(
+        tmp_path, stderr, expected):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "Stop": [{"hooks": [{"command": "roto"}]}]
+    }})
+    manager = HookManager(config_file=config_file)
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(return_value=_fake_process(3, stderr))):
+        with patch.object(hooks_module.logger, "warning"):
+            outcome = await manager.emit(HookEvent("Stop"))
+
+    assert outcome.denied is False
+    assert expected in next(iter(manager.errors.values()))
 
 
 @pytest.mark.asyncio
@@ -711,3 +734,395 @@ def test_manager_drain_context_is_single_use():
     assert manager.drain_context() == "contexto pendiente"
     assert manager.pending_context == ""
     assert manager.drain_context() == ""
+
+
+def test_registry_loads_all_hook_types():
+    config = {"hooks": {"PreToolUse": [{"matcher": "bash", "hooks": [
+        {"type": "command", "command": "echo hola"},
+        {"type": "http", "url": "https://example.test/hook", "timeout": 3},
+        {"type": "prompt", "prompt": "¿continuar?", "model": "modelo-x"},
+        {"type": "agent", "prompt": "revisa", "tools": ["read_file"]},
+    ]}]}}
+
+    registry = HookRegistry(config)
+
+    assert registry.for_event("PreToolUse", "bash") == [
+        {"matcher": "bash", "command": "echo hola"},
+        {"matcher": "bash", "type": "http",
+         "url": "https://example.test/hook", "timeout": 3},
+        {"matcher": "bash", "type": "prompt", "prompt": "¿continuar?",
+         "model": "modelo-x"},
+        {"matcher": "bash", "type": "agent", "prompt": "revisa",
+         "tools": ["read_file"]},
+    ]
+
+
+def test_registry_skips_handler_without_required_value():
+    registry = HookRegistry({"hooks": {"Stop": [{"hooks": [
+        {"type": "http"}, {"type": "prompt", "prompt": ""},
+        {"type": "desconocido", "command": "echo no"},
+    ]}]}})
+
+    assert registry.for_event("Stop") == []
+
+
+@pytest.mark.parametrize("matcher,tool_name,expected", [
+    ("mcp__.*", "mcp__github_read", True),
+    ("mcp__.*", "bash", False),
+    ("bash|edit_file", "edit_file", True),
+    ("bash|edit_file", "read_file", False),
+    ("", "bash", True),
+    ("[", "bash", False),
+])
+def test_registry_matcher_accepts_regex_and_alternatives(
+        matcher, tool_name, expected):
+    registry = HookRegistry({"hooks": {"PreToolUse": [{
+        "matcher": matcher, "hooks": [{"command": "hook"}]}]}})
+
+    with patch.object(hooks_module.logger, "warning") as warn:
+        found = bool(registry.for_event("PreToolUse", tool_name))
+
+    assert found is expected
+    assert warn.called is (matcher == "[")
+
+
+@pytest.mark.parametrize("rule,tool_name,tool_input,expected", [
+    ("bash:rm *", "bash", {"command": "rm -f x"}, True),
+    ("bash:rm *", "bash", {"command": "ls"}, False),
+    (["write_file:src/*"], "write_file", {"path": "src/a.py"}, True),
+    ("edit_file:app.py", "edit_file", {"path": "app.py"}, True),
+    ("read_file", "read_file", {}, True),
+    ("read_file", "bash", {}, False),
+    (123, "bash", {}, True),
+])
+def test_registry_if_filter_uses_permission_signatures(
+        rule, tool_name, tool_input, expected):
+    registry = HookRegistry({"hooks": {"PreToolUse": [{"hooks": [
+        {"command": "hook", "if": rule}]}]}})
+
+    found = registry.for_event("PreToolUse", tool_name, tool_input)
+
+    assert bool(found) is expected
+
+
+def test_registry_if_filter_is_ignored_outside_tool_events():
+    registry = HookRegistry({"hooks": {"Stop": [{"hooks": [
+        {"command": "hook", "if": "bash:*"}]}]}})
+
+    assert registry.for_event("Stop") == [
+        {"matcher": "", "command": "hook", "if": "bash:*"}]
+
+
+@pytest.mark.parametrize("text,plain_is_context,denied,reason,context", [
+    ('{"ok": false, "reason": "no"}', False, True, "no", ""),
+    ('{"ok": true, "additionalContext": "ctx"}', False, False, "", "ctx"),
+    ('{"ok": false}', False, True, "El hook no aprobó la acción.", ""),
+    ("texto libre", False, False, "", ""),
+    ("texto libre", True, False, "", "texto libre"),
+    ("[]", True, False, "", "[]"),
+    ("", True, False, "", ""),
+    ('{"decision": "block", "reason": "alto", "additionalContext": "ctx"}',
+     False, True, "alto", "ctx"),
+])
+def test_outcome_from_text(text, plain_is_context, denied, reason, context):
+    outcome = HookOutcome.from_text(text, plain_is_context=plain_is_context)
+
+    assert outcome.denied is denied
+    assert outcome.reason == reason
+    assert outcome.additional_context == context
+
+
+def _fake_http(response=None, error=None):
+    client = MagicMock()
+    client.post = AsyncMock(
+        side_effect=error) if error else AsyncMock(return_value=response)
+    context_manager = MagicMock()
+    context_manager.__aenter__ = AsyncMock(return_value=client)
+    context_manager.__aexit__ = AsyncMock(return_value=None)
+    return context_manager, client
+
+
+def _http_manager(tmp_path, handler=None):
+    handler = handler or {"type": "http", "url": "https://example.test/hook"}
+    config = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "PreToolUse": [{"hooks": [handler]}]}})
+    return HookManager(config_file=config, timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_http_hook_posts_event_and_buffers_context(tmp_path):
+    manager = _http_manager(tmp_path)
+    response = MagicMock(status_code=200, text=json.dumps({
+        "additionalContext": "usa python"}))
+    cm, client = _fake_http(response=response)
+
+    with patch.object(hooks_module.httpx, "AsyncClient", return_value=cm) as factory:
+        outcome = await manager.emit(HookEvent(
+            "PreToolUse", tool_name="bash", tool_input={"command": "ls"}))
+
+    assert outcome.additional_context == "usa python"
+    assert manager.pending_context == "usa python"
+    factory.assert_called_once_with(timeout=2)
+    assert client.post.await_args.args[0] == "https://example.test/hook"
+    assert client.post.await_args.kwargs["json"]["tool_name"] == "bash"
+
+
+@pytest.mark.asyncio
+async def test_http_hook_ignores_error_status_and_records_it(tmp_path):
+    manager = _http_manager(tmp_path)
+    cm, _ = _fake_http(response=MagicMock(status_code=500, text=""))
+
+    with patch.object(hooks_module.httpx, "AsyncClient", return_value=cm):
+        with patch.object(hooks_module.logger, "warning") as warn:
+            outcome = await manager.emit(HookEvent("PreToolUse", tool_name="bash"))
+
+    assert outcome.denied is False
+    assert manager.errors
+    assert "HTTP 500" in warn.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_http_hook_survives_connection_error(tmp_path):
+    manager = _http_manager(tmp_path)
+    cm, _ = _fake_http(error=OSError("sin red"))
+
+    with patch.object(hooks_module.httpx, "AsyncClient", return_value=cm):
+        with patch.object(hooks_module.logger, "warning") as warn:
+            outcome = await manager.emit(HookEvent("PreToolUse", tool_name="bash"))
+
+    assert outcome.denied is False
+    assert "sin red" in warn.call_args[0][0]
+    assert any("sin red" in error for error in manager.errors.values())
+
+
+def _prompt_manager(tmp_path, llm=None, handler=None):
+    handler = handler or {"type": "prompt", "prompt": "¿continuar?"}
+    config = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "Stop": [{"hooks": [handler]}]}})
+    return HookManager(config_file=config, llm=llm, timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_prompt_hook_denies_with_llm_json(tmp_path):
+    from app.core.llm.base import LLMResponse
+
+    llm = FakeLLM(responses=[LLMResponse(
+        content='{"ok": false, "reason": "no cerrar"}')])
+    manager = _prompt_manager(tmp_path, llm=llm)
+
+    outcome = await manager.emit(HookEvent("Stop"))
+
+    assert outcome.denied is True
+    assert outcome.reason == "no cerrar"
+
+
+@pytest.mark.asyncio
+async def test_prompt_hook_keeps_plain_answer_as_context(tmp_path):
+    from app.core.llm.base import LLMResponse
+
+    llm = FakeLLM(responses=[LLMResponse(content="Revisa el tono")])
+    manager = _prompt_manager(tmp_path, llm=llm)
+
+    outcome = await manager.emit(HookEvent("Stop"))
+
+    assert outcome.denied is False
+    assert outcome.additional_context == "Revisa el tono"
+
+
+@pytest.mark.asyncio
+async def test_prompt_hook_builds_messages_with_event(tmp_path):
+    from app.core.llm.base import LLMResponse
+
+    llm = FakeLLM(responses=[LLMResponse(content='{"ok": true}')])
+    captured = []
+    original_chat = llm.chat
+
+    async def spy_chat(*args, **kwargs):
+        captured.append(args[0])
+        return await original_chat(*args, **kwargs)
+
+    llm.chat = spy_chat
+    manager = _prompt_manager(tmp_path, llm=llm)
+
+    await manager.emit(HookEvent("Stop", prompt="Hola"))
+
+    assert "Decide si la acción" in captured[0][0]["content"]
+    assert "¿continuar?" in captured[0][1]["content"]
+    assert '"prompt": "Hola"' in captured[0][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_prompt_hook_survives_llm_error(tmp_path):
+    llm = FakeLLM()
+    llm.chat = AsyncMock(side_effect=RuntimeError("sin modelo"))
+    manager = _prompt_manager(tmp_path, llm=llm)
+
+    with patch.object(hooks_module.logger, "warning") as warn:
+        outcome = await manager.emit(HookEvent("Stop"))
+
+    assert outcome.denied is False
+    assert "sin modelo" in warn.call_args[0][0]
+    assert any("sin modelo" in error for error in manager.errors.values())
+
+
+@pytest.mark.asyncio
+async def test_prompt_hook_builds_llm_from_config(tmp_path):
+    from app.core.llm.base import LLMResponse
+    llm = FakeLLM(responses=[LLMResponse(content='{"ok": true}')])
+    handler = {"type": "prompt", "prompt": "revisa", "provider": "fake",
+               "model": "modelo-x"}
+    manager = _prompt_manager(tmp_path, handler=handler)
+
+    with patch("app.core.llm.get_llm", return_value=llm) as get_llm:
+        outcome = await manager.emit(HookEvent("Stop"))
+
+    assert outcome.denied is False
+    get_llm.assert_called_once_with("fake", model="modelo-x")
+
+
+@pytest.mark.asyncio
+async def test_prompt_hook_builds_llm_without_model(tmp_path):
+    from app.core.llm.base import LLMResponse
+    llm = FakeLLM(responses=[LLMResponse(content='{"ok": true}')])
+    manager = _prompt_manager(tmp_path)
+
+    with patch("app.core.llm.get_llm", return_value=llm) as get_llm:
+        await manager.emit(HookEvent("Stop"))
+
+    get_llm.assert_called_once_with(hooks_module.settings.LLM_PROVIDER)
+
+
+def _agent_manager(tmp_path, handler=None, llm=None):
+    handler = handler or {"type": "agent", "prompt": "revisa el cambio",
+                          "tools": ["read_file"]}
+    config = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "PostToolUse": [{"hooks": [handler]}]}})
+    return HookManager(config_file=config, llm=llm or FakeLLM(), timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_agent_hook_parses_subagent_json(tmp_path):
+    manager = _agent_manager(tmp_path)
+    delegate = MagicMock()
+    delegate.run = AsyncMock(return_value=ToolResult(
+        success=True, content='[Subagent: hook_agent] Response:\n'
+        '{"ok": false, "reason": "revisa"}'))
+
+    with patch("app.core.harness.subagents.DelegateTool", return_value=delegate):
+        outcome = await manager.emit(HookEvent("PostToolUse"))
+
+    assert outcome.denied is True
+    assert outcome.reason == "revisa"
+    assert hooks_module._hook_depth.get() == 0
+
+
+@pytest.mark.asyncio
+async def test_agent_hook_keeps_plain_answer_as_context(tmp_path):
+    manager = _agent_manager(tmp_path)
+    delegate = MagicMock()
+    delegate.run = AsyncMock(return_value=ToolResult(
+        success=True, content="[Subagent: hook_agent] Response:\nFalta documentar"))
+
+    with patch("app.core.harness.subagents.DelegateTool", return_value=delegate):
+        outcome = await manager.emit(HookEvent("PostToolUse"))
+
+    assert outcome.additional_context == "Falta documentar"
+
+
+@pytest.mark.asyncio
+async def test_agent_hook_uses_default_tools_and_timeout(tmp_path):
+    manager = _agent_manager(tmp_path, handler={"type": "agent", "prompt": "revisa"})
+    delegate = MagicMock()
+    delegate.run = AsyncMock(return_value=ToolResult(success=True, content="{}"))
+
+    with patch("app.core.harness.subagents.DelegateTool", return_value=delegate):
+        await manager.emit(HookEvent("PostToolUse"))
+
+    assert delegate.run.await_args.args[0].startswith("revisa")
+    assert hooks_module.AGENT_HOOK_TIMEOUT == 60.0
+
+
+@pytest.mark.asyncio
+async def test_agent_hook_failure_is_fail_open(tmp_path):
+    manager = _agent_manager(tmp_path)
+    delegate = MagicMock()
+    delegate.run = AsyncMock(return_value=ToolResult(
+        success=False, content="", error="falló el subagente"))
+
+    with patch("app.core.harness.subagents.DelegateTool", return_value=delegate):
+        with patch.object(hooks_module.logger, "warning") as warn:
+            outcome = await manager.emit(HookEvent("PostToolUse"))
+
+    assert outcome.denied is False
+    assert "falló el subagente" in warn.call_args[0][0]
+    assert hooks_module._hook_depth.get() == 0
+
+
+@pytest.mark.asyncio
+async def test_agent_hook_timeout_is_fail_open(tmp_path):
+    manager = _agent_manager(tmp_path)
+    delegate = MagicMock()
+    delegate.run = AsyncMock(side_effect=asyncio.TimeoutError)
+
+    with patch("app.core.harness.subagents.DelegateTool", return_value=delegate):
+        with patch.object(hooks_module.logger, "warning") as warn:
+            outcome = await manager.emit(HookEvent("PostToolUse"))
+
+    assert outcome.denied is False
+    assert "falló" in warn.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_emit_hook_is_noop_inside_agent_hook():
+    manager = AsyncMock()
+    token = hooks_module._hook_depth.set(1)
+    try:
+        with patch.object(hooks_module, "hook_manager", new=manager):
+            outcome = await emit_hook(HookEvent("Stop"))
+    finally:
+        hooks_module._hook_depth.reset(token)
+
+    assert outcome.denied is False
+    manager.emit.assert_not_awaited()
+
+
+def test_reload_if_changed_detects_new_config(tmp_path):
+    config = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "Stop": [{"hooks": [{"command": "echo viejo"}]}]}})
+    manager = HookManager(config_file=config)
+
+    assert manager.reload_if_changed() is False
+    _write_config(config, {"hooks": {
+        "Stop": [{"hooks": [{"command": "echo nuevo"}]}]}})
+    # forcezar mtime distinto aunque el archivo se escriba en el mismo segundo
+    os.utime(config, (config.stat().st_atime + 2, config.stat().st_mtime + 2))
+
+    assert manager.reload_if_changed() is True
+    assert manager.registry.for_event("Stop")[0]["command"] == "echo nuevo"
+
+
+def test_describe_without_hooks():
+    manager = HookManager(config_file=Path("no-existe.json"))
+
+    assert "No hay hooks configurados" in manager.describe()
+
+
+def test_describe_lists_hooks_truncates_and_shows_errors(tmp_path):
+    config = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "PreToolUse": [{"matcher": "bash", "hooks": [{
+            "type": "http", "url": "https://example.test/" + "x" * 80,
+            "if": "bash:rm *"}]}]}})
+    manager = HookManager(config_file=config)
+    entry = manager.registry.for_event(
+        "PreToolUse", "bash", {"command": "rm -f x"})[0]
+    manager._record_error("PreToolUse", entry, "HTTP 500")
+    description = manager.describe()
+
+    assert "### 🪝 Hooks activos" in description
+    assert "**PreToolUse**" in description
+    assert "`http`" in description
+    assert "..." in description
+    assert "matcher `bash`" in description
+    assert "if `bash:rm *`" in description
+    assert "HTTP 500" in description
+    assert "Config:" in description

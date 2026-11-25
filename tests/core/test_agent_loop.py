@@ -13,7 +13,9 @@ from app.core.llm.base import BaseLLM, LLMResponse
 from app.core.harness.context import ContextManager
 from app.core.llm.providers.fake import FakeLLM
 from app.core.harness.events import AgentEvent
-from app.core.harness.hooks import HookManager, HookOutcome, hook_manager
+from app.core.harness.hooks import (
+    HookManager, HookOutcome, _hook_depth, hook_manager,
+)
 
 
 class HangingLLM(BaseLLM):
@@ -855,3 +857,21 @@ async def test_loop_stream_tool_context_reaches_next_llm_call(
     assert events[-1].data["final_answer"] == "Listo"
     assert any("revisa el resultado" in str(msg["content"]) for msg in seen[1])
     assert _hook_context_messages(ctx) == []
+
+
+@pytest.mark.asyncio
+async def test_loop_nested_in_agent_hook_does_not_drain_context(
+        monkeypatch, fake_llm, basic_registry):
+    """El loop anidado de un hook `agent` no roba el contexto del turno padre."""
+    monkeypatch.setattr(hook_manager, "pending_context", "contexto del padre")
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+    ctx = ContextManager()
+    token = _hook_depth.set(1)
+    try:
+        loop._inject_hook_context(ctx)
+        loop._finish_hook_context(ctx)
+    finally:
+        _hook_depth.reset(token)
+
+    assert _hook_context_messages(ctx) == []
+    assert hook_manager.pending_context == "contexto del padre"

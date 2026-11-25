@@ -5,6 +5,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.harness.context import ContextManager
+from app.core.harness.hooks import hook_manager
 from app.core.llm.registry import list_providers
 from app.core.llm.base import BaseLLM
 from app.core.llm import get_llm
@@ -51,7 +52,7 @@ def mode_message(command: str) -> str:
 
 AVAILABLE_COMMANDS = [
     "/help", "/shortcuts", "/model", "/provider", "/tools", "/subagents",
-    "/skills", "/reload", "/tokens", "/compact", "/verbose", "/clear", "/debug",
+    "/skills", "/hooks", "/reload", "/tokens", "/compact", "/verbose", "/clear", "/debug",
     "/permissions", "/export", "/session", "/memory", "/doctor", "/trace", "/cost", "/quit",
     *MODE_INSTRUCTIONS,
 ]
@@ -87,6 +88,7 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `/tools` | Lista las herramientas disponibles en el Registry |\n"
             "| `/subagents` | Lista los subagentes registrados |\n"
             "| `/skills` | Lista todas las habilidades (tools + subagents) |\n"
+            "| `/hooks [reload]` | Lista los hooks activos y sus errores; `reload` recarga la config |\n"
             "| `/reload [skills/permissions/tools]` | Recarga `skills`, `permissions` o `tools` |\n"
             "| `/tokens` | Muestra el uso estimado de tokens |\n"
             "| `/cost` | 💰 Muestra el coste real (USD) de la última llamada |\n"
@@ -385,6 +387,29 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             txt += "\n_No hay skills instaladas en `.agents/skills/`._\n"
 
         await app.write_to_chat(txt, type="agent")
+        return True
+
+    elif cmd == "/hooks":
+        target = parts[1].lower() if len(parts) > 1 else None
+        if target not in (None, "reload"):
+            await app.write_to_chat(
+                f"❌ Objetivo desconocido: `{target}`. Uso: `/hooks [reload]`",
+                type="system")
+            return True
+
+        if target == "reload":
+            try:
+                hook_manager.reload()
+            except Exception as exc:
+                logger.warning(f"No se pudieron recargar los hooks: {exc}")
+                await app.write_to_chat(
+                    f"❌ No se pudieron recargar los hooks: {exc}", type="system")
+                return True
+            header = "✅ Configuración de hooks recargada.\n\n"
+        else:
+            header = ""
+
+        await app.write_to_chat(header + hook_manager.describe(), type="agent")
         return True
 
     elif cmd == "/reload":

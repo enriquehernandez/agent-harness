@@ -61,7 +61,7 @@ Los eventos de subagentes A2A incluyen `agent_name`/`agent_depth` para poder fil
 Un handler `command` puede impedir la ejecución de la herramienta en dos formatos compatibles con Claude Code:
 
 1. Terminar con **código 2** y escribir el motivo en `stderr` (si stderr está vacío se usa un motivo genérico).
-2. Escribir en `stdout` un JSON con `hookSpecificOutput.permissionDecision: "deny"` y `hookSpecificOutput.permissionDecisionReason`. También se reconoce el formato genérico `decision: "block"` con `reason`.
+2. Escribir en `stdout` un JSON con `hookSpecificOutput.permissionDecision: "deny"` y `hookSpecificOutput.permissionDecisionReason`. También se reconoce el formato genérico `decision: "block"` con `reason`, que se usa como feedback en `Stop`/`PostToolUse` (ver más abajo).
 
 `HookManager.emit()` ejecuta los hooks en orden y devuelve el **primer deny**, sin lanzar los restantes. `AgentLoop._execute_tool()` consulta el resultado **antes de `PermissionGate.check()`**, de modo que el deny prevalece sobre `allow`: no llama a la herramienta, escribe el motivo en el resultado de la tool y marca `last_hook_denial`. En `stream()`, ese estado produce el evento `AgentEvent(type="hook_denied", data={"tool": ..., "message": ...})`; `stream_to_chat()` lo muestra como `🚫 **Bloqueado por un hook:** ...` sin interrumpir el turno.
 
@@ -84,4 +84,12 @@ Un handler `command` puede impedir la ejecución de la herramienta en dos format
 
 - Un JSON de configuración inválido, un comando que no existe, un código de salida distinto de cero (salvo el 2 con motivo), un stdout vacío o no parseable y un timeout solo generan `logger.warning` y permiten la acción.
 - La compactación y el Permission Gate siguen funcionando igual: los hooks son aditivos.
-- Resto de la fase 2 (feed-back de `Stop`/`PostToolUse` e `additionalContext`) y fase 3 (tipos avanzados, matchers completos y `/hooks`) siguen pendientes en `tasks/pendientes.md`.
+### Feedback de `Stop` y `PostToolUse`
+
+Un hook `Stop` o `PostToolUse` que devuelve `decision: "block"` (o cualquier `deny`) ya no se ignora: `AgentLoop._apply_hook_feedback()` convierte el motivo en un mensaje `[SISTEMA - FEEDBACK DE HOOK]: ...` añadido al contexto antes de la siguiente llamada al LLM.
+
+- En `PostToolUse`, la herramienta ya se ejecutó: el mensaje se añade después del resultado de la tool para que el agente pueda corregirlo en el siguiente paso.
+- En `Stop`, el bloqueo impide cerrar el turno: el loop añade el feedback y vuelve a iterar (respetando `max_iterations`). Si ya se agotaron las iteraciones, el feedback queda registrado y se devuelve el resultado habitual.
+- Si el hook no aporta motivo, se usa un texto genérico. El mensaje se conserva en el historial: es feedback, no un contexto temporal (ese será `additionalContext` en el resto de la fase 2).
+
+Pendientes: `additionalContext` temporal y fase 3 (tipos avanzados, matchers completos y `/hooks`) en `tasks/pendientes.md`.

@@ -11,7 +11,7 @@ from ..llm.base import BaseLLM, LLMResponse
 from .tool import ToolRegistry, ToolResult
 from .permissions import PermissionGate, Decision
 from .context import ContextManager
-from .hooks import HookEvent, emit_hook
+from .hooks import HookEvent, HookOutcome, emit_hook
 
 
 def _init_langfuse():
@@ -62,6 +62,31 @@ class AgentLoop:
         self.provider_name = provider_name
         self.last_hook_denial: str | None = None
 
+    @staticmethod
+    def _apply_hook_feedback(
+        outcome: HookOutcome, ctx: ContextManager, default: str
+    ) -> bool:
+        """Convierte un `block` de hook en feedback temporal para el LLM."""
+        if outcome.denied is not True:
+            return False
+        reason = outcome.reason or default
+        ctx.add_user(f"[SISTEMA - FEEDBACK DE HOOK]: {reason}")
+        return True
+
+    async def _emit_stop_with_feedback(self, ctx: ContextManager) -> bool:
+        outcome = await emit_hook(HookEvent(hook_event_name="Stop"))
+        return self._apply_hook_feedback(
+            outcome, ctx, "El hook pidió revisar la respuesta.")
+
+    async def _emit_post_tool(
+        self, ctx: ContextManager, tool_name: str, args: dict, success: bool
+    ) -> None:
+        outcome = await emit_hook(HookEvent(
+            hook_event_name="PostToolUse", tool_name=tool_name,
+            tool_input=args, success=success))
+        self._apply_hook_feedback(
+            outcome, ctx, "El hook pidió corregir el uso de la herramienta.")
+
     async def run(
         self,
         user_input: str,
@@ -104,9 +129,10 @@ class AgentLoop:
                             f"[SISTEMA - FEEDBACK DEL CRÍTICO]: Tu respuesta anterior fue rechazada por este motivo: {critique_msg}. Corrige el error y responde de nuevo.")
                         continue
 
+                if await self._emit_stop_with_feedback(ctx):
+                    continue
                 ctx.add_assistant(final)
                 cost = await self._calculate_total_cost(usage_total)
-                await emit_hook(HookEvent(hook_event_name="Stop"))
                 return LoopResult(
                     final_answer=final,
                     steps=step,
@@ -121,8 +147,8 @@ class AgentLoop:
                 await self._execute_tool(tc, ctx)
                 tools_used.append(tc["name"])
 
+        await self._emit_stop_with_feedback(ctx)
         cost = await self._calculate_total_cost(usage_total)
-        await emit_hook(HookEvent(hook_event_name="Stop"))
         return LoopResult(
             final_answer="[Max iterations reached without final answer]",
             steps=self.max_iterations,
@@ -192,11 +218,12 @@ class AgentLoop:
                         if reflection_attempts >= 2:
                             yield AgentEvent(type="text_chunk", data={
                                 "text": "\n\n⚠️ Se alcanzó el límite de reflexiones. Aceptando respuesta actual.\n\n"})
+                            if await self._emit_stop_with_feedback(ctx):
+                                continue
                             cost = await self._calculate_total_cost(usage_total)
                             self._langfuse_update(
                                 generation, full_content, step, tools_used, usage_total, cost)
                             ctx.add_assistant(full_content)
-                            await emit_hook(HookEvent(hook_event_name="Stop"))
                             yield AgentEvent(type="result", data={
                                 "final_answer": full_content,
                                 "steps": step,
@@ -230,11 +257,12 @@ class AgentLoop:
                                 "text": f"\n\n⚠️ Corrección aplicada: {critique_msg}\n\n"})
                             continue
 
+                    if await self._emit_stop_with_feedback(ctx):
+                        continue
                     cost = await self._calculate_total_cost(usage_total)
                     self._langfuse_update(
                         generation, full_content, step, tools_used, usage_total, cost)
                     ctx.add_assistant(full_content)
-                    await emit_hook(HookEvent(hook_event_name="Stop"))
                     yield AgentEvent(type="result", data={
                         "final_answer": full_content,
                         "steps": step,
@@ -262,10 +290,10 @@ class AgentLoop:
                     })
 
             # 🔥 Si el for termina sin return, se agotó max_iterations
+            await self._emit_stop_with_feedback(ctx)
             cost = await self._calculate_total_cost(usage_total)
             self._langfuse_update(
                 generation, "", self.max_iterations, tools_used, usage_total, cost)
-            await emit_hook(HookEvent(hook_event_name="Stop"))
             yield AgentEvent(type="result", data={
                 "final_answer": (
                     f"[Max iterations ({self.max_iterations}) reached without final answer]"
@@ -344,26 +372,20 @@ class AgentLoop:
                 or f"El hook bloqueó la herramienta '{tool_name}'."
             )
             ctx.add_tool_result(tool_call_id, f"ERROR: {self.last_hook_denial}")
-            await emit_hook(HookEvent(
-                hook_event_name="PostToolUse", tool_name=tool_name,
-                tool_input=args, success=False))
+            await self._emit_post_tool(ctx, tool_name, args, False)
             return False, None
 
         decision = await self.permissions.check(tool_name, args)
         if decision == Decision.DENY:
             ctx.add_tool_result(
                 tool_call_id, f"ERROR: Permission denied for '{tool_name}'.")
-            await emit_hook(HookEvent(
-                hook_event_name="PostToolUse", tool_name=tool_name,
-                tool_input=args, success=False))
+            await self._emit_post_tool(ctx, tool_name, args, False)
             return False, None
 
         tool = self.tools.get(tool_name)
         if tool is None:
             ctx.add_tool_result(tool_call_id, f"Tool '{tool_name}' not found.")
-            await emit_hook(HookEvent(
-                hook_event_name="PostToolUse", tool_name=tool_name,
-                tool_input=args, success=False))
+            await self._emit_post_tool(ctx, tool_name, args, False)
             return False, None
 
         try:
@@ -392,9 +414,7 @@ class AgentLoop:
                     f"Error: {result.error}. (Reintento {attempts}/3. Si no puedes recuperarte, pregunta al usuario).",
                 )
 
-        await emit_hook(HookEvent(
-            hook_event_name="PostToolUse", tool_name=tool_name,
-            tool_input=args, success=result.success))
+        await self._emit_post_tool(ctx, tool_name, args, result.success)
         return result.success, result
 
     @staticmethod

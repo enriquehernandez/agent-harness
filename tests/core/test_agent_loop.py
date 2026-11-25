@@ -581,3 +581,164 @@ async def test_real_no_delete_hook_blocks_bash_rm(fake_llm, tmp_path):
     assert len(denials) == 1
     assert "eliminar" in denials[0].data["message"].lower()
     func_spy.assert_not_called()
+
+
+def _feedback_messages(ctx):
+    return [msg["content"] for msg in ctx.messages
+            if "FEEDBACK DE HOOK" in str(msg.get("content", ""))]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason,expected", [
+    ("Revisa el tono", "Revisa el tono"),
+    ("", "El hook pidió revisar la respuesta."),
+])
+async def test_loop_run_stop_block_adds_feedback_and_continues(
+        fake_llm, basic_registry, reason, expected):
+    """Un `block` en Stop impide cerrar el turno y realimenta al agente."""
+    fake_llm._responses = [
+        LLMResponse(content="Primera"), LLMResponse(content="Corregida")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+    ctx = ContextManager()
+    stop_calls = 0
+
+    async def emit_side_effect(event):
+        nonlocal stop_calls
+        if event.hook_event_name == "Stop":
+            stop_calls += 1
+            if stop_calls == 1:
+                return HookOutcome(denied=True, reason=reason)
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        result = await loop.run("Hola", context=ctx)
+
+    assert stop_calls == 2
+    assert result.final_answer == "Corregida"
+    assert result.steps == 2
+    feedback = _feedback_messages(ctx)
+    assert len(feedback) == 1
+    assert expected in feedback[0]
+
+
+@pytest.mark.asyncio
+async def test_loop_run_stop_block_at_max_iterations(fake_llm, basic_registry):
+    """Si se agotan las iteraciones, el feedback se registra y se devuelve el resultado."""
+    fake_llm._responses = [LLMResponse(content="Primera")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, max_iterations=1)
+    ctx = ContextManager()
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "Stop":
+            return HookOutcome(denied=True, reason="No destruir el resultado")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        result = await loop.run("Hola", context=ctx)
+
+    assert result.final_answer == "[Max iterations reached without final answer]"
+    assert "No destruir el resultado" in _feedback_messages(ctx)[0]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_stop_block_adds_feedback_and_continues(
+        fake_llm, basic_registry):
+    fake_llm._responses = [
+        LLMResponse(content="Primera"), LLMResponse(content="Corregida")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+    ctx = ContextManager()
+    stop_calls = 0
+
+    async def emit_side_effect(event):
+        nonlocal stop_calls
+        if event.hook_event_name == "Stop":
+            stop_calls += 1
+            if stop_calls == 1:
+                return HookOutcome(denied=True, reason="Revisa la respuesta")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        events = [event async for event in loop.stream("Hola", context=ctx)]
+
+    texts = [event.data["text"] for event in events
+             if event.type == "text_chunk"]
+    assert any("Primera" in text for text in texts)
+    assert any("Corregida" in text for text in texts)
+    results = [event for event in events if event.type == "result"]
+    assert len(results) == 1
+    assert results[0].data["final_answer"] == "Corregida"
+    assert "Revisa la respuesta" in _feedback_messages(ctx)[0]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_stop_block_at_max_iterations(fake_llm, basic_registry):
+    fake_llm._responses = [LLMResponse(content="Primera")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, max_iterations=1)
+    ctx = ContextManager()
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "Stop":
+            return HookOutcome(denied=True, reason="Sin cierre")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        events = [event async for event in loop.stream("Hola", context=ctx)]
+
+    results = [event for event in events if event.type == "result"]
+    assert len(results) == 1
+    assert "Max iterations" in results[0].data["final_answer"]
+    assert "Sin cierre" in _feedback_messages(ctx)[0]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_stop_block_at_reflection_limit(
+        fake_llm, basic_registry):
+    critic = MagicMock()
+    critic.run = AsyncMock(return_value=ToolResult(
+        success=True, content="REJECTED: incompleto"))
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry,
+                     critic_tool=critic, max_iterations=4)
+    ctx = ContextManager()
+    stop_calls = 0
+
+    async def emit_side_effect(event):
+        nonlocal stop_calls
+        if event.hook_event_name == "Stop":
+            stop_calls += 1
+            if stop_calls == 1:
+                return HookOutcome(denied=True, reason="Aun no")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        events = [event async for event in loop.stream("Hola", context=ctx)]
+
+    assert any("límite de reflexiones" in event.data.get("text", "")
+               for event in events if event.type == "text_chunk")
+    assert any(event.type == "result" for event in events)
+    assert "Aun no" in _feedback_messages(ctx)[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason,expected", [
+    ("Revisa el argumento", "Revisa el argumento"),
+    ("", "El hook pidió corregir el uso de la herramienta."),
+])
+async def test_loop_post_tool_block_adds_feedback(
+        fake_llm, basic_registry, reason, expected):
+    """Un `block` en PostToolUse realimenta al agente tras ejecutar la tool."""
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+    ctx = ContextManager()
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "PostToolUse":
+            return HookOutcome(denied=True, reason=reason)
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        success, result = await loop._execute_tool(
+            {"id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}, ctx)
+
+    assert success is True
+    assert result.content == "3"
+    assert expected in _feedback_messages(ctx)[0]

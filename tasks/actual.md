@@ -1,6 +1,6 @@
 # Tarea Actual
 
-No quedan tareas en ejecución. La Fase 2A (feedback de `Stop`/`PostToolUse`) terminó y está en `tasks/completadas.md`; siguen pendientes la Fase 2B (`additionalContext` temporal) y la Fase 3 en `tasks/pendientes.md`.
+No quedan tareas en ejecución. Las fases 2A (feedback de `Stop`/`PostToolUse`) y 2B (`additionalContext` temporal) terminaron y están en `tasks/completadas.md`; sigue pendiente la Fase 3 en `tasks/pendientes.md`.
 
 ## Notas
 

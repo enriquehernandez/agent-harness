@@ -284,6 +284,7 @@ def test_hook_outcome_defaults_to_allow():
 
     assert outcome.denied is False
     assert outcome.reason == ""
+    assert outcome.additional_context == ""
 
 
 @pytest.mark.asyncio
@@ -557,3 +558,156 @@ def test_settings_exposes_hooks_file():
     from app.core.harness.hooks import HookManager
 
     assert HookManager().config_file == settings.hooks_file
+
+
+def _context_payload(context, **extra):
+    payload = {"hookSpecificOutput": {"additionalContext": context}}
+    payload.update(extra)
+    return json.dumps(payload).encode("utf-8")
+
+
+@pytest.mark.parametrize("payload,expected", [
+    (_context_payload("  usa python  "), "usa python"),
+    (json.dumps({"additionalContext": "lee el contrato"}).encode("utf-8"),
+     "lee el contrato"),
+    (json.dumps({"hookSpecificOutput": {"additionalContext": "a"},
+                 "additionalContext": "b"}).encode("utf-8"), "a"),
+    (json.dumps({"hookSpecificOutput": {}, "additionalContext": "b"}).encode("utf-8"),
+     "b"),
+])
+def test_outcome_parses_additional_context(payload, expected):
+    outcome = HookOutcome.from_process(0, payload, b"")
+
+    assert outcome.denied is False
+    assert outcome.additional_context == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_name", [
+    "UserPromptSubmit", "PreToolUse", "PostToolUse",
+])
+async def test_manager_buffers_context_for_supported_events(tmp_path, event_name):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        event_name: [{"hooks": [{"command": "contexto"}]}]
+    }})
+    manager = HookManager(config_file=config_file)
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(return_value=_fake_process(
+                   stdout=_context_payload("usa python")))):
+        outcome = await manager.emit(HookEvent(event_name))
+
+    assert outcome.additional_context == "usa python"
+    assert manager.pending_context == "usa python"
+
+
+@pytest.mark.asyncio
+async def test_manager_returns_context_but_does_not_buffer_on_stop(tmp_path):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "Stop": [{"hooks": [{"command": "contexto"}]}]
+    }})
+    manager = HookManager(config_file=config_file)
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(return_value=_fake_process(
+                   stdout=_context_payload("no guardar")))):
+        outcome = await manager.emit(HookEvent("Stop"))
+
+    assert outcome.additional_context == "no guardar"
+    assert manager.pending_context == ""
+
+
+@pytest.mark.asyncio
+async def test_manager_concatenates_contexts_from_several_hooks(tmp_path):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "UserPromptSubmit": [{"hooks": [
+            {"command": "primero"}, {"command": "vacio"}, {"command": "segundo"},
+        ]}]
+    }})
+    manager = HookManager(config_file=config_file)
+    processes = [
+        _fake_process(stdout=_context_payload("contexto uno")),
+        _fake_process(stdout=b""),
+        _fake_process(stdout=_context_payload("contexto dos")),
+    ]
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(side_effect=processes)):
+        outcome = await manager.emit(HookEvent("UserPromptSubmit"))
+
+    assert outcome.additional_context == "contexto uno\ncontexto dos"
+    assert manager.pending_context == "contexto uno\ncontexto dos"
+
+
+@pytest.mark.asyncio
+async def test_manager_keeps_context_when_a_later_hook_denies(tmp_path):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "PreToolUse": [{"hooks": [
+            {"command": "contexto"}, {"command": "guardia"},
+            {"command": "no_deberia_ejecutarse"},
+        ]}]
+    }})
+    manager = HookManager(config_file=config_file)
+    denials = json.dumps({
+        "hookSpecificOutput": {
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "Prohibido",
+            "additionalContext": "motivo extra",
+        }
+    }).encode("utf-8")
+    processes = [
+        _fake_process(stdout=_context_payload("contexto previo")),
+        _fake_process(stdout=denials),
+    ]
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(side_effect=processes)) as spawn:
+        outcome = await manager.emit(HookEvent("PreToolUse", tool_name="bash"))
+
+    assert spawn.await_count == 2
+    assert outcome.denied is True
+    assert outcome.reason == "Prohibido"
+    assert outcome.additional_context == "contexto previo\nmotivo extra"
+    assert manager.pending_context == "contexto previo\nmotivo extra"
+
+
+@pytest.mark.asyncio
+async def test_manager_does_not_buffer_blank_context(tmp_path):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "PostToolUse": [{"hooks": [{"command": "contexto"}]}]
+    }})
+    manager = HookManager(config_file=config_file)
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(return_value=_fake_process(
+                   stdout=_context_payload("   ")))):
+        outcome = await manager.emit(HookEvent("PostToolUse"))
+
+    assert outcome.additional_context == ""
+    assert manager.pending_context == ""
+
+
+@pytest.mark.asyncio
+async def test_manager_exit_two_keeps_no_context(tmp_path):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "PostToolUse": [{"hooks": [{"command": "guardia"}]}]
+    }})
+    manager = HookManager(config_file=config_file)
+
+    with patch("app.core.harness.hooks.asyncio.create_subprocess_shell",
+               new=AsyncMock(return_value=_fake_process(2, b"alto"))):
+        with patch.object(hooks_module.logger, "warning"):
+            outcome = await manager.emit(HookEvent("PostToolUse"))
+
+    assert outcome.denied is True
+    assert outcome.additional_context == ""
+    assert manager.pending_context == ""
+
+
+def test_manager_drain_context_is_single_use():
+    manager = HookManager(config_file=Path("no-existe.json"))
+    manager.pending_context = "contexto pendiente"
+
+    assert manager.drain_context() == "contexto pendiente"
+    assert manager.pending_context == ""
+    assert manager.drain_context() == ""

@@ -11,7 +11,7 @@ from ..llm.base import BaseLLM, LLMResponse
 from .tool import ToolRegistry, ToolResult
 from .permissions import PermissionGate, Decision
 from .context import ContextManager
-from .hooks import HookEvent, HookOutcome, emit_hook
+from .hooks import HookEvent, HookOutcome, emit_hook, hook_manager
 
 
 def _init_langfuse():
@@ -87,6 +87,19 @@ class AgentLoop:
         self._apply_hook_feedback(
             outcome, ctx, "El hook pidió corregir el uso de la herramienta.")
 
+    @staticmethod
+    def _inject_hook_context(ctx: ContextManager) -> None:
+        """Inyecta el `additionalContext` pendiente antes de llamar al LLM."""
+        context = hook_manager.drain_context()
+        if context:
+            ctx.append_hook_context(context)
+
+    @staticmethod
+    def _finish_hook_context(ctx: ContextManager) -> None:
+        """Retira el mensaje temporal y descarta contexto que no se usó."""
+        ctx.remove_hook_context()
+        hook_manager.drain_context()
+
     async def run(
         self,
         user_input: str,
@@ -104,6 +117,7 @@ class AgentLoop:
 
         for step in range(1, self.max_iterations + 1):
             await ctx.maybe_compact(self.llm, verbose=verbose)
+            self._inject_hook_context(ctx)
             response: LLMResponse = await self.llm.chat(
                 messages=ctx.get_messages(),
                 tools=self.tools.all_schemas() or None,
@@ -131,6 +145,7 @@ class AgentLoop:
 
                 if await self._emit_stop_with_feedback(ctx):
                     continue
+                self._finish_hook_context(ctx)
                 ctx.add_assistant(final)
                 cost = await self._calculate_total_cost(usage_total)
                 return LoopResult(
@@ -148,6 +163,7 @@ class AgentLoop:
                 tools_used.append(tc["name"])
 
         await self._emit_stop_with_feedback(ctx)
+        self._finish_hook_context(ctx)
         cost = await self._calculate_total_cost(usage_total)
         return LoopResult(
             final_answer="[Max iterations reached without final answer]",
@@ -191,6 +207,7 @@ class AgentLoop:
         try:
             for step in range(1, self.max_iterations + 1):
                 await ctx.maybe_compact(self.llm, verbose=verbose)
+                self._inject_hook_context(ctx)
 
                 full_content = ""
                 tool_calls = []
@@ -319,6 +336,7 @@ class AgentLoop:
             yield AgentEvent(type="error", data={"message": str(e), "is_timeout": False})
             return
         finally:
+            self._finish_hook_context(ctx)
             if generation_cm is not None:
                 try:
                     generation_cm.__exit__(None, None, None)

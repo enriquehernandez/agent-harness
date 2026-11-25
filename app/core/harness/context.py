@@ -11,6 +11,7 @@ from .hooks import HookEvent, emit_hook
 class ContextManager:
     def __init__(self, system_prompt: str | None = None, strategy: CompactionStrategy | None = None):
         self.messages: list[dict[str, Any]] = []
+        self.hook_context_msg: dict[str, Any] | None = None
         self.strategy = strategy or SummarizationStrategy()
         if system_prompt:
             self.add_system(system_prompt)
@@ -46,6 +47,28 @@ class ContextManager:
             "tool_call_id": tool_call_id,
             "content": content,
         })
+
+    def append_hook_context(self, content: str) -> None:
+        """Añade contexto temporal de hooks; se retira al terminar el turno."""
+        if not content:
+            return
+        text = f"[SISTEMA - CONTEXTO ADICIONAL DE HOOK]: {content}"
+        if self.hook_context_msg is None:
+            self.hook_context_msg = {"role": "user", "content": text}
+            self.messages.append(self.hook_context_msg)
+        else:
+            self.hook_context_msg["content"] += "\n" + content
+
+    def remove_hook_context(self) -> None:
+        """Retira el mensaje temporal para que no quede en el historial."""
+        msg = self.hook_context_msg
+        self.hook_context_msg = None
+        if msg is None:
+            return
+        for index, message in enumerate(self.messages):
+            if message is msg:
+                del self.messages[index]
+                break
 
     def get_messages(self) -> list[dict[str, Any]]:
         return self.messages

@@ -13,7 +13,7 @@ from app.core.llm.base import BaseLLM, LLMResponse
 from app.core.harness.context import ContextManager
 from app.core.llm.providers.fake import FakeLLM
 from app.core.harness.events import AgentEvent
-from app.core.harness.hooks import HookManager, HookOutcome
+from app.core.harness.hooks import HookManager, HookOutcome, hook_manager
 
 
 class HangingLLM(BaseLLM):
@@ -742,3 +742,116 @@ async def test_loop_post_tool_block_adds_feedback(
     assert success is True
     assert result.content == "3"
     assert expected in _feedback_messages(ctx)[0]
+
+
+def _hook_context_messages(ctx):
+    return [msg["content"] for msg in ctx.messages
+            if "CONTEXTO ADICIONAL DE HOOK" in str(msg.get("content", ""))]
+
+
+def _spy_chat(fake_llm, seen):
+    """Devuelve un patch que captura los mensajes enviados al LLM."""
+    original_chat = fake_llm.chat
+
+    async def spy_chat(*args, **kwargs):
+        messages = kwargs.get("messages") or (args[0] if args else [])
+        seen.append(list(messages))
+        return await original_chat(*args, **kwargs)
+
+    return patch.object(fake_llm, "chat", side_effect=spy_chat)
+
+
+@pytest.mark.asyncio
+async def test_loop_run_injects_hook_context_and_removes_it(
+        monkeypatch, fake_llm, basic_registry):
+    """El contexto de UserPromptSubmit se envía al LLM y no queda en el historial."""
+    monkeypatch.setattr(hook_manager, "pending_context", "usa python")
+    fake_llm._responses = [LLMResponse(content="Listo")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+    ctx = ContextManager()
+    seen = []
+
+    with _spy_chat(fake_llm, seen):
+        result = await loop.run("Hola", context=ctx)
+
+    assert result.final_answer == "Listo"
+    assert any("usa python" in str(msg["content"]) for msg in seen[0])
+    assert _hook_context_messages(ctx) == []
+    assert hook_manager.pending_context == ""
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_injects_hook_context_and_removes_it(
+        monkeypatch, fake_llm, basic_registry):
+    monkeypatch.setattr(hook_manager, "pending_context", "lee el contrato")
+    fake_llm._responses = [LLMResponse(content="Listo")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+    ctx = ContextManager()
+    seen = []
+
+    with _spy_chat(fake_llm, seen):
+        events = [event async for event in loop.stream("Hola", context=ctx)]
+
+    assert events[-1].data["final_answer"] == "Listo"
+    assert any("lee el contrato" in str(msg["content"]) for msg in seen[0])
+    assert _hook_context_messages(ctx) == []
+    assert hook_manager.pending_context == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_name", ["PreToolUse", "PostToolUse"])
+async def test_loop_tool_context_reaches_next_llm_call(
+        monkeypatch, fake_llm, basic_registry, event_name):
+    monkeypatch.setattr(hook_manager, "pending_context", "")
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    fake_llm._responses = [
+        LLMResponse(tool_calls=[
+            {"id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}]),
+        LLMResponse(content="Listo"),
+    ]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+    ctx = ContextManager()
+    seen = []
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == event_name:
+            hook_manager.pending_context = "revisa el resultado"
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        with _spy_chat(fake_llm, seen):
+            result = await loop.run("Hola", context=ctx)
+
+    assert result.final_answer == "Listo"
+    assert len(seen) == 2
+    assert any("revisa el resultado" in str(msg["content"]) for msg in seen[1])
+    assert _hook_context_messages(ctx) == []
+    assert hook_manager.pending_context == ""
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_tool_context_reaches_next_llm_call(
+        monkeypatch, fake_llm, basic_registry):
+    monkeypatch.setattr(hook_manager, "pending_context", "")
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    fake_llm._responses = [
+        LLMResponse(tool_calls=[
+            {"id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}]),
+        LLMResponse(content="Listo"),
+    ]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+    ctx = ContextManager()
+    seen = []
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "PostToolUse":
+            hook_manager.pending_context = "revisa el resultado"
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        with _spy_chat(fake_llm, seen):
+            events = [event async for event in loop.stream("Hola", context=ctx)]
+
+    assert events[-1].data["final_answer"] == "Listo"
+    assert any("revisa el resultado" in str(msg["content"]) for msg in seen[1])
+    assert _hook_context_messages(ctx) == []

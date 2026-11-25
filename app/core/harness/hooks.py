@@ -27,6 +27,7 @@ SUPPORTED_EVENTS = frozenset({
     "StopFailure",
 })
 TOOL_EVENTS = frozenset({"PreToolUse", "PostToolUse"})
+CONTEXT_EVENTS = frozenset({"UserPromptSubmit", "PreToolUse", "PostToolUse"})
 
 
 @dataclass
@@ -69,10 +70,24 @@ class HookEvent:
 
 @dataclass
 class HookOutcome:
-    """Resultado de un evento: ``denied`` bloquea la herramienta en curso."""
+    """Resultado de un evento: ``denied`` bloquea la herramienta en curso.
+
+    ``additional_context`` es información temporal para el LLM: se inyecta
+    antes de la siguiente llamada y se retira al terminar el turno.
+    """
 
     denied: bool = False
     reason: str = ""
+    additional_context: str = ""
+
+    @staticmethod
+    def _extract_context(payload: dict) -> str:
+        """Lee `additionalContext` del bloque específico o de la raíz."""
+        specific = payload.get("hookSpecificOutput")
+        value = payload.get("additionalContext")
+        if isinstance(specific, dict):
+            value = specific.get("additionalContext") or value
+        return str(value).strip() if value else ""
 
     @classmethod
     def from_process(
@@ -81,7 +96,10 @@ class HookOutcome:
         # Convención Claude Code: exit 2 + motivo en stderr = bloqueo.
         if returncode == 2:
             reason = stderr.decode("utf-8", errors="replace").strip()
-            return cls(denied=True, reason=reason or "El hook bloqueó la acción (código 2).")
+            return cls(
+                denied=True,
+                reason=reason or "El hook bloqueó la acción (código 2).",
+            )
 
         if stdout:
             try:
@@ -89,13 +107,17 @@ class HookOutcome:
             except (UnicodeDecodeError, json.JSONDecodeError):
                 payload = None
             if isinstance(payload, dict):
+                context = cls._extract_context(payload)
                 specific = payload.get("hookSpecificOutput")
                 if isinstance(specific, dict) and specific.get("permissionDecision") == "deny":
                     reason = specific.get("permissionDecisionReason") or "El hook bloqueó la acción."
-                    return cls(denied=True, reason=str(reason))
+                    return cls(denied=True, reason=str(reason),
+                               additional_context=context)
                 if payload.get("decision") == "block":
                     reason = payload.get("reason") or "El hook bloqueó la acción."
-                    return cls(denied=True, reason=str(reason))
+                    return cls(denied=True, reason=str(reason),
+                               additional_context=context)
+                return cls(additional_context=context)
         return cls()
 
 
@@ -165,6 +187,7 @@ class HookManager:
         )
         self.registry = registry or HookRegistry()
         self.timeout = settings.TOOL_TIMEOUT if timeout is None else timeout
+        self.pending_context = ""
         self.reload()
 
     def reload(self) -> None:
@@ -182,14 +205,38 @@ class HookManager:
         self.registry.load(config if isinstance(config, dict) else {})
 
     async def emit(self, event: HookEvent) -> HookOutcome:
-        """Ejecuta los hooks del evento; el primer deny gana y corta la cadena."""
+        """Ejecuta los hooks en orden; el primer deny gana y corta la cadena.
+
+        Los ``additionalContext`` se concatenan y quedan pendientes para la
+        siguiente llamada al LLM en los eventos que lo permiten.
+        """
+        contexts: list[str] = []
+        denial: HookOutcome | None = None
         for handler in self.registry.for_event(
             event.hook_event_name, event.tool_name
         ):
             outcome = await self._launch(handler["command"], event)
+            if outcome.additional_context:
+                contexts.append(outcome.additional_context)
             if outcome.denied:
-                return outcome
-        return HookOutcome()
+                denial = outcome
+                break
+
+        aggregated = "\n".join(contexts)
+        if aggregated and event.hook_event_name in CONTEXT_EVENTS:
+            self.pending_context = "\n".join(
+                part for part in (self.pending_context, aggregated) if part)
+        return HookOutcome(
+            denied=denial is not None,
+            reason=denial.reason if denial else "",
+            additional_context=aggregated,
+        )
+
+    def drain_context(self) -> str:
+        """Devuelve y limpia el contexto pendiente (un solo uso por turno)."""
+        context = self.pending_context
+        self.pending_context = ""
+        return context
 
     async def _launch(self, command: str, event: HookEvent) -> HookOutcome:
         payload = json.dumps(event.to_dict(), ensure_ascii=False).encode("utf-8")

@@ -31,7 +31,7 @@ La configuración vive en `.harness/hooks.json` (`settings.hooks_file`) y se car
 - `matcher` admite alternativas separadas por `|` y solo filtra `PreToolUse`/`PostToolUse` por nombre de herramienta; vacío significa «todas». En el resto de eventos se ignora.
 - Solo se aceptan handlers `type: command` (fase 1). Los tipos `http`, `prompt` y `agent` quedan para la fase 3.
 - `disableAllHooks: true` desactiva todos los hooks sin borrar la configuración.
-- Los scripts de hooks van en `.harness/hooks/` y se versionan; los logs que generan (`audit.log`) quedan ignorados.
+- Los scripts de hooks van en `.harness/hooks/` y se versionan; el log que generan (`audit.log`) queda ignorado.
 
 ## Arquitectura
 
@@ -68,6 +68,17 @@ Un handler `command` puede impedir la ejecución de la herramienta en dos format
 ### Guardia `no_delete.py`
 
 `.harness/hooks/no_delete.py` es un hook `PreToolUse` con matcher `bash`. Lee el evento por stdin y, si `tool_input.command` contiene `rm`, `rmdir`, `unlink`, `shred`, `git rm`, `find ... -delete`, `os.remove`, `os.unlink`, `Path(...).unlink()` o `shutil.rmtree()`, devuelve el JSON `deny` con el comando bloqueado en el motivo. El análisis es conservador: ante la duda, bloquea. Las órdenes sin borrado no escriben nada y la herramienta continúa.
+
+### Registro compartido `audit.py`
+
+`.harness/hooks/audit.py` es tanto el hook `PostToolUse` que registra `edit_file`/`write_file` como el módulo de registro compartido: expone `log_event(event)` y escribe siempre en `<cwd>/.harness/hooks/audit.log` con el formato:
+
+```text
+2026-11-24T23:28:12+00:00 tool=bash success=False command=rm -f archivo.txt
+2026-11-24T23:29:01+00:00 tool=edit_file success=True path=app/tui/app.py
+```
+
+`no_delete.py` importa `log_event()` y registra el bloqueo **en el momento de decidirlo**, antes de devolver el `deny`. Por eso no hace falta un segundo hook `PostToolUse` con matcher `bash` y no hay entradas duplicadas. Para `bash` se guarda el comando; para el resto de herramientas, la ruta. Los saltos de línea del comando se escapan para mantener una entrada por línea.
 
 ## Fail-open y límites
 

@@ -10,6 +10,8 @@ import json
 import re
 import sys
 
+from audit import log_event
+
 # Detecta borrados directos, borrados con git/find y borrados desde Python.
 # Se aplica solo a `bash`; el análisis es conservador: ante la duda, bloquea.
 DELETE_PATTERNS = tuple(
@@ -56,6 +58,12 @@ def main() -> None:
         return
 
     if any(pattern.search(command) for pattern in DELETE_PATTERNS):
+        log_event({
+            "cwd": event.get("cwd", ""),
+            "tool_name": "bash",
+            "tool_input": {"command": command},
+            "success": False,
+        })
         sys.stdout.write(json.dumps(deny_decision(command), ensure_ascii=False))
 
 

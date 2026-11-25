@@ -69,8 +69,10 @@ chroma_db/
 !.harness/hooks/
 .harness/hooks/*
 !.harness/hooks/**
-# Los logs generados por los hooks siguen siendo locales.
+# Los logs y los bytecode generados por los hooks siguen siendo locales.
 .harness/hooks/**/*.log
+.harness/hooks/**/__pycache__/
+.harness/hooks/**/*.pyc
 
 # # ==========================================
 # # Permisos Locales del Harness

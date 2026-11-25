@@ -423,16 +423,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 NO_DELETE_SCRIPT = REPO_ROOT / ".harness" / "hooks" / "no_delete.py"
 
 
-def _run_no_delete(command: str, tool_name: str = "bash"):
+def _run_no_delete(command: str, tool_name: str = "bash", cwd: Path | None = None):
+    cwd = cwd or REPO_ROOT
     payload = json.dumps({
         "hook_event_name": "PreToolUse",
-        "cwd": str(REPO_ROOT),
+        "cwd": str(cwd),
         "tool_name": tool_name,
         "tool_input": {"command": command},
     })
     return subprocess.run(
         [sys.executable, str(NO_DELETE_SCRIPT)],
-        input=payload, capture_output=True, text=True, cwd=REPO_ROOT,
+        input=payload, capture_output=True, text=True, cwd=cwd,
         check=False,
     )
 
@@ -449,8 +450,8 @@ def _run_no_delete(command: str, tool_name: str = "bash"):
     "python3 -c \"from pathlib import Path; Path('x').unlink()\"",
     "ls && rm -f temporal.txt",
 ])
-def test_no_delete_script_denies_destructive_commands(command):
-    result = _run_no_delete(command)
+def test_no_delete_script_denies_destructive_commands(tmp_path, command):
+    result = _run_no_delete(command, cwd=tmp_path)
 
     assert result.returncode == 0
     decision = json.loads(result.stdout)["hookSpecificOutput"]
@@ -479,6 +480,76 @@ def test_no_delete_script_survives_invalid_payload():
 
     assert result.returncode == 0
     assert result.stdout.strip() == ""
+
+
+AUDIT_SCRIPT = REPO_ROOT / ".harness" / "hooks" / "audit.py"
+
+
+def _run_audit(event: dict, cwd: Path):
+    return subprocess.run(
+        [sys.executable, str(AUDIT_SCRIPT)],
+        input=json.dumps(event), capture_output=True, text=True,
+        cwd=cwd, check=False,
+    )
+
+
+@pytest.mark.parametrize("tool,tool_input,success,expected", [
+    ("edit_file", {"path": "app.py"}, True,
+     "tool=edit_file success=True path=app.py"),
+    ("write_file", {"path": "nuevo.py"}, False,
+     "tool=write_file success=False path=nuevo.py"),
+])
+def test_audit_script_records_edits(
+        tmp_path, tool, tool_input, success, expected):
+    result = _run_audit({
+        "hook_event_name": "PostToolUse", "tool_name": tool,
+        "tool_input": tool_input, "success": success,
+    }, tmp_path)
+
+    assert result.returncode == 0
+    log = (tmp_path / ".harness" / "hooks" / "audit.log").read_text(
+        encoding="utf-8")
+    assert expected in log
+
+
+def test_audit_script_ignores_bash(tmp_path):
+    """Los bloqueos de bash los registra `no_delete.py` vía `log_event()`."""
+    _run_audit({
+        "hook_event_name": "PostToolUse", "tool_name": "bash",
+        "tool_input": {"command": "rm temporal-hook.txt"}, "success": False,
+    }, tmp_path)
+
+    assert not (tmp_path / ".harness" / "hooks" / "audit.log").exists()
+
+
+def test_audit_script_survives_invalid_payload(tmp_path):
+    result = subprocess.run(
+        [sys.executable, str(AUDIT_SCRIPT)],
+        input="no es json", capture_output=True, text=True,
+        cwd=tmp_path, check=False,
+    )
+
+    assert result.returncode == 0
+    assert not (tmp_path / ".harness" / "hooks" / "audit.log").exists()
+
+
+def test_no_delete_logs_denial_through_audit_module(tmp_path):
+    """El guardia usa el registrador compartido y deja una sola línea."""
+    result = _run_no_delete("rm temporal-hook.txt", cwd=tmp_path)
+
+    assert json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    lines = (tmp_path / ".harness" / "hooks" / "audit.log").read_text(
+        encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert "tool=bash success=False command=rm temporal-hook.txt" in lines[0]
+
+
+def test_hooks_config_has_no_duplicate_bash_audit():
+    config = json.loads(
+        (REPO_ROOT / ".harness" / "hooks.json").read_text(encoding="utf-8"))
+
+    matchers = [group.get("matcher", "") for group in config["hooks"]["PostToolUse"]]
+    assert "bash" not in matchers
 
 
 def test_settings_exposes_hooks_file():

@@ -11,6 +11,7 @@ import fnmatch
 import json
 import os
 import re
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -305,7 +306,29 @@ class HookManager:
         return f"{event_name}|{entry.get('type', 'command')}|{target}"
 
     def _record_error(self, event_name: str, entry: dict, message: Any) -> None:
-        self.errors[self._handler_key(event_name, entry)] = str(message)[:300]
+        text = str(message or "").strip()
+        self.errors[self._handler_key(event_name, entry)] = (
+            text or "error sin motivo")[:300]
+
+    @staticmethod
+    def _format_hook_error(
+        exc: BaseException, timeout: float | None = None
+    ) -> str:
+        """Describe la excepción; los timeouts suelen tener `str()` vacío."""
+        detail = str(exc).strip()
+        if isinstance(
+            exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)
+        ):
+            detail = (
+                f"superó {timeout:g}s" if timeout is not None
+                else (detail or "timeout")
+            )
+        return f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+
+    @staticmethod
+    def _log_hook(payload: dict) -> None:
+        """Publica el ciclo de vida del hook como JSON en el panel de debug."""
+        logger.info(json.dumps(payload, ensure_ascii=False))
 
     def _stat_mtime(self) -> float | None:
         try:
@@ -337,44 +360,108 @@ class HookManager:
         self.reload()
         return True
 
-    async def emit(self, event: HookEvent) -> HookOutcome:
-        """Ejecuta los hooks en orden; el primer deny gana y corta la cadena.
+    async def emit(
+        self, event: HookEvent, parallel: bool = False
+    ) -> HookOutcome:
+        """Ejecuta los hooks; el primer deny en orden de configuración gana.
 
-        Los ``additionalContext`` se concatenan y quedan pendientes para la
-        siguiente llamada al LLM en los eventos que lo permiten.
+        Por defecto se ejecutan en serie y el primer deny corta la cadena. Con
+        ``parallel=True`` todos arrancan a la vez (útil en ``UserPromptSubmit``
+        para no sumar latencias), pero los resultados se reducen en el orden
+        original: el contexto se concatena igual y el primer deny sigue
+        ganando, aunque los demás handlers ya se hayan ejecutado.
         """
         self.reload_if_changed()
-        contexts: list[str] = []
-        denial: HookOutcome | None = None
-        for entry in self.registry.for_event(
+        started = time.perf_counter()
+        entries = self.registry.for_event(
             event.hook_event_name, event.tool_name, event.tool_input
-        ):
-            outcome = await self._run_handler(entry, event)
-            if outcome.additional_context:
-                contexts.append(outcome.additional_context)
-            if outcome.denied:
-                denial = outcome
-                break
+        )
+        if parallel and len(entries) > 1:
+            outcomes = list(await asyncio.gather(
+                *(self._run_handler(entry, event) for entry in entries)
+            ))
+        else:
+            outcomes = []
+            for entry in entries:
+                outcome = await self._run_handler(entry, event)
+                outcomes.append(outcome)
+                if outcome.denied:
+                    break
 
+        contexts = [
+            outcome.additional_context
+            for outcome in outcomes if outcome.additional_context
+        ]
+        denial = next(
+            (outcome for outcome in outcomes if outcome.denied), None)
         aggregated = "\n".join(contexts)
         if aggregated and event.hook_event_name in CONTEXT_EVENTS:
             self.pending_context = "\n".join(
                 part for part in (self.pending_context, aggregated) if part)
-        return HookOutcome(
+        result = HookOutcome(
             denied=denial is not None,
             reason=denial.reason if denial else "",
             additional_context=aggregated,
         )
+        self._log_hook({
+            "hook": "emit",
+            "event": event.hook_event_name,
+            "parallel": parallel,
+            "handlers": len(entries),
+            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            "input": event.to_dict(),
+            "output": {
+                "denied": result.denied,
+                "reason": result.reason,
+                "additionalContext": result.additional_context,
+            },
+        })
+        return result
 
     async def _run_handler(self, entry: dict, event: HookEvent) -> HookOutcome:
         kind = entry.get("type", "command")
-        if kind == "command":
-            return await self._launch(entry, event)
-        if kind == "http":
-            return await self._launch_http(entry, event)
-        if kind == "prompt":
-            return await self._launch_prompt(entry, event)
-        return await self._launch_agent(entry, event)
+        started = time.perf_counter()
+        outcome = HookOutcome()
+        try:
+            if kind == "command":
+                outcome = await self._launch(entry, event)
+            elif kind == "http":
+                outcome = await self._launch_http(entry, event)
+            elif kind == "prompt":
+                outcome = await self._launch_prompt(entry, event)
+            else:
+                outcome = await self._launch_agent(entry, event)
+            return outcome
+        finally:
+            error = self.errors.get(
+                self._handler_key(event.hook_event_name, entry), "")
+            status = "error" if error else (
+                "denied" if outcome.denied else "ok")
+            provider = entry.get("provider")
+            if not provider and kind in ("prompt", "agent"):
+                provider = settings.LLM_PROVIDER
+            self._log_hook({
+                "hook": "handler",
+                "event": event.hook_event_name,
+                "type": kind,
+                "status": status,
+                "duration_ms": round(
+                    (time.perf_counter() - started) * 1000, 2),
+                "matcher": entry.get("matcher", ""),
+                "if": entry.get("if", ""),
+                "target": (
+                    entry.get("command") or entry.get("url")
+                    or entry.get("prompt") or ""
+                ),
+                "provider": provider or "",
+                "input": event.to_dict(),
+                "output": {
+                    "denied": outcome.denied,
+                    "reason": outcome.reason,
+                    "additionalContext": outcome.additional_context,
+                },
+                "error": error or None,
+            })
 
     async def _launch(self, entry: dict, event: HookEvent) -> HookOutcome:
         command = entry["command"]
@@ -395,8 +482,9 @@ class HookManager:
             if process is not None and process.returncode is None:
                 process.kill()
                 await process.wait()
-            logger.warning(f"Hook '{command}' falló: {exc}")
-            self._record_error(event.hook_event_name, entry, exc)
+            message = self._format_hook_error(exc, self.timeout)
+            logger.warning(f"Hook '{command}' falló: {message}")
+            self._record_error(event.hook_event_name, entry, message)
             return HookOutcome()
 
         if process.returncode != 0:
@@ -412,14 +500,14 @@ class HookManager:
 
     async def _launch_http(self, entry: dict, event: HookEvent) -> HookOutcome:
         url = entry["url"]
+        timeout = entry.get("timeout", self.timeout)
         try:
-            async with httpx.AsyncClient(
-                timeout=entry.get("timeout", self.timeout)
-            ) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, json=event.to_dict())
         except Exception as exc:
-            logger.warning(f"Hook http '{url}' falló: {exc}")
-            self._record_error(event.hook_event_name, entry, exc)
+            message = self._format_hook_error(exc, timeout)
+            logger.warning(f"Hook http '{url}' falló: {message}")
+            self._record_error(event.hook_event_name, entry, message)
             return HookOutcome()
         if response.status_code >= 400:
             logger.warning(
@@ -452,13 +540,15 @@ class HookManager:
             ]
             response = await asyncio.wait_for(llm.chat(messages), self.timeout)
         except Exception as exc:
-            logger.warning(f"Hook prompt falló: {exc}")
-            self._record_error(event.hook_event_name, entry, exc)
+            message = self._format_hook_error(exc, self.timeout)
+            logger.warning(f"Hook prompt falló: {message}")
+            self._record_error(event.hook_event_name, entry, message)
             return HookOutcome()
         return HookOutcome.from_text(
             response.content or "", plain_is_context=True)
 
     async def _launch_agent(self, entry: dict, event: HookEvent) -> HookOutcome:
+        timeout = entry.get("timeout", AGENT_HOOK_TIMEOUT)
         token = _hook_depth.set(_hook_depth.get() + 1)
         try:
             from .permissions import PermissionGate
@@ -481,18 +571,19 @@ class HookManager:
                 f"{entry['prompt']}\n\nEvento: "
                 f"{json.dumps(event.to_dict(), ensure_ascii=False)}"
             )
-            result = await asyncio.wait_for(
-                delegate.run(task), entry.get("timeout", AGENT_HOOK_TIMEOUT))
+            result = await asyncio.wait_for(delegate.run(task), timeout)
         except Exception as exc:
-            logger.warning(f"Hook agent falló: {exc}")
-            self._record_error(event.hook_event_name, entry, exc)
+            message = self._format_hook_error(exc, timeout)
+            logger.warning(f"Hook agent falló: {message}")
+            self._record_error(event.hook_event_name, entry, message)
             return HookOutcome()
         finally:
             _hook_depth.reset(token)
 
         if not result.success:
-            logger.warning(f"Hook agent devolvió error: {result.error}")
-            self._record_error(event.hook_event_name, entry, result.error)
+            reason = result.error or "sin motivo"
+            logger.warning(f"Hook agent devolvió error: {reason}")
+            self._record_error(event.hook_event_name, entry, reason)
             return HookOutcome()
         text = (result.content or "").split("Response:\n", 1)[-1]
         return HookOutcome.from_text(text, plain_is_context=True)
@@ -535,8 +626,10 @@ class HookManager:
 hook_manager = HookManager()
 
 
-async def emit_hook(event: HookEvent) -> HookOutcome:
+async def emit_hook(
+    event: HookEvent, parallel: bool = False
+) -> HookOutcome:
     """Dispara un evento; reutilizable desde el loop, el contexto y la TUI."""
     if _hook_depth.get() > 0:
         return HookOutcome()
-    return await hook_manager.emit(event)
+    return await hook_manager.emit(event, parallel=parallel)

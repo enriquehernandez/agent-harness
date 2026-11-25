@@ -481,15 +481,17 @@ class AgentHarnessApp(App):
         await self._stream_user_message(user_input, loading)
 
     async def _stream_user_message(self, user_input: str, loading: LoadingIndicator) -> None:
-        await emit_hook(HookEvent(
-            hook_event_name="UserPromptSubmit", prompt=user_input,
-            session_id=str(getattr(self.session_manager, "session_id", "") or ""),
-        ))
+        # Mostramos primero el mensaje y el indicador: los hooks pueden llamar
+        # a un LLM y no deben retrasar la respuesta visual de la TUI.
         self.update_dashboard("Pensando...")
         display_text = user_input if len(
             user_input) < 300 else user_input[:300] + "..."
         await self.write_to_chat(display_text, type="user")
         loading.display = True
+        await emit_hook(HookEvent(
+            hook_event_name="UserPromptSubmit", prompt=user_input,
+            session_id=str(getattr(self.session_manager, "session_id", "") or ""),
+        ), parallel=True)
         temp_msg = self._begin_pending_mode()
 
         try:
@@ -608,10 +610,6 @@ class AgentHarnessApp(App):
         user_text = await self._expand_skills(user_text)
 
         if self.attached_images:
-            await emit_hook(HookEvent(
-                hook_event_name="UserPromptSubmit", prompt=user_text,
-                session_id=str(getattr(self.session_manager, "session_id", "") or ""),
-            ))
             display_text = user_text if user_text else "[Imagen adjunta]"
             await self.write_to_chat(display_text, type="user")
             temp_msg = self._begin_pending_mode()
@@ -621,6 +619,10 @@ class AgentHarnessApp(App):
             self.update_dashboard("Pensando...")
             loading = self.query_one("#loading-indicator", LoadingIndicator)
             loading.display = True
+            await emit_hook(HookEvent(
+                hook_event_name="UserPromptSubmit", prompt=user_text,
+                session_id=str(getattr(self.session_manager, "session_id", "") or ""),
+            ), parallel=True)
             try:
                 stream_gen = self.agent_loop.stream("", context=self.ctx, verbose=getattr(
                     self, 'verbose_mode', False), timeout_seconds=settings.LLM_STREAM_TIMEOUT)

@@ -49,7 +49,7 @@ TEST_ENTRIES = [
     ),
     MemoryEntry(
         key="debug_tips",
-        value="Para depurar, usar /debug on en la TUI y revisar el panel lateral con F1. Los logs van a harness_debug.log.",
+        value="Para depurar, usar /debug on en la TUI y revisar el panel lateral con F1. Los logs van a .harness/logs/yyyy_MM_dd_harness.log.",
         timestamp=datetime.now(),
         kind="fact"
     ),

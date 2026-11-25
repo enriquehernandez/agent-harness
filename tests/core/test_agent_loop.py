@@ -6,6 +6,7 @@ from typing import AsyncIterator
 
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
+import app.core.harness.hooks as hooks_module
 from app.core.harness.loop import AgentLoop
 from app.core.harness.permissions import PermissionGate, Decision
 from app.core.harness.tool import FunctionTool, ToolRegistry, ToolResult
@@ -576,8 +577,11 @@ async def test_real_no_delete_hook_blocks_bash_rm(fake_llm, tmp_path):
 
     with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
         with patch("app.core.harness.hooks.hook_manager", manager):
-            loop = AgentLoop(llm=fake_llm, tools=registry, max_iterations=1)
-            events = [event async for event in loop.stream("Borra el archivo")]
+            # Este test sí quiere hooks reales; anula el no-op del fixture global.
+            with patch("app.core.harness.loop.emit_hook",
+                       side_effect=hooks_module.emit_hook):
+                loop = AgentLoop(llm=fake_llm, tools=registry, max_iterations=1)
+                events = [event async for event in loop.stream("Borra el archivo")]
 
     denials = [event for event in events if event.type == "hook_denied"]
     assert len(denials) == 1

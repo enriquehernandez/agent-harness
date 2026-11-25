@@ -6,6 +6,7 @@ from textual.widgets import Input, Static, ListView, Tree
 from textual.worker import NoActiveWorker
 from app.core.harness.loop import LoopResult
 from app.core.harness.context import ContextManager
+from app.core.harness.hooks import HookOutcome
 from pathlib import Path
 
 
@@ -1320,6 +1321,38 @@ async def test_app_emits_user_prompt_submit_hook():
     events = [call.args[0] for call in emit.await_args_list]
     assert [event.hook_event_name for event in events] == ["UserPromptSubmit"]
     assert events[0].prompt == "Hola"
+
+
+@pytest.mark.asyncio
+async def test_app_shows_prompt_before_slow_hooks():
+    """El mensaje y el indicador aparecen aunque los hooks tarden."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+
+        async def mock_stream(*args, **kwargs):
+            yield "ok"
+
+        app.agent_loop = MagicMock(stream=mock_stream)
+        release = asyncio.Event()
+
+        async def slow_emit(*args, **kwargs):
+            await release.wait()
+            return HookOutcome()
+
+        async with app.run_test() as pilot:
+            with patch("app.tui.app.emit_hook", side_effect=slow_emit) as emit:
+                app.process_input("Hola")
+                await pilot.pause()
+
+                texts = [str(getattr(child, "renderable", getattr(child, "content", "")))
+                         for child in app.query_one("#chat-scroll").children]
+                assert any("Hola" in text for text in texts)
+                assert app.query_one("#loading-indicator").display is True
+                assert emit.await_count == 1
+
+                release.set()
+                await pilot.pause()
 
 
 @pytest.mark.asyncio

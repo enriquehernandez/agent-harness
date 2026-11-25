@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.config import settings
 from app.core.harness import hooks as hooks_module
 from app.core.harness.hooks import (
     HookEvent, HookManager, HookOutcome, HookRegistry, emit_hook,
@@ -29,6 +30,26 @@ def _fake_process(returncode=0, stderr=b"", stdout=b"", communicate=None):
 def _write_config(path: Path, config: dict) -> Path:
     path.write_text(json.dumps(config), encoding="utf-8")
     return path
+
+
+def test_format_hook_error_describes_timeout_and_message():
+    """Los timeouts y las excepciones sin texto dejan un motivo legible."""
+    format_error = hooks_module.HookManager._format_hook_error
+
+    assert format_error(asyncio.TimeoutError(), 10) == "TimeoutError: superó 10s"
+    assert format_error(ValueError("sin modelo"), 2) == "ValueError: sin modelo"
+    assert format_error(Exception()) == "Exception"
+    assert format_error(hooks_module.httpx.TimeoutException("timeout"), 3) == (
+        "TimeoutException: superó 3s")
+
+
+def test_record_error_falls_back_to_a_reason():
+    manager = HookManager(config_file=Path("no-existe.json"))
+    entry = {"command": "echo hola"}
+
+    manager._record_error("Stop", entry, "")
+
+    assert manager.errors["Stop|command|echo hola"] == "error sin motivo"
 
 
 def test_hook_event_payload_with_all_fields():
@@ -251,6 +272,7 @@ async def test_manager_kills_process_on_timeout(tmp_path):
     process.kill.assert_called_once()
     process.wait.assert_awaited_once()
     assert "lento" in warn.call_args[0][0]
+    assert "TimeoutError: superó 30s" in warn.call_args[0][0]
 
 
 @pytest.mark.asyncio
@@ -299,7 +321,17 @@ async def test_emit_hook_delegates_to_module_manager():
     with patch.object(hooks_module, "hook_manager", new_callable=AsyncMock) as manager:
         await emit_hook(event)
 
-    manager.emit.assert_awaited_once_with(event)
+    manager.emit.assert_awaited_once_with(event, parallel=False)
+
+
+@pytest.mark.asyncio
+async def test_emit_hook_forwards_parallel_flag():
+    event = HookEvent("UserPromptSubmit")
+
+    with patch.object(hooks_module, "hook_manager", new_callable=AsyncMock) as manager:
+        await emit_hook(event, parallel=True)
+
+    manager.emit.assert_awaited_once_with(event, parallel=True)
 
 
 def test_hook_outcome_defaults_to_allow():
@@ -736,6 +768,82 @@ def test_manager_drain_context_is_single_use():
     assert manager.drain_context() == ""
 
 
+@pytest.mark.asyncio
+async def test_manager_emit_parallel_runs_handlers_concurrently(tmp_path):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "UserPromptSubmit": [{"hooks": [
+            {"type": "prompt", "prompt": "primero"},
+            {"type": "prompt", "prompt": "segundo"},
+        ]}]
+    }})
+    manager = HookManager(config_file=config_file)
+    started: list[str] = []
+    release = asyncio.Event()
+
+    async def fake_handler(entry, event):
+        started.append(entry["prompt"])
+        if len(started) == 2:
+            release.set()
+        await release.wait()
+        return HookOutcome(additional_context=entry["prompt"])
+
+    with patch.object(manager, "_run_handler", side_effect=fake_handler):
+        outcome = await manager.emit(
+            HookEvent("UserPromptSubmit"), parallel=True)
+
+    assert started == ["primero", "segundo"]
+    assert outcome.additional_context == "primero\nsegundo"
+    assert manager.pending_context == "primero\nsegundo"
+
+
+@pytest.mark.asyncio
+async def test_manager_emit_parallel_keeps_first_deny_in_config_order(tmp_path):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "UserPromptSubmit": [{"hooks": [
+            {"type": "prompt", "prompt": "primero"},
+            {"type": "prompt", "prompt": "segundo"},
+        ]}]
+    }})
+    manager = HookManager(config_file=config_file)
+    outcomes = {
+        "primero": HookOutcome(denied=True, reason="no uno",
+                               additional_context="ctx uno"),
+        "segundo": HookOutcome(denied=True, reason="no dos",
+                               additional_context="ctx dos"),
+    }
+
+    async def fake_handler(entry, event):
+        return outcomes[entry["prompt"]]
+
+    with patch.object(manager, "_run_handler", side_effect=fake_handler):
+        outcome = await manager.emit(
+            HookEvent("UserPromptSubmit"), parallel=True)
+
+    assert outcome.denied is True
+    assert outcome.reason == "no uno"
+    assert outcome.additional_context == "ctx uno\nctx dos"
+
+
+@pytest.mark.asyncio
+async def test_manager_emit_parallel_with_single_handler_is_sequential(tmp_path):
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "UserPromptSubmit": [{"hooks": [{"type": "prompt", "prompt": "único"}]}]
+    }})
+    manager = HookManager(config_file=config_file)
+    calls: list[str] = []
+
+    async def fake_handler(entry, event):
+        calls.append(entry["prompt"])
+        return HookOutcome(additional_context="listo")
+
+    with patch.object(manager, "_run_handler", side_effect=fake_handler):
+        outcome = await manager.emit(
+            HookEvent("UserPromptSubmit"), parallel=True)
+
+    assert calls == ["único"]
+    assert outcome.additional_context == "listo"
+
+
 def test_registry_loads_all_hook_types():
     config = {"hooks": {"PreToolUse": [{"matcher": "bash", "hooks": [
         {"type": "command", "command": "echo hola"},
@@ -1069,7 +1177,27 @@ async def test_agent_hook_timeout_is_fail_open(tmp_path):
             outcome = await manager.emit(HookEvent("PostToolUse"))
 
     assert outcome.denied is False
-    assert "falló" in warn.call_args[0][0]
+    assert "Hook agent falló: TimeoutError: superó 60s" in warn.call_args[0][0]
+    assert any("TimeoutError: superó 60s" in error
+               for error in manager.errors.values())
+
+
+@pytest.mark.asyncio
+async def test_agent_timeout_is_logged_as_error_in_debug_panel(tmp_path):
+    """El panel marca el timeout como error y guarda su motivo."""
+    manager = _agent_manager(
+        tmp_path, handler={"type": "agent", "prompt": "revisa", "timeout": 1})
+    delegate = MagicMock()
+    delegate.run = AsyncMock(side_effect=asyncio.TimeoutError)
+
+    with patch("app.core.harness.subagents.DelegateTool", return_value=delegate):
+        with patch.object(hooks_module.logger, "info") as info:
+            await manager.emit(HookEvent("PostToolUse"))
+
+    logs = [json.loads(call.args[0]) for call in info.call_args_list]
+    handler_log = next(log for log in logs if log["hook"] == "handler")
+    assert handler_log["status"] == "error"
+    assert handler_log["error"] == "TimeoutError: superó 1s"
 
 
 @pytest.mark.asyncio
@@ -1126,3 +1254,79 @@ def test_describe_lists_hooks_truncates_and_shows_errors(tmp_path):
     assert "if `bash:rm *`" in description
     assert "HTTP 500" in description
     assert "Config:" in description
+
+
+@pytest.mark.asyncio
+async def test_emit_logs_hook_lifecycle_with_matcher_input_and_output(tmp_path):
+    """Cada handler y el evento global dejan un JSON en el panel de debug."""
+    config_file = _write_config(tmp_path / "hooks.json", {"hooks": {
+        "PreToolUse": [{"matcher": "bash", "hooks": [{
+            "type": "prompt", "prompt": "Resume", "provider": "fake",
+            "if": "bash:rm *"}]}]}})
+    manager = HookManager(config_file=config_file)
+    event = HookEvent("PreToolUse", tool_name="bash",
+                      tool_input={"command": "rm -f x"})
+
+    with patch.object(manager, "_launch_prompt", new_callable=AsyncMock) as launch:
+        launch.return_value = HookOutcome(additional_context="ctx")
+        with patch.object(hooks_module.logger, "info") as info:
+            await manager.emit(event, parallel=True)
+
+    payloads = [json.loads(call.args[0]) for call in info.call_args_list]
+    handler = next(p for p in payloads if p["hook"] == "handler")
+    emitted = next(p for p in payloads if p["hook"] == "emit")
+
+    assert handler["event"] == "PreToolUse"
+    assert handler["type"] == "prompt"
+    assert handler["matcher"] == "bash"
+    assert handler["if"] == "bash:rm *"
+    assert handler["target"] == "Resume"
+    assert handler["provider"] == "fake"
+    assert handler["input"] == event.to_dict()
+    assert handler["output"] == {
+        "denied": False, "reason": "", "additionalContext": "ctx"}
+    assert handler["status"] == "ok"
+    assert handler["duration_ms"] >= 0
+    assert emitted["parallel"] is True
+    assert emitted["handlers"] == 1
+    assert emitted["output"]["additionalContext"] == "ctx"
+
+
+@pytest.mark.asyncio
+async def test_handler_log_marks_denials_and_default_provider():
+    """Un deny se refleja en el log y el provider cae al global si falta."""
+    manager = HookManager(config_file=Path("no-existe.json"))
+    entry = {"type": "prompt", "prompt": "Bloquea", "matcher": ""}
+    event = HookEvent("UserPromptSubmit", prompt="hola")
+
+    with patch.object(manager, "_launch_prompt", new_callable=AsyncMock) as launch:
+        launch.return_value = HookOutcome(denied=True, reason="no")
+        with patch.object(hooks_module.logger, "info") as info:
+            outcome = await manager._run_handler(entry, event)
+
+    payload = json.loads(info.call_args.args[0])
+    assert outcome.denied is True
+    assert payload["status"] == "denied"
+    assert payload["provider"] == settings.LLM_PROVIDER
+    assert payload["output"]["denied"] is True
+    assert payload["output"]["reason"] == "no"
+    assert payload["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_handler_log_marks_recorded_errors():
+    """Los errores registrados por el handler aparecen en su log."""
+    manager = HookManager(config_file=Path("no-existe.json"))
+    entry = {"command": "echo hola"}
+    event = HookEvent("Stop")
+    manager._record_error("Stop", entry, "boom")
+
+    with patch.object(manager, "_launch", new_callable=AsyncMock) as launch:
+        launch.return_value = HookOutcome()
+        with patch.object(hooks_module.logger, "info") as info:
+            await manager._run_handler(entry, event)
+
+    payload = json.loads(info.call_args.args[0])
+    assert payload["status"] == "error"
+    assert payload["type"] == "command"
+    assert payload["error"] == "boom"

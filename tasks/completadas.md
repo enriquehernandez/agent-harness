@@ -113,3 +113,23 @@
 - **Estado:** Completada. `HookRegistry` acepta cuatro tipos (`command`, `http`, `prompt`, `agent`), matchers con nombres, `|` y regex, y filtro `if` con firmas `herramienta:detalle` estilo permisos. `HookOutcome.from_text()` entiende `ok: false`, `permissionDecision`, `decision: block` y `additionalContext`; `http` usa `httpx`, `prompt` una llamada LLM y `agent` un `DelegateTool` con timeout de 60 s y permisos hijos. `_hook_depth` evita la recursión de hooks y que el loop anidado del subagente drene el contexto del turno padre. `HookManager` registra errores por handler, los muestra en `describe()` y recarga la configuración por mtime en cada evento. `/hooks` y `/hooks reload` se añadieron a `AVAILABLE_COMMANDS` y a `/help` con el diseño aprobado en el chat (sin modal nuevo). Cubierto por tests nuevos en `tests/core/test_hooks.py`, `tests/core/test_agent_loop.py` y `tests/tui/test_commands.py` con cobertura del 100 %; documentado en `PRODUCT_BLUEPRINT/02_COMPONENTS/11_hooks.md`, `docs/herramientas.md` y `README.md`.
 
 - **Decisiones de diseño conservadas:** activación automática (sin comando para dispararlos; `/hooks` es solo un visor), configuración en `.harness/hooks.json` y nunca en `.claude/settings.json`, sin dependencias nuevas (`httpx` ya estaba en `pyproject.toml`), fail-open ante errores y `agent_name`/`agent_depth` en los eventos de subagentes A2A. Los commits se hicieron solo con aprobación explícita del usuario.
+
+## Hooks — Latencia percibida al enviar un prompt
+
+- **Objetivo:** que un hook `prompt`/`agent` lento en `UserPromptSubmit` no retrase la respuesta visual de la TUI.
+- **Estado:** Completada. `_stream_user_message()` y la rama de imágenes pintan el mensaje y activan «Pensando…» antes de esperar `emit_hook(..., parallel=True)`. `HookManager.emit(parallel=True)` ejecuta los handlers concurrentemente pero reduce los resultados en orden de configuración: mismo `additionalContext` concatenado y mismo primer deny ganador; los eventos de herramientas siguen en modo serie. Los tests de TUI y loop se aislaron del `hooks.json` local con fixtures en `tests/conftest.py` y `tests/tui/conftest.py`. Cubierto por tests nuevos y documentado en `PRODUCT_BLUEPRINT/02_COMPONENTS/11_hooks.md`, `docs/herramientas.md` y `README.md`.
+
+## Hooks — Observabilidad en el panel de debug
+
+- **Objetivo:** ver el ciclo de vida completo de los hooks (evento, matcher, input, output, estado y duración) sin depender de sondeos externos.
+- **Estado:** Completada. `HookManager._run_handler()` publica un JSON por handler y `emit()` otro con el resumen agregado; `DebugEventCollector` los formatea como entradas `🪝 ...` con detalle JSON en el modal. Cubierto por tests nuevos en `tests/core/test_hooks.py` y `tests/core/test_logger.py`, y documentado en `PRODUCT_BLUEPRINT/02_COMPONENTS/11_hooks.md`, `docs/herramientas.md` y `README.md`.
+
+## Hooks — Motivos de error legibles
+
+- **Objetivo:** evitar warnings y trazas de debug con el motivo vacío cuando un hook agota su timeout.
+- **Estado:** Completada. `HookManager._format_hook_error()` añade el tipo de excepción y el límite de tiempo (`TimeoutError: superó 10s`) en `command`, `http`, `prompt` y `agent`; `_record_error()` usa `error sin motivo` como fallback. El panel de debug marca estos casos como `status: error` con el motivo visible. Cubierto por tests nuevos y documentado en `PRODUCT_BLUEPRINT/02_COMPONENTS/11_hooks.md` y `docs/herramientas.md`.
+
+## Logs — Nombre diario del archivo
+
+- **Objetivo:** sustituir `harness_debug.log` por un archivo identificable por día (`yyyy_MM_dd_harness.log`).
+- **Estado:** Completada. `Settings.log_file` calcula la ruta diaria y `app/core/logger.py` la usa para el `FileHandler`. `DailyFileHandler` rota automáticamente al cambiar de día, incluso con la TUI abierta. Cubierto por test en `tests/core/test_logger.py`; documentado en `README.md` y `docs/herramientas.md`, y actualizado el mensaje de `scripts/verify_memory_backends.py`.

@@ -28,8 +28,9 @@ La configuración vive en `.harness/hooks.json` (`settings.hooks_file`) y se car
 }
 ```
 
-- `matcher` admite alternativas separadas por `|` y solo filtra `PreToolUse`/`PostToolUse` por nombre de herramienta; vacío significa «todas». En el resto de eventos se ignora.
-- Solo se aceptan handlers `type: command` (fase 1). Los tipos `http`, `prompt` y `agent` quedan para la fase 3.
+- `matcher` admite alternativas separadas por `|`, nombres exactos y regex estilo `mcp__.*`; solo filtra `PreToolUse`/`PostToolUse` por nombre de herramienta. Vacío significa «todas». En el resto de eventos se ignora.
+- Se aceptan cuatro tipos de handler: `command` (por defecto), `http`, `prompt` y `agent`.
+- Cada handler puede llevar `if`: una firma `herramienta:detalle` con comodines `fnmatch`, igual que las reglas de permisos (`bash:rm *`, `edit_file:src/*.py`). Solo se aplica en eventos de herramienta.
 - `disableAllHooks: true` desactiva todos los hooks sin borrar la configuración.
 - Los scripts de hooks van en `.harness/hooks/` y se versionan; el log que generan (`audit.log`) queda ignorado.
 
@@ -38,9 +39,9 @@ La configuración vive en `.harness/hooks.json` (`settings.hooks_file`) y se car
 `app/core/harness/hooks.py` contiene cuatro piezas:
 
 - `HookEvent`: payload con `hook_event_name`, `session_id`, `cwd`, `prompt`, `tool_name`, `tool_input`, `success`, `trigger`, `agent_name` y `agent_depth`. Los campos vacíos se omiten al serializar.
-- `HookOutcome`: resultado del evento (`denied`, `reason`, `additional_context`). Lo produce `from_process()` a partir de la salida del comando.
-- `HookRegistry`: carga y filtra los handlers por evento y herramienta, siguiendo el Registry Pattern.
-- `HookManager`: lee el JSON, lanza cada comando con `asyncio.create_subprocess_shell()` y pasa el evento por **stdin** como JSON. El comando sale de la configuración (archivo de confianza); los datos del evento nunca se interpolan en la cadena. Se aplica `settings.TOOL_TIMEOUT` y, si expira, se mata el proceso. También guarda el `additionalContext` pendiente hasta que el loop lo consume con `drain_context()`.
+- `HookOutcome`: resultado del evento (`denied`, `reason`, `additional_context`). `from_process()` parsea la salida del comando (incluido exit 2) y `from_text()` la de HTTP/prompt/agent; acepta `permissionDecision`, `decision: block`, `ok: false` y `additionalContext`.
+- `HookRegistry`: carga y filtra los handlers por evento, nombre de herramienta y firma `if`, siguiendo el Registry Pattern.
+- `HookManager`: lee el JSON, lanza cada handler y aplica la primera decisión de bloqueo. En `command` usa `asyncio.create_subprocess_shell()` y pasa el evento por **stdin** como JSON; el comando sale de la configuración (archivo de confianza) y los datos del evento nunca se interpolan en la cadena. Controla `settings.TOOL_TIMEOUT` (mata el proceso si expira), guarda el `additionalContext` pendiente hasta `drain_context()`, registra errores por handler para `/hooks` y recarga la config automáticamente si cambia su mtime (`reload_if_changed()`).
 
 `emit_hook(event)` es la única fachada pública; el módulo mantiene un `hook_manager` compartido.
 
@@ -107,4 +108,17 @@ Solo se guarda en los eventos `UserPromptSubmit`, `PreToolUse` y `PostToolUse`. 
 
 A diferencia del feedback, este contexto **no se conserva**: es de un solo uso por turno y nunca entra en el system prompt ni en la sesión.
 
-Pendiente: fase 3 (tipos avanzados, matchers completos y `/hooks`) en `tasks/pendientes.md`.
+### Tipos avanzados de handler
+
+| Tipo | Configuración | Comportamiento |
+| :--- | :--- | :--- |
+| `command` | `command` | Shell con el evento por stdin; `settings.TOOL_TIMEOUT` |
+| `http` | `url`, `timeout` opcional | `POST` JSON con `httpx.AsyncClient`; un `>= 400` se registra como error y se ignora |
+| `prompt` | `prompt`, `provider`/`model` opcionales | Una llamada LLM con el evento; JSON con `ok: false` bloquea y la respuesta en texto pasa a `additionalContext` |
+| `agent` | `prompt`, `tools`, `timeout` opcionales | `DelegateTool` con permisos hijos y timeout de 60 s por defecto; su respuesta se parsea igual que `prompt` |
+
+Los tipos `prompt` y `agent` reutilizan el LLM inyectado en `HookManager` (tests) o construyen uno desde `provider`/`model` y `settings.LLM_PROVIDER`. El contexto variable `_hook_depth` impide que los eventos del subagente vuelvan a disparar hooks ni a drenar el `additionalContext` del turno padre.
+
+### Interfaz y recarga
+
+`/hooks` muestra en el chat los eventos, tipos, comandos/URLs/prompts, matchers, filtros `if` y los errores registrados por handler. `/hooks reload` fuerza la lectura de `.harness/hooks.json` y vuelve a mostrar el estado. Además, `HookManager.emit()` comprueba el mtime del archivo antes de cada evento (`hot-reload`), así que basta con editar la configuración: no hace falta reiniciar la TUI. Los cambios de la TUI se limitaron a registrarlo en `AVAILABLE_COMMANDS` y en `/help`.

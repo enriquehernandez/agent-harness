@@ -1,6 +1,6 @@
 # Tarea Actual
 
-No quedan tareas en ejecución. Las fases 2A (feedback de `Stop`/`PostToolUse`) y 2B (`additionalContext` temporal) terminaron y están en `tasks/completadas.md`; sigue pendiente la Fase 3 en `tasks/pendientes.md`.
+No quedan tareas en ejecución. Las cuatro fases de hooks están terminadas y documentadas en `tasks/completadas.md`; `tasks/pendientes.md` no tiene tareas sueltas.
 
 ## Notas
 

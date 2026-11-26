@@ -113,11 +113,29 @@ A diferencia del feedback, este contexto **no se conserva**: es de un solo uso p
 | Tipo | Configuración | Comportamiento |
 | :--- | :--- | :--- |
 | `command` | `command` | Shell con el evento por stdin; `settings.TOOL_TIMEOUT` |
-| `http` | `url`, `timeout` opcional | `POST` JSON con `httpx.AsyncClient`; un `>= 400` se registra como error y se ignora |
+| `http` | `url`, `timeout` opcional | `POST` JSON con `httpx.AsyncClient`; la ruta no tiene semántica, solo el JSON de respuesta (ver abajo); un `>= 400` se registra como error y se ignora |
 | `prompt` | `prompt`, `provider`/`model` opcionales | Una llamada LLM con el evento; JSON con `ok: false` bloquea y la respuesta en texto pasa a `additionalContext` |
 | `agent` | `prompt`, `tools`, `timeout` opcionales | `DelegateTool` con permisos hijos y timeout de 60 s por defecto; su respuesta se parsea igual que `prompt` |
 
 Los tipos `prompt` y `agent` reutilizan el LLM inyectado en `HookManager` (tests) o construyen uno desde `provider`/`model` y `settings.LLM_PROVIDER`. El contexto variable `_hook_depth` impide que los eventos del subagente vuelvan a disparar hooks ni a drenar el `additionalContext` del turno padre.
+
+### Contrato de respuesta del hook `http`
+
+El harness envía el `HookEvent` completo como JSON en el cuerpo del `POST`. **La ruta es solo una etiqueta del servidor**: `/context`, `/deny` o cualquier otra no activan comportamientos especiales en el harness. Lo que decide el efecto es el JSON devuelto con `status < 400`:
+
+| Respuesta | Efecto |
+| :--- | :--- |
+| `{"additionalContext": "..."}` | Se concatena con los demás aportes y se inyecta como contexto temporal (ver más arriba). |
+| `{"decision": "block", "reason": "..."}` | `denied=True` con ese motivo. |
+| `{"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "..."}}` o `{"ok": false, "reason": "..."}` | También `denied=True` (formatos Claude Code y hooks `prompt`/`agent`). |
+| Texto plano o JSON no parseable | Se ignora: `_launch_http()` llama a `from_text()` sin `plain_is_context=True`, a diferencia de `prompt`/`agent`. |
+| `status >= 400` | `logger.warning`, error registrado por handler y `HookOutcome()` vacío (fail-open): **no** es un deny. |
+
+El deny es decisivo en `PreToolUse`/`PostToolUse`: gana sobre los permisos y la tool no se ejecuta. En `UserPromptSubmit` la TUI ignora el `denied` del outcome; ahí solo tiene efecto el `additionalContext`. En `Stop`/`PostToolUse`, un deny se convierte en feedback para el modelo (ver más arriba).
+
+### Timeouts del tipo `agent`
+
+`agent` lanza un `DelegateTool` real con un `AgentLoop` sobre el LLM configurado; si el handler no lleva `provider`, hereda `settings.LLM_PROVIDER` (en el entorno actual, `OPENROUTER`). El timeout por defecto es `AGENT_HOOK_TIMEOUT = 60` y se puede fijar con `timeout` en el handler. Una llamada remota no es instantánea: en una ejecución real del 25 de noviembre de 2026 el mismo hook que fallaba con `timeout: 1` y con `timeout: 10` terminó correctamente en **17,51 s** con `timeout: 60`. Por eso un timeout corto agota siempre y no indica un problema de configuración. El error se registra con tipo y límite (`TimeoutError: superó 1s`), tanto en el warning como en el campo `error` del JSON del panel. Si no interesa esperar al subagente, conviene subir el timeout a 30–60 s o mover el hook a `Stop`.
 
 ### Interfaz y recarga
 

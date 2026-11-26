@@ -129,6 +129,11 @@
 - **Objetivo:** evitar warnings y trazas de debug con el motivo vacío cuando un hook agota su timeout.
 - **Estado:** Completada. `HookManager._format_hook_error()` añade el tipo de excepción y el límite de tiempo (`TimeoutError: superó 10s`) en `command`, `http`, `prompt` y `agent`; `_record_error()` usa `error sin motivo` como fallback. El panel de debug marca estos casos como `status: error` con el motivo visible. Cubierto por tests nuevos y documentado en `PRODUCT_BLUEPRINT/02_COMPONENTS/11_hooks.md` y `docs/herramientas.md`.
 
+## Hooks — Contrato `http` y diagnóstico de timeouts de `agent`
+
+- **Objetivo:** dejar por escrito el contrato de respuesta de los hooks `http` y la causa de los timeouts del hook `agent`, que hasta ahora solo estaban explicados en el chat.
+- **Estado:** Completada (documentación). `PRODUCT_BLUEPRINT/02_COMPONENTS/11_hooks.md` detalla que la ruta HTTP es solo una etiqueta, que el efecto lo decide el JSON de respuesta, que el texto plano se ignora y que un `>= 400` es fail-open; también registra que el hook `agent` hereda `settings.LLM_PROVIDER`, que su timeout por defecto es 60 s y que con `OPENROUTER` tardó 17,51 s en una ejecución real, por lo que 1–10 s son insuficientes. `docs/herramientas.md` incluye el resumen. Sin cambios de código ni commits nuevos.
+
 ## Logs — Nombre diario del archivo
 
 - **Objetivo:** sustituir `harness_debug.log` por un archivo identificable por día (`yyyy_MM_dd_harness.log`).

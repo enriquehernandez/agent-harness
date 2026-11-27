@@ -1453,3 +1453,9 @@ async def test_command_hook_guard_blocks_unsafe_command_before_spawn(tmp_path):
     shell.assert_not_called()
     assert outcome.denied is False
     assert "shell" in manager.errors["Stop|command|echo hola; rm -rf /"]
+
+
+def test_hook_matcher_ignores_empty_alternatives():
+    """Un separador `|` con alternativas vacías no coincide con nada."""
+    assert HookRegistry._matches(" || bash ", "bash") is True
+    assert HookRegistry._matches(" || ", "bash") is False

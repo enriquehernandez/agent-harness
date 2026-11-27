@@ -1,6 +1,8 @@
 # Tarea Actual
 
-No hay tareas en ejecución. El inventario priorizado está en `tasks/pendientes.md` y las tareas cerradas, en `tasks/completadas.md`.
+No hay tareas en curso.
+
+El inventario priorizado está en `tasks/pendientes.md` y las tareas cerradas, en `tasks/completadas.md`.
 
 ## Plantilla para una tarea en curso
 

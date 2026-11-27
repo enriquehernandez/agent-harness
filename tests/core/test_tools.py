@@ -561,3 +561,48 @@ async def test_read_document_pptx(tmp_path):
         res = await tool.run("test.pptx")
         assert res.success is True
         assert "Texto del PPTX" in res.content
+
+
+@pytest.mark.asyncio
+async def test_read_document_reports_parsing_error(tmp_path):
+    """Un error al parsear el documento se devuelve como ToolResult fallido."""
+    from app.tools.documents import ReadDocumentTool
+
+    (tmp_path / "roto.pdf").write_text("no es un pdf", encoding="utf-8")
+    tool = ReadDocumentTool(base_dir=str(tmp_path))
+
+    result = await tool.run("roto.pdf")
+
+    assert result.success is False
+    assert result.error
+
+
+@pytest.mark.asyncio
+async def test_observations_reports_write_error(tmp_path):
+    """Si no se puede escribir el JSON, se informa del error."""
+    from app.tools.observations import ExportObservationsTool
+    from app.core.harness.tool import ToolRegistry
+
+    blocked = tmp_path / "observations.json"
+    blocked.mkdir()
+    tool = ExportObservationsTool(ToolRegistry(), [])
+
+    result = await tool.run(str(blocked))
+
+    assert result.success is False
+    assert result.error
+
+
+@pytest.mark.asyncio
+async def test_load_skill_reports_read_error(tmp_path):
+    """Una SKILL.md ilegible se devuelve como error, no como excepción."""
+    skill_dir = tmp_path / ".agents" / "skills" / "rota"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").mkdir()
+    tool = LoadSkillTool()
+    tool.skills_dir = tmp_path / ".agents" / "skills"
+
+    result = await tool.run("rota")
+
+    assert result.success is False
+    assert result.error

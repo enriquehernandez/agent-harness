@@ -7,7 +7,7 @@
 
 - [ ] Test escrito **antes** del código si es una feature nueva o un cambio de comportamiento (TDD).
 - [ ] `uv run tom test` pasa y la cobertura reportada llega al 100 % (`--cov-fail-under=100`).
-- [ ] La cobertura es significativa: los tests nuevos comprueban comportamiento, no números de línea. Mientras siga activa la tarea **P0.8**, revisar además que no se hayan añadido exclusiones en `[tool.coverage.report]` ni `# pragma: no cover` sin justificación.
+- [ ] La cobertura es significativa: los tests nuevos comprueban comportamiento, no números de línea. Revisar además que no se hayan añadido exclusiones en `[tool.coverage.report]` ni `# pragma: no cover` sin justificación, y que la suite siga incluyendo `tests/integration`.
 - [ ] No hay tests duplicados, tests sin `assert` ni `filterwarnings` nuevos que oculten el problema.
 - [ ] Si la tarea toca MCP, A2A o HTTP: `uv run tom test-integration` también pasa.
 - [ ] Si toca pricing, se verifica con tests. Los scripts de diagnóstico son opcionales: trabajan en directorios temporales y no tocan cachés ni memoria reales del usuario.

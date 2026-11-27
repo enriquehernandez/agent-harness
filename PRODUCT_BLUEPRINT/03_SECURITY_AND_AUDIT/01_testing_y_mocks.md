@@ -58,7 +58,7 @@ Testear interfaces de terminal es complejo. Usamos `app.run_test()` y `pilot`.
 Algunas líneas son difíciles de cubrir porque son defensivas (ej. `if not file.exists(): return {}`).
 
 - **No las ignores**: Escribe un test específico que fuerce esa condición (ej. no crees el archivo).
-- **Si es imposible (ej. excepciones del sistema)**: Usa `# pragma: no cover` con una justificación clara. En este proyecto, `pyproject.toml` (`[tool.coverage.report].exclude_lines`) ya tiene **9 reglas**: `pragma: no cover` (exclusión explícita), `if __name__ == .__main__.:` (bloques de entrada no ejecutados en tests), `^\s*\.\.\.\s*$` (cuerpos abstractos/stubs), `^\s*except.*:\s*$` (ramas defensivas de excepción), `^\s*continue\s*$` (saltos de control), `^\s*def on_`, `^\s*def watch_` y `^\s*def compose` (callbacks de Textual), y `^\s*return$` (retornos vacíos). Ya no hay una exclusión específica de CSS/BINDINGS.
+- **Si es imposible (ej. excepciones del sistema)**: Usa `# pragma: no cover` con una justificación clara. En este proyecto, `pyproject.toml` (`[tool.coverage.report].exclude_lines`) solo tiene **3 reglas**: `pragma: no cover` (exclusión explícita), `if __name__ == .__main__.:` (bloques de entrada no ejecutados en tests) y `^\s*\.\.\.\s*$` (cuerpos abstractos/stubs). Las ramas `except`/`continue`/`return` y los callbacks de Textual (`on_`, `watch_`, `compose`) **se miden**: hay tests que provocan esos errores y comprueban el comportamiento resultante. No se añadan exclusiones nuevas sin justificación.
 
 ## 6. El `except` del Timeout en `AgentLoop.stream()`
 El bloque `except (asyncio.TimeoutError, TimeoutError)` solo se ejecuta si el LLM se cuelga. Para cubrirlo, el `FakeLLM` debe tener un método `stream_chat` que haga un await `asyncio.sleep(2)` antes de devolver un chunk, y el test debe llamar a `loop.stream(..., timeout_seconds=0.1).`
@@ -80,7 +80,7 @@ uv run tom test
 uv run tom test-integration
 ```
 
-El informe de cobertura debe marcar **100%** de líneas: el script `test` de `pyproject.toml` usa `--cov-fail-under=100`, por lo que `uv run tom test` (y por extensión CI) falla si baja de ese umbral. En la TUI (`app/tui/`) las exclusiones **no son solo visuales**: `def on_`, `def watch_` y `def compose` excluyen manejadores de eventos, watchers reactivos y métodos de construcción de widgets de Textual; además se aplican las reglas globales (`except`, `continue`, `return`, `...`, `if __name__ == ...` y `pragma: no cover`) detalladas en la sección 5.
+El informe de cobertura debe marcar **100%** de líneas: el script `test` de `pyproject.toml` usa `--cov-fail-under=100`, por lo que `uv run tom test` (y por extensión CI) falla si baja de ese umbral. La suite incluye `tests/integration` y no silencia `RuntimeWarning`: los coroutines sin await y las fugas de recursos se corrigen en los tests, no se ocultan. En la TUI (`app/tui/`), los manejadores `on_`, `watch_` y `compose` y las ramas de error se cubren con tests de comportamiento, como se detalla en la sección 5.
 
 ## 10. Mocking de Pricing
 El `PricingProvider` se mockea fácilmente porque usa `PricingSource` (interfaz). Para tests:

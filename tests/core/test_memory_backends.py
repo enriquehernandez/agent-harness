@@ -459,3 +459,40 @@ async def test_vector_store_save_without_inserted_row(tmp_path, mock_vector_mode
 
     with pytest.raises(RuntimeError, match="No se pudo guardar/actualizar"):
         await store.save(MemoryEntry(key="k", value="v", timestamp=datetime.now()))
+
+
+@pytest.mark.asyncio
+async def test_session_files_invalid_timestamp_uses_now(tmp_path):
+    """Un timestamp corrupto en el archivo se sustituye por la fecha actual."""
+    from app.core.harness.memory.backends.session_files import SessionFilesStore
+
+    (tmp_path / "recuerdo.md").write_text(
+        "# recuerdo\n\nvalor\n\n_[fact] fecha-no-valida_", encoding="utf-8")
+    store = SessionFilesStore(base_dir=tmp_path)
+
+    entries = await store.get_all()
+
+    assert len(entries) == 1
+    assert entries[0].value == "valor"
+    assert abs((datetime.now() - entries[0].timestamp).total_seconds()) < 10
+
+
+def test_session_files_parse_unexpected_input():
+    """Un contenido inesperado no rompe el parser de memoria."""
+    from app.core.harness.memory.backends.session_files import _parse_memory_file
+
+    assert _parse_memory_file(None) is None
+
+
+@pytest.mark.asyncio
+async def test_session_files_skips_unreadable_entries(tmp_path):
+    """Un archivo .md ilegible se omite en recall y get_all."""
+    from app.core.harness.memory.backends.session_files import SessionFilesStore
+
+    (tmp_path / "roto.md").mkdir()  # read_text() lanza IsADirectoryError
+    (tmp_path / "bueno.md").write_text(
+        "# bueno\n\nvalor buscado", encoding="utf-8")
+    store = SessionFilesStore(base_dir=tmp_path)
+
+    assert [entry.key for entry in await store.recall("buscado")] == ["bueno"]
+    assert [entry.key for entry in await store.get_all()] == ["bueno"]

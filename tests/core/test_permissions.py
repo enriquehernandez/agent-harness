@@ -330,3 +330,15 @@ def test_permission_gate_diff_edit_empty_old_text(tmp_path):
     })
 
     assert diff == "⚠️ edit con 'oldText' vacío: no se puede generar el diff."
+
+
+def test_save_persisted_permissions_tolerates_unwritable_path(tmp_path):
+    """Si no se puede escribir el JSON de permisos, la app sigue funcionando."""
+    blocked = tmp_path / "permissions.json"
+    blocked.mkdir()
+    gate = PermissionGate(ask_user=None, persist_file=blocked)
+    gate.session_allowed.add("bash:ls")
+
+    gate._save_persisted_permissions()
+
+    assert list(blocked.iterdir()) == []

@@ -64,3 +64,36 @@ async def test_file_aware_input_on_key_ctrl_u():
                 await input_box.on_key(other_event)
                 other_event.prevent_default.assert_not_called()
                 other_event.stop.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_single_file_handles_copy_error(tmp_path):
+    """Si falla la copia de un archivo externo, no se propaga la excepción."""
+    input_box = FileAwareInput()
+    external = tmp_path / "externo.txt"
+    external.write_text("contenido", encoding="utf-8")
+
+    with patch("app.tui.widgets.file_aware_input.shutil.copy2",
+               side_effect=Exception("Sin permisos")):
+        await input_box._process_single_file(str(external))
+
+
+@pytest.mark.asyncio
+async def test_watch_value_cancels_previous_batch_timer(tmp_path):
+    """Una segunda ruta sustituye al lote pendiente en lugar de duplicarlo."""
+    from app.tui.app import AgentHarnessApp
+
+    app = AgentHarnessApp()
+    first = tmp_path / "primero.txt"
+    first.write_text("A", encoding="utf-8")
+
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock), \
+            patch("app.tui.app.SessionManager.list_sessions", return_value=[]):
+        async with app.run_test() as pilot:
+            input_box = app.query_one("#input-box", FileAwareInput)
+            previous_timer = MagicMock()
+            input_box._batch_timer = previous_timer
+            input_box.value = str(first)
+            await pilot.pause(0.01)
+
+    previous_timer.cancel.assert_called_once()

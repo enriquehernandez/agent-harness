@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 from app.core.harness.a2a.base import AgentCard
 from app.core.harness.a2a.strategies.supervisor import SupervisorStrategy
 from app.core.harness.a2a.strategies.sequential import SequentialStrategy
@@ -955,3 +955,14 @@ async def test_swarm_with_persisted_permissions_fork_and_model(mock_llm, mock_re
 
         await strategy.execute("Tarea", context=ctx)
         assert MockLoop.called
+
+
+def test_a2a_ignores_corrupt_persisted_permissions(tmp_path):
+    """Un permissions.json corrupto no impide arrancar un subagente."""
+    perm_file = tmp_path / "permissions.json"
+    perm_file.write_text("{json roto", encoding="utf-8")
+    strategy = SupervisorStrategy(MagicMock(), {}, None)
+
+    with patch("app.core.config.Settings.permissions_file",
+               new_callable=PropertyMock, return_value=perm_file):
+        assert strategy._load_persisted_permissions() == set()

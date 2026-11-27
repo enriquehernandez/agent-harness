@@ -240,3 +240,19 @@ async def test_openai_provider_stream_tool_calls(mock_async_openai):
     assert provider.supports_tool_calling is True
     assert provider.count_tokens("1234") == 1
     assert provider.max_context_window == 128000
+
+
+@pytest.mark.asyncio
+@patch("app.core.llm.providers.openai_provider.AsyncOpenAI")
+async def test_openai_provider_503_has_actionable_message(mock_async_openai):
+    """Un 503 del proveedor se traduce en una instrucción clara para el usuario."""
+    mock_client = mock_async_openai.return_value
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=Exception("503 Provider returned error"))
+
+    provider = OpenAICompatibleProvider(api_key="key", model="model")
+
+    with pytest.raises(Exception, match="está caído o sobrecargado") as excinfo:
+        await provider.chat([])
+
+    assert "/model" in str(excinfo.value)

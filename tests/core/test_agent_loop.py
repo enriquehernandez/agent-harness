@@ -879,3 +879,62 @@ async def test_loop_nested_in_agent_hook_does_not_drain_context(
 
     assert _hook_context_messages(ctx) == []
     assert hook_manager.pending_context == "contexto del padre"
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_tolerates_langfuse_close_error(fake_llm, basic_registry):
+    """Un fallo al cerrar la observación de Langfuse no rompe el stream."""
+    from app.core.harness import loop as loop_module
+
+    observation_cm = MagicMock()
+    observation_cm.__enter__.return_value = MagicMock()
+    observation_cm.__exit__.side_effect = Exception("Langfuse caído")
+    langfuse = MagicMock()
+    langfuse.start_as_current_observation.return_value = observation_cm
+
+    async def mock_stream(*args, **kwargs):
+        yield "Respuesta"
+
+    with patch.object(loop_module, "langfuse", langfuse), \
+            patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+        events = [event async for event in loop.stream("Hola")]
+
+    assert [event.type for event in events] == ["text_chunk", "result"]
+    observation_cm.__exit__.assert_called_once()
+
+
+def test_langfuse_helpers_tolerate_missing_and_broken_generation():
+    """Los helpers de Langfuse son best-effort: nunca tiran el agente."""
+    AgentLoop._langfuse_update(None, "respuesta", 1, [], {}, 0.0)
+    AgentLoop._langfuse_error(None, "Timeout")
+
+    broken = MagicMock()
+    broken.update.side_effect = Exception("Langfuse caído")
+    AgentLoop._langfuse_update(broken, "respuesta", 1, [], {}, 0.0)
+    AgentLoop._langfuse_error(broken, "Timeout")
+    assert broken.update.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_wraps_tool_run_exception(fake_llm, basic_registry):
+    """Una herramienta que lanza en `run` se convierte en ToolResult fallido."""
+
+    class ExplodingTool:
+        name = "explode"
+        description = ""
+        parameters_schema = {}
+
+        async def run(self, **kwargs):
+            raise ValueError("Boom interno")
+
+    basic_registry.register(ExplodingTool())
+    gate = PermissionGate(policies={"explode": Decision.ALLOW})
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+    ctx = ContextManager()
+
+    ok, result = await loop._execute_tool(
+        {"id": "c1", "name": "explode", "arguments": {}}, ctx)
+
+    assert ok is False
+    assert "Error inesperado: Boom interno" in result.error

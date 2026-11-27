@@ -7,12 +7,6 @@
 
 ## P0 — Bloqueantes (seguridad e integridad de datos)
 
-### P0.8 Dejar de inflar la cobertura
-- **Problema:** `pyproject.toml` excluye `except`, `continue`, `return` y `on_*/watch_*/compose` y silencia `RuntimeWarning`; `tests/integration` se ignora en `addopts`.
-- **Criterio:** medir el manejo de errores y los handlers de TUI; aceptar que el porcentaje baje temporalmente y cubrirlo con tests de comportamiento; no silenciar `RuntimeWarning`.
-- **Prueba en TUI prevista:** N/A en TUI (proceso): `uv run tom test` con las exclusiones reducidas → cobertura real sin `RuntimeWarning`; arrancar la TUI y `/doctor` sin errores.
-- **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
-
 ### P0.9 Desacoplar la aprobación del modal: petición pendiente por sesión
 - **Problema:** `PermissionGate.check()` hace `await self.ask_user(...)` en el mismo proceso (`app/core/harness/permissions.py`). En background (`ask_user=None`) deniega sin poder preguntar y en A2A `parallel` (`app/core/harness/a2a/strategies/parallel.py`) se apilan modales. OpenCode resuelve el `ask` como una `PermissionRequest(sessionID, requestID, resources, save)` y espera un `reply` externo `once|always|reject`.
 - **Criterio:** las decisiones `ALLOW`/`DENY` se resuelven localmente sin modal; un `ASK` encola una petición con `sessionID` del subagente, `requestID`, firma/recursos y patrones propuestos, y el tool call espera la respuesta. La TUI puede listar y responder peticiones del hijo aunque el padre siga trabajando: `once` vale solo para esa petición, `always` guarda patrones literales (depende de P0.3) y nunca vence a un `deny` configurado, `reject` cierra esa y todas las pendientes de la misma sesión. Sin cliente (background/headless) la petición queda pendiente o se rechaza según política, nunca se auto-aprueba.

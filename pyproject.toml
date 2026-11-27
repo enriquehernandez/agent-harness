@@ -50,13 +50,10 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-# Mantenemos tu configuración de cobertura y reporte
-addopts = "--cov=app --cov-report=term-missing --cov-report=html --cov-report=xml --junitxml=junit.xml -o junit_family=legacy --ignore=tests/integration"
+# La suite completa incluye los tests de integración; la cobertura se mide sin exclusiones artificiales.
+addopts = "--cov=app --cov-report=term-missing --cov-report=html --cov-report=xml --junitxml=junit.xml -o junit_family=legacy"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-filterwarnings = [
-    "ignore::RuntimeWarning",
-]
 
 [tool.tomlscript]
 # Scripts de desarrollo
@@ -69,13 +66,6 @@ exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
     '^\s*\.\.\.\s*$',
-    '^\s*except.*:\s*$',
-    '^\s*continue\s*$',
-    '^\s*def on_',
-    '^\s*def watch_',
-    '^\s*def compose',
-    # 🔥 Líneas que el intérprete no alcanza en los tests
-    '^\s*return$',
 ]
 
 #[tool.coverage.run]

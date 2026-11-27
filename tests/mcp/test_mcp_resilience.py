@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from app.mcp.client import MCPClient, MCPToolProxy
@@ -122,3 +124,27 @@ async def test_mcp_proxy_fallback_retry_fails():
 
     assert result.success is False
     assert "Fallo tras reconexión" in result.error
+
+
+@pytest.mark.asyncio
+async def test_mcp_connect_is_idempotent():
+    """Si ya hay sesión, connect no intenta abrir otra conexión."""
+    client = MCPClient(command="uv", args=["run", "dummy.py"])
+    client.session = MagicMock()
+
+    with patch.object(client, "_do_connect", new_callable=AsyncMock) as connect:
+        await client.connect()
+
+    connect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mcp_connect_timeout_is_reported():
+    """Un timeout de conexión se registra y se propaga tras los reintentos."""
+    client = MCPClient(command="uv", args=["run", "dummy.py"])
+
+    with patch.object(client, "_do_connect", new_callable=AsyncMock,
+                      side_effect=asyncio.TimeoutError), \
+            patch("asyncio.sleep", new_callable=AsyncMock):
+        with pytest.raises(asyncio.TimeoutError):
+            await client.connect()

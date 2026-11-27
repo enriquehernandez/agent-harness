@@ -37,8 +37,12 @@ async def test_app_mount_and_bindings():
     app = AgentHarnessApp()
     with patch.object(app, "initialize_agent", new_callable=AsyncMock):
         app.agent_loop = MagicMock()
-        app.agent_loop.stream = AsyncMock(
-            return_value=iter([]))  # Mock de stream
+
+        async def empty_stream(*args, **kwargs):
+            if False:
+                yield
+
+        app.agent_loop.stream = empty_stream
         async with app.run_test() as pilot:
             input_box = app.query_one("#input-box", FileAwareInput)
             input_box.focus()
@@ -124,6 +128,7 @@ async def test_app_process_input_agent_error():
 
         async def mock_stream(*args, **kwargs):
             raise Exception("Error simulado")
+            yield  # Convierte la función en generador asíncrono.
         mock_loop.stream = mock_stream
         app.agent_loop = mock_loop
         async with app.run_test() as pilot:
@@ -1336,7 +1341,8 @@ async def test_app_emits_user_prompt_submit_hook():
 
         app.agent_loop = MagicMock(stream=mock_stream)
         async with app.run_test() as pilot:
-            with patch("app.tui.app.emit_hook", new_callable=AsyncMock) as emit:
+            with patch("app.tui.app.emit_hook", new_callable=AsyncMock,
+                       return_value=HookOutcome()) as emit:
                 app.process_input("Hola")
                 await pilot.pause()
 
@@ -1389,7 +1395,8 @@ async def test_app_emits_user_prompt_submit_hook_for_inline_mode():
 
         app.agent_loop = MagicMock(stream=mock_stream)
         async with app.run_test() as pilot:
-            with patch("app.tui.app.emit_hook", new_callable=AsyncMock) as emit:
+            with patch("app.tui.app.emit_hook", new_callable=AsyncMock,
+                       return_value=HookOutcome()) as emit:
                 app.process_input("/devil ¿Fallos?")
                 await pilot.pause()
 
@@ -1413,7 +1420,8 @@ async def test_app_emits_user_prompt_submit_hook_for_images():
         mock_event = MagicMock(value="¿Qué ves?", input=MagicMock())
 
         async with app.run_test() as pilot:
-            with patch("app.tui.app.emit_hook", new_callable=AsyncMock) as emit:
+            with patch("app.tui.app.emit_hook", new_callable=AsyncMock,
+                       return_value=HookOutcome()) as emit:
                 await app.on_input_submitted(mock_event)
                 await pilot.pause()
 
@@ -1734,3 +1742,140 @@ async def test_tui_bash_approved_command_is_executed_verbatim(tmp_path, monkeypa
     assert mock_shell.call_args[0][0] == approved
     export_tool.run.assert_not_awaited()
     assert not (tmp_path / "observations.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_app_request_permission_omits_content_when_diff():
+    """Con diff no se muestra el contenido completo del archivo editado."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            with patch("app.tui.app.PermissionModal") as modal_cls, \
+                    patch.object(app, "push_screen_wait", new_callable=AsyncMock,
+                                 return_value="n"):
+                await app.request_permission(
+                    "edit_file", "edit_file:f.py",
+                    {"content": "contenido_secreto",
+                     "edits": [{"oldText": "a", "newText": "b"}],
+                     "path": "f.py"},
+                    diff_text="--- diff ---",
+                )
+
+    args_str = modal_cls.call_args[0][1]
+    assert "contenido_secreto" not in args_str
+    assert "- `path`: f.py" in args_str
+    assert modal_cls.call_args[0][2] == "--- diff ---"
+
+
+@pytest.mark.asyncio
+async def test_app_request_permission_timeout_denies():
+    """Un modal que no responde acaba en denegación, no en un worker colgado."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            with patch.object(app, "push_screen_wait", new_callable=AsyncMock,
+                              side_effect=asyncio.TimeoutError):
+                await app.request_permission("bash", "bash:ls", {"command": "ls"})
+
+            texts = [str(getattr(child, "renderable", getattr(child, "content", "")))
+                     for child in app.query_one("#chat-scroll").children]
+    assert any("Permiso **denegado**" in text for text in texts)
+
+
+@pytest.mark.asyncio
+async def test_app_process_input_command_error_is_visible():
+    """Un fallo de /comando se informa en el chat y no rompe la TUI."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        with patch("app.tui.app.handle_command", new_callable=AsyncMock,
+                   side_effect=Exception("Fallo de comando")):
+            async with app.run_test() as pilot:
+                app.process_input("/roto")
+                await pilot.pause()
+                texts = [str(getattr(child, "renderable", getattr(child, "content", "")))
+                         for child in app.query_one("#chat-scroll").children]
+    assert any("Error en comando: Fallo de comando" in text for text in texts)
+
+
+@pytest.mark.asyncio
+async def test_app_stream_to_chat_ends_without_result_event():
+    """Un stream que termina sin evento `result` sale limpiamente del bucle."""
+    from app.core.harness.events import AgentEvent
+
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            async def short_stream():
+                yield AgentEvent(type="text_chunk", data={"text": "Hola"})
+
+            await app.stream_to_chat(short_stream())
+            await pilot.pause()
+            widgets = [child for child in app.query_one("#chat-scroll").children
+                       if hasattr(child, "_markdown")]
+    assert len(widgets) == 1
+    assert widgets[0]._markdown == "Hola"
+
+
+@pytest.mark.asyncio
+async def test_app_on_input_submitted_empty_input_does_nothing():
+    """Enviar un input vacío sin adjuntos no llama al agente."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            event = MagicMock(value="   ", input=MagicMock())
+            with patch.object(app, "process_input", new_callable=MagicMock) as process:
+                await app.on_input_submitted(event)
+                await pilot.pause()
+    process.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_app_on_input_submitted_image_stream_error():
+    """Un fallo del stream multimodal se muestra en el chat."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+        app.attached_images = ["data:image/png;base64,fake"]
+        app.agent_loop = MagicMock()
+        app.agent_loop.stream.side_effect = Exception("Fallo multimodal")
+        event = MagicMock(value="¿Qué ves?", input=MagicMock())
+        async with app.run_test() as pilot:
+            with patch("app.tui.app.emit_hook", new_callable=AsyncMock,
+                       return_value=HookOutcome()):
+                await app.on_input_submitted(event)
+                await pilot.pause()
+            texts = [str(getattr(child, "renderable", getattr(child, "content", "")))
+                     for child in app.query_one("#chat-scroll").children]
+    assert any("**Error:** Fallo multimodal" in text for text in texts)
+
+
+@pytest.mark.asyncio
+async def test_app_process_input_reports_stream_setup_error():
+    """Un fallo al iniciar el stream de texto se informa y limpia el indicador."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+        app.agent_loop = MagicMock()
+        app.agent_loop.stream.side_effect = Exception("Stream caído")
+        async with app.run_test() as pilot:
+            app.process_input("Hola")
+            await pilot.pause()
+            texts = [str(getattr(child, "renderable", getattr(child, "content", "")))
+                     for child in app.query_one("#chat-scroll").children]
+            loading_hidden = app.query_one("#loading-indicator").display is False
+
+    assert any("**Error inesperado:** Stream caído" in text for text in texts)
+    assert loading_hidden
+
+
+@pytest.mark.asyncio
+async def test_app_unmount_tolerates_mcp_disconnect_error():
+    """Si un cliente MCP falla al desconectarse, el cierre de la TUI continúa."""
+    app = AgentHarnessApp()
+    broken_client = AsyncMock()
+    broken_client.disconnect.side_effect = Exception("MCP caído")
+    app.mcp_clients.append(broken_client)
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+    broken_client.disconnect.assert_awaited_once()

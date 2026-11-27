@@ -1077,3 +1077,19 @@ async def test_cmd_help_and_autocomplete_include_response_modes(mock_app, ctx):
         assert f"`{command}`" in help_text
         assert instruction in mode_message(command)
     assert "no cambian las reglas" in mode_message("/truth")
+
+
+@pytest.mark.asyncio
+async def test_cmd_doctor_reports_broken_mcp_config(tmp_path, monkeypatch,
+                                                    mock_app, ctx):
+    """Un mcp_config.json corrupto se informa como problema de salud."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mcp_config.json").write_text("{roto", encoding="utf-8")
+    mock_app.session_manager = MagicMock()
+    mock_app.session_manager.list_sessions.return_value = []
+
+    await handle_command("/doctor", ctx, {}, None, mock_app)
+
+    output = mock_app.write_to_chat.call_args[0][0]
+    assert "Error parseando `mcp_config.json`" in output
+    assert "problema(s) crítico(s)" in output

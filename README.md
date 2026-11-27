@@ -287,16 +287,17 @@ Al arrancar la TUI, el agente descubrirá e integrará automáticamente las herr
 El proyecto cuenta con una suite de pruebas robusta. Para evitar el consumo de tokens y la dependencia de red, se utiliza un `FakeLLM` inyectable.
 
 ```bash
-# Ejecutar tests unitarios con cobertura. OJO: `addopts` en pyproject.toml
-# incluye --ignore=tests/integration, así que NO incluye los tests de integración.
-uv run pytest tests/ --cov=app --cov-report=term-missing
-
-# Equivalente: tampoco incluye tests/integration
+# Suite completa con cobertura real (incluye tests/integration):
 uv run tom test
 
-# Tests de integración (los excluidos arriba):
+# Equivalente directo (la configuración de pyproject.toml ya incluye integración):
+uv run pytest tests/ --cov=app --cov-report=term-missing
+
+# Solo los tests de integración (MCP local y búsqueda semántica):
 uv run tom test-integration
 ```
+
+La configuración no silencia `RuntimeWarning` y la cobertura solo excluye los patrones que el intérprete no puede ejecutar (`pragma: no cover`, bloques `if __name__ == ...` y cuerpos `...`). Los manejadores de eventos, watchers y ramas de error se miden y se cubren con tests.
 
 🧑‍💻 Autor
 Enrique Hernández Leiva

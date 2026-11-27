@@ -12,13 +12,11 @@ def register_core_tools(registry: ToolRegistry, base_dir: str = ".", memory_stor
     registry.register(WriteFileTool(base_dir=base_dir))
     registry.register(EditFileTool(base_dir=base_dir))
 
-    # 🔥 Creamos ExportObservationsTool primero
-    export_tool = ExportObservationsTool(
-        registry=registry, mcp_clients=mcp_clients or [])
-    registry.register(export_tool)
-
-    # 🔥 Pasamos la tool al BashTool para que la use automáticamente
-    registry.register(BashTool(export_observations=export_tool))
+    # `export_observations` es una tool por derecho propio: el modelo la pide
+    # explícitamente y el PermissionGate la aprueba. BashTool no escribe por él.
+    registry.register(ExportObservationsTool(
+        registry=registry, mcp_clients=mcp_clients or []))
+    registry.register(BashTool())
 
     registry.register(LoadSkillTool(registry=registry))
 

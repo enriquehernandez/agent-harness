@@ -39,7 +39,6 @@ flowchart TD
     subgraph Seguridad [🛡️ Los Hooks - Seguridad y Automatización]
         PERM{"✋ PermissionGate\n(¿Dejar pasar?)"}:::hooks
         TIMER["⏱️ Hooks de Evento\n(Temporizadores - metáfora)"]:::hooks
-        INJ["💉 Hooks de Inyección\n(Preparar la mesa)"]:::hooks
     end
 
     %% Subagentes
@@ -89,7 +88,7 @@ flowchart TD
 *   **La Cocina (El Harness):** La infraestructura física. Los fogones (el motor del LLM), la despensa (la base de datos) y el espacio de trabajo.
 *   **Los Utensilios (Las Tools):** Cuchillos, licuadoras, hornos. Son las herramientas (`bash`, `write_file`, `read_file`). El chef las usa para manipular los ingredientes. No puede cocinar sin ellas.
 *   **La Vitrina (Vista previa de imágenes):** Al pegar una imagen, la TUI la muestra con `HalfcellImage` si `TERM_PROGRAM=WarpTerminal` y con `TerminalImage` en los demás terminales; el archivo se envía al modelo en Base64 (`image/png` para PNG, `image/jpeg` para el resto).
-*   **Las Comandas Guardadas (Las Sesiones / `SessionManager`):** Cada vez que el restaurante cierra, se guardan las comandas en un libro (archivos JSON en `.harness/sessions/`). Al día siguiente, el chef lee la última comanda y sabe exactamente en qué mesa se quedó trabajando.
+*   **Las Comandas Guardadas (Las Sesiones / `SessionManager`):** Cada vez que el restaurante cierra, se guardan las comandas en un libro (archivos JSON en `.harness/sessions/`). Al día siguiente, el chef lee la última comanda y sabe exactamente en qué mesa se quedó trabajando. El libro solo acepta nombres de comanda simples, sin rutas; una comanda ilegible cuenta como vacía y las notas de sistema escritas en el libro nunca sustituyen las reglas que el chef ya trae en la mesa.
 
 ## 📖 Las Instrucciones (La Información)
 
@@ -106,7 +105,7 @@ En una cocina real, no basta con que el chef sepa usar los utensilios; necesitas
 
 *   **El Temporizador (Hooks de Evento — metáfora):** *"A los 20 minutos, haz sonar la campana para sacarlo"* es solo una forma de describir reacciones automáticas. No hay un registro de hooks: en el código solo hay enganches puntuales, como el colector de eventos del `logger` (`DebugEventCollector`, que alimenta el panel F1).
 *   **La Regla de Seguridad (Hook de Intercepción - PermissionGate):** Si el chef intenta meter la mano en el horno a 200°C, el supervisor lo detiene: *"¡Alto! Necesito autorización de la gerencia (el humano) para abrir el horno"* (`y/a/n`). No se limita a `bash` o `write_file`: también cubre lecturas y listados (`read_file`, `read_text_file`, `list_dir`, `list_directory`, `edit_file`); responder `a` guarda la firma y auto-aprueba esa acción en el futuro.
-*   **La Preparación Previa (Hook de Inyección):** Antes de que el chef empiece a cocinar, el supervisor le pone en la mesa los ingredientes exactos. En tu código, es el hook puntual de `BashTool` que intercepta el comando `capture_snapshot.py` y le inyecta automáticamente `--tools observations.json` para que la receta funcione bien desde el principio.
+*   **La Preparación Previa (sin atajos ocultos):** El chef pone en la mesa los ingredientes exactos y el horno recibe esa misma orden: `BashTool` ejecuta el comando aprobado sin inyectar `--tools observations.json`. Si hace falta el inventario, el modelo pide `export_observations` como tool independiente y esa escritura pasa por el `PermissionGate`.
 
 ## 💰 El Dueño del Restaurante (Los Costos / PricingProvider)
 

@@ -19,9 +19,10 @@ from rich.syntax import Syntax
 from app.core.llm import get_llm
 from app.core.harness import AgentLoop, ToolRegistry, ContextManager
 from app.core.harness.permissions import Decision, PermissionGate
+from app.core.harness.hooks import HookEvent, emit_hook
 from app.core.harness.subagents import DelegateTool
 from app.core.harness.memory.factory import create_memory_store
-from app.core.harness.session import SessionManager
+from app.core.harness.session import SessionManager, merge_session_history
 from app.tools import register_core_tools
 from app.tui.commands import AVAILABLE_COMMANDS, MODE_INSTRUCTIONS, handle_command, mode_message
 from app.mcp.client import MCPClient
@@ -110,7 +111,8 @@ class AgentHarnessApp(App):
             self.session_manager = SessionManager(last_session["id"])
             messages = self.session_manager.load()
             if messages:
-                self.ctx.messages = messages
+                self.ctx.messages = merge_session_history(
+                    self.ctx.messages, messages)
                 metadata = self.session_manager.load_metadata()
                 repair_counts = metadata.get("repair_counts", {})
                 if repair_counts and self.agent_loop:
@@ -174,7 +176,11 @@ class AgentHarnessApp(App):
             for name, server_conf in config.get("mcpServers", {}).items():
                 try:
                     client = MCPClient(
-                        command=server_conf["command"], args=server_conf["args"], env=server_conf.get("env"))
+                        command=server_conf["command"],
+                        args=server_conf["args"],
+                        env=server_conf.get("env"),
+                        allowed_env=server_conf.get("allowed_env"),
+                    )
                     await client.connect()
                     await client.register_tools(self.registry, server_name=name)
                     self.mcp_clients.append(client)
@@ -462,6 +468,16 @@ class AgentHarnessApp(App):
                 del self.ctx.messages[index]
                 break
 
+    async def _reject_prompt(self, reason: str,
+                             loading: LoadingIndicator) -> None:
+        """Un hook denegó el prompt: se informa y no se llama al agente."""
+        self.update_dashboard("Bloqueado")
+        detail = (reason or "El hook bloqueó el prompt.").strip()
+        await self.write_to_chat(
+            f"🚫 **Prompt bloqueado por un hook:** {detail}", type="system")
+        loading.display = False
+        self.query_one("#input-box", FileAwareInput).focus()
+
     @work(exclusive=True)
     async def process_input(self, user_input: str):
         loading = self.query_one("#loading-indicator", LoadingIndicator)
@@ -480,11 +496,20 @@ class AgentHarnessApp(App):
         await self._stream_user_message(user_input, loading)
 
     async def _stream_user_message(self, user_input: str, loading: LoadingIndicator) -> None:
+        # Mostramos primero el mensaje y el indicador: los hooks pueden llamar
+        # a un LLM y no deben retrasar la respuesta visual de la TUI.
         self.update_dashboard("Pensando...")
         display_text = user_input if len(
             user_input) < 300 else user_input[:300] + "..."
         await self.write_to_chat(display_text, type="user")
         loading.display = True
+        outcome = await emit_hook(HookEvent(
+            hook_event_name="UserPromptSubmit", prompt=user_input,
+            session_id=str(getattr(self.session_manager, "session_id", "") or ""),
+        ), parallel=True)
+        if outcome.denied:
+            await self._reject_prompt(outcome.reason, loading)
+            return
         temp_msg = self._begin_pending_mode()
 
         try:
@@ -571,6 +596,11 @@ class AgentHarnessApp(App):
                     self.update_dashboard("Listo", tokens=tokens)
                     break
 
+                elif event.type == "hook_denied":
+                    msg = event.data.get("message") or "Acción bloqueada por un hook."
+                    await self.write_to_chat(
+                        f"🚫 **Bloqueado por un hook:** {msg}", type="system")
+
                 elif event.type == "error":
                     self.update_dashboard("Error")
                     loading.display = False
@@ -600,13 +630,22 @@ class AgentHarnessApp(App):
         if self.attached_images:
             display_text = user_text if user_text else "[Imagen adjunta]"
             await self.write_to_chat(display_text, type="user")
+            self.update_dashboard("Pensando...")
+            loading = self.query_one("#loading-indicator", LoadingIndicator)
+            loading.display = True
+            outcome = await emit_hook(HookEvent(
+                hook_event_name="UserPromptSubmit", prompt=user_text,
+                session_id=str(getattr(self.session_manager, "session_id", "") or ""),
+            ), parallel=True)
+            if outcome.denied:
+                self.attached_images = []
+                self.update_attachments_bar()
+                await self._reject_prompt(outcome.reason, loading)
+                return
             temp_msg = self._begin_pending_mode()
             self.ctx.add_user_with_image(user_text, self.attached_images)
             self.attached_images = []
             self.update_attachments_bar()
-            self.update_dashboard("Pensando...")
-            loading = self.query_one("#loading-indicator", LoadingIndicator)
-            loading.display = True
             try:
                 stream_gen = self.agent_loop.stream("", context=self.ctx, verbose=getattr(
                     self, 'verbose_mode', False), timeout_seconds=settings.LLM_STREAM_TIMEOUT)

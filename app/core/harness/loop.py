@@ -11,6 +11,9 @@ from ..llm.base import BaseLLM, LLMResponse
 from .tool import ToolRegistry, ToolResult
 from .permissions import PermissionGate, Decision
 from .context import ContextManager
+from .hooks import (
+    HookEvent, HookOutcome, emit_hook, hook_context_active, hook_manager,
+)
 
 
 def _init_langfuse():
@@ -59,6 +62,49 @@ class AgentLoop:
         self.critic_tool = critic_tool
         self.agent_rules = agent_rules
         self.provider_name = provider_name
+        self.last_hook_denial: str | None = None
+
+    @staticmethod
+    def _apply_hook_feedback(
+        outcome: HookOutcome, ctx: ContextManager, default: str
+    ) -> bool:
+        """Convierte un `block` de hook en feedback temporal para el LLM."""
+        if outcome.denied is not True:
+            return False
+        reason = outcome.reason or default
+        ctx.add_user(f"[SISTEMA - FEEDBACK DE HOOK]: {reason}")
+        return True
+
+    async def _emit_stop_with_feedback(self, ctx: ContextManager) -> bool:
+        outcome = await emit_hook(HookEvent(hook_event_name="Stop"))
+        return self._apply_hook_feedback(
+            outcome, ctx, "El hook pidió revisar la respuesta.")
+
+    async def _emit_post_tool(
+        self, ctx: ContextManager, tool_name: str, args: dict, success: bool
+    ) -> None:
+        outcome = await emit_hook(HookEvent(
+            hook_event_name="PostToolUse", tool_name=tool_name,
+            tool_input=args, success=success))
+        self._apply_hook_feedback(
+            outcome, ctx, "El hook pidió corregir el uso de la herramienta.")
+
+    @staticmethod
+    def _inject_hook_context(ctx: ContextManager) -> None:
+        """Inyecta el `additionalContext` pendiente antes de llamar al LLM."""
+        if not hook_context_active():
+            return
+        context = hook_manager.drain_context()
+        if context:
+            ctx.append_hook_context(context)
+
+    @staticmethod
+    def _finish_hook_context(ctx: ContextManager) -> None:
+        """Retira el mensaje temporal y descarta contexto que no se usó."""
+        if not hook_context_active():
+            return
+        ctx.remove_hook_context()
+        hook_manager.drain_context()
 
     async def run(
         self,
@@ -67,6 +113,8 @@ class AgentLoop:
         verbose: bool = False,
     ) -> LoopResult:
         ctx = context or ContextManager()
+        await emit_hook(HookEvent(
+            hook_event_name="UserPromptSubmit", prompt=user_input))
         ctx.add_user(user_input)
 
         tools_used: list[str] = []
@@ -75,6 +123,7 @@ class AgentLoop:
 
         for step in range(1, self.max_iterations + 1):
             await ctx.maybe_compact(self.llm, verbose=verbose)
+            self._inject_hook_context(ctx)
             response: LLMResponse = await self.llm.chat(
                 messages=ctx.get_messages(),
                 tools=self.tools.all_schemas() or None,
@@ -100,6 +149,9 @@ class AgentLoop:
                             f"[SISTEMA - FEEDBACK DEL CRÍTICO]: Tu respuesta anterior fue rechazada por este motivo: {critique_msg}. Corrige el error y responde de nuevo.")
                         continue
 
+                if await self._emit_stop_with_feedback(ctx):
+                    continue
+                self._finish_hook_context(ctx)
                 ctx.add_assistant(final)
                 cost = await self._calculate_total_cost(usage_total)
                 return LoopResult(
@@ -116,6 +168,8 @@ class AgentLoop:
                 await self._execute_tool(tc, ctx)
                 tools_used.append(tc["name"])
 
+        await self._emit_stop_with_feedback(ctx)
+        self._finish_hook_context(ctx)
         cost = await self._calculate_total_cost(usage_total)
         return LoopResult(
             final_answer="[Max iterations reached without final answer]",
@@ -159,6 +213,7 @@ class AgentLoop:
         try:
             for step in range(1, self.max_iterations + 1):
                 await ctx.maybe_compact(self.llm, verbose=verbose)
+                self._inject_hook_context(ctx)
 
                 full_content = ""
                 tool_calls = []
@@ -186,6 +241,8 @@ class AgentLoop:
                         if reflection_attempts >= 2:
                             yield AgentEvent(type="text_chunk", data={
                                 "text": "\n\n⚠️ Se alcanzó el límite de reflexiones. Aceptando respuesta actual.\n\n"})
+                            if await self._emit_stop_with_feedback(ctx):
+                                continue
                             cost = await self._calculate_total_cost(usage_total)
                             self._langfuse_update(
                                 generation, full_content, step, tools_used, usage_total, cost)
@@ -223,6 +280,8 @@ class AgentLoop:
                                 "text": f"\n\n⚠️ Corrección aplicada: {critique_msg}\n\n"})
                             continue
 
+                    if await self._emit_stop_with_feedback(ctx):
+                        continue
                     cost = await self._calculate_total_cost(usage_total)
                     self._langfuse_update(
                         generation, full_content, step, tools_used, usage_total, cost)
@@ -240,6 +299,11 @@ class AgentLoop:
 
                 for tc in tool_calls:
                     success, tool_result = await self._execute_tool(tc, ctx)
+                    if self.last_hook_denial:
+                        denial = self.last_hook_denial
+                        self.last_hook_denial = None
+                        yield AgentEvent(type="hook_denied", data={
+                            "tool": tc["name"], "message": denial})
                     # 🔥 siempre, no solo success
                     tools_used.append(tc["name"])
                     yield AgentEvent(type="tool_end", data={
@@ -249,6 +313,7 @@ class AgentLoop:
                     })
 
             # 🔥 Si el for termina sin return, se agotó max_iterations
+            await self._emit_stop_with_feedback(ctx)
             cost = await self._calculate_total_cost(usage_total)
             self._langfuse_update(
                 generation, "", self.max_iterations, tools_used, usage_total, cost)
@@ -264,6 +329,7 @@ class AgentLoop:
 
         except (asyncio.TimeoutError, TimeoutError):
             self._langfuse_error(generation, "Timeout")
+            await emit_hook(HookEvent(hook_event_name="StopFailure"))
             yield AgentEvent(type="error", data={
                 "message": f"Timeout: el stream superó {timeout}s",
                 "is_timeout": True,
@@ -272,9 +338,11 @@ class AgentLoop:
         except Exception as e:
             logger.error(f"AgentLoop.stream error: {e}", exc_info=True)
             self._langfuse_error(generation, str(e))
+            await emit_hook(HookEvent(hook_event_name="StopFailure"))
             yield AgentEvent(type="error", data={"message": str(e), "is_timeout": False})
             return
         finally:
+            self._finish_hook_context(ctx)
             if generation_cm is not None:
                 try:
                     generation_cm.__exit__(None, None, None)
@@ -319,15 +387,29 @@ class AgentLoop:
         args = tc["arguments"]
         tool_call_id = tc["id"]
 
+        self.last_hook_denial = None
+        hook_outcome = await emit_hook(HookEvent(
+            hook_event_name="PreToolUse", tool_name=tool_name, tool_input=args))
+        if hook_outcome.denied is True:
+            self.last_hook_denial = (
+                hook_outcome.reason
+                or f"El hook bloqueó la herramienta '{tool_name}'."
+            )
+            ctx.add_tool_result(tool_call_id, f"ERROR: {self.last_hook_denial}")
+            await self._emit_post_tool(ctx, tool_name, args, False)
+            return False, None
+
         decision = await self.permissions.check(tool_name, args)
         if decision == Decision.DENY:
             ctx.add_tool_result(
                 tool_call_id, f"ERROR: Permission denied for '{tool_name}'.")
+            await self._emit_post_tool(ctx, tool_name, args, False)
             return False, None
 
         tool = self.tools.get(tool_name)
         if tool is None:
             ctx.add_tool_result(tool_call_id, f"Tool '{tool_name}' not found.")
+            await self._emit_post_tool(ctx, tool_name, args, False)
             return False, None
 
         try:
@@ -356,6 +438,7 @@ class AgentLoop:
                     f"Error: {result.error}. (Reintento {attempts}/3. Si no puedes recuperarte, pregunta al usuario).",
                 )
 
+        await self._emit_post_tool(ctx, tool_name, args, result.success)
         return result.success, result
 
     @staticmethod

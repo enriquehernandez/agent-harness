@@ -7,7 +7,7 @@ Cuando un agente usa herramientas muy pesadas (como leer 10 archivos para revisa
 Implementamos el patrón **Subagents-as-Tools**. El agente principal (Orquestador) tiene acceso a una herramienta llamada `delegate_to_reviewer`. 
 
 Cuando el Orquestador la invoca:
-1.  Se instancia un **nuevo AgentLoop** con su propio `ContextManager` y un `ToolRegistry` restringido. La TUI copia `read_file` y `bash` (`app/tui/app.py`), que son nombres reales del registry (`register_core_tools()`); para listar directorios el subagente usa `bash`. Además, `DelegateTool.run()` deriva un gate hijo del gate interactivo del padre con `PermissionGate.child(allow=self.tools.names())` (`app/core/harness/subagents.py`): comparte las aprobaciones (`session_allowed`) con el padre, pero marca solo esas tools como `Decision.ALLOW` en su copia de `policies`.
+1.  Se instancia un **nuevo AgentLoop** con su propio `ContextManager` y un `ToolRegistry` restringido. La TUI copia `read_file` y `bash` (`app/tui/app.py`), que son nombres reales del registry (`register_core_tools()`); para listar directorios el subagente usa `bash`. Además, `DelegateTool.run()` deriva un gate hijo del gate interactivo del padre con `PermissionGate.child()` (`app/core/harness/subagents.py`): comparte las aprobaciones (`session_allowed`) y las `policies`, pero **no auto-aprueba ninguna tool**. `bash` y `write_file` siguen pasando por el modal salvo que ya estén aprobadas en `session_allowed`.
 2.  El Subagente ejecuta la tarea de forma aislada.
 3.  Al terminar, devuelve **solo un resumen** al agente principal.
 

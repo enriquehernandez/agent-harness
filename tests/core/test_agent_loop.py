@@ -1,8 +1,12 @@
 import asyncio
+import json
+import sys
+from pathlib import Path
 from typing import AsyncIterator
 
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
+import app.core.harness.hooks as hooks_module
 from app.core.harness.loop import AgentLoop
 from app.core.harness.permissions import PermissionGate, Decision
 from app.core.harness.tool import FunctionTool, ToolRegistry, ToolResult
@@ -10,6 +14,9 @@ from app.core.llm.base import BaseLLM, LLMResponse
 from app.core.harness.context import ContextManager
 from app.core.llm.providers.fake import FakeLLM
 from app.core.harness.events import AgentEvent
+from app.core.harness.hooks import (
+    HookManager, HookOutcome, _hook_depth, hook_manager,
+)
 
 
 class HangingLLM(BaseLLM):
@@ -342,3 +349,533 @@ async def test_loop_calculate_cost_delegates_to_pricing(fake_llm, basic_registry
 
     assert cost == {"input_cost": 0.1, "output_cost": 0.2}
     loop.pricing.get_cost_pricing.assert_awaited_once_with("fake-model", 100, 50)
+
+
+@pytest.mark.asyncio
+async def test_loop_run_emits_prompt_and_stop(fake_llm, basic_registry):
+    """El modo headless dispara UserPromptSubmit y Stop sin intervención del usuario."""
+    fake_llm._responses = [LLMResponse(content="Listo")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+
+    with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+        result = await loop.run("Hola", context=ContextManager())
+
+    assert result.final_answer == "Listo"
+    events = [call.args[0] for call in emit.await_args_list]
+    assert [event.hook_event_name for event in events] == [
+        "UserPromptSubmit", "Stop"]
+    assert events[0].prompt == "Hola"
+
+
+@pytest.mark.asyncio
+async def test_loop_execute_tool_emits_pre_and_post(fake_llm, basic_registry):
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+
+    with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+        success, _ = await loop._execute_tool(
+            {"id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}},
+            ContextManager(),
+        )
+
+    assert success is True
+    events = [call.args[0] for call in emit.await_args_list]
+    assert [event.hook_event_name for event in events] == [
+        "PreToolUse", "PostToolUse"]
+    assert events[0].tool_name == "add"
+    assert events[0].tool_input == {"a": 1, "b": 2}
+    assert events[1].success is True
+
+
+@pytest.mark.asyncio
+async def test_loop_denied_tool_emits_post_hook(fake_llm, basic_registry, tmp_path):
+    gate = PermissionGate(policies={"add": Decision.DENY},
+                          persist_file=tmp_path / "no_perms.json")
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+
+    with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+        success, result = await loop._execute_tool(
+            {"id": "c1", "name": "add", "arguments": {}}, ContextManager())
+
+    assert (success, result) == (False, None)
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "PreToolUse", "PostToolUse"]
+    assert emit.await_args_list[1].args[0].success is False
+
+
+@pytest.mark.asyncio
+async def test_loop_missing_tool_emits_post_hook(fake_llm, basic_registry):
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+
+    with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+        success, result = await loop._execute_tool(
+            {"id": "c1", "name": "ghost", "arguments": {}}, ContextManager())
+
+    assert (success, result) == (False, None)
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "PreToolUse", "PostToolUse"]
+    assert emit.await_args_list[1].args[0].success is False
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_emits_stop(fake_llm, basic_registry):
+    async def mock_stream(*args, **kwargs):
+        yield "Listo"
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+        with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+            events = [event async for event in loop.stream("Hola")]
+
+    assert any(event.type == "result" for event in events)
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "Stop"]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_emits_stop_failure_on_timeout():
+    loop = AgentLoop(llm=HangingLLM(), tools=ToolRegistry())
+
+    with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+        events = [event async for event in loop.stream(
+            "Hola", timeout_seconds=0.1)]
+
+    assert events[-1].type == "error"
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "StopFailure"]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_emits_stop_failure_on_error(fake_llm):
+    with patch.object(fake_llm, "stream_chat", side_effect=RuntimeError("boom")):
+        loop = AgentLoop(llm=fake_llm, tools=ToolRegistry())
+        with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+            events = [event async for event in loop.stream("Hola")]
+
+    assert events[-1].type == "error"
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "StopFailure"]
+
+
+@pytest.mark.asyncio
+async def test_loop_max_iterations_emits_stop(fake_llm, basic_registry):
+    async def mock_stream(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "add",
+               "arguments": {"a": 1, "b": 2}}
+
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry,
+                         permissions=gate, max_iterations=1)
+        with patch("app.core.harness.loop.emit_hook", new_callable=AsyncMock) as emit:
+            events = [event async for event in loop.stream("Hola")]
+
+    assert events[-1].type == "result"
+    assert [call.args[0].hook_event_name for call in emit.await_args_list][-1] == "Stop"
+
+
+@pytest.mark.asyncio
+async def test_loop_hook_denial_blocks_tool(fake_llm, basic_registry):
+    """Un hook PreToolUse con deny impide ejecutar la herramienta."""
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+    tool = basic_registry.get("add")
+    tool._func = MagicMock(return_value=3)
+    ctx = ContextManager()
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "PreToolUse":
+            return HookOutcome(denied=True, reason="Borrado prohibido por hook")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook",
+               side_effect=emit_side_effect) as emit:
+        success, result = await loop._execute_tool(
+            {"id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}, ctx)
+
+    assert (success, result) == (False, None)
+    tool._func.assert_not_called()
+    assert loop.last_hook_denial == "Borrado prohibido por hook"
+    assert "Borrado prohibido por hook" in ctx.messages[-1]["content"]
+    assert [call.args[0].hook_event_name for call in emit.await_args_list] == [
+        "PreToolUse", "PostToolUse"]
+    assert emit.await_args_list[1].args[0].success is False
+
+
+@pytest.mark.asyncio
+async def test_loop_hook_denial_without_reason_uses_default(fake_llm, basic_registry):
+    """Si el hook no da motivo, se ofrece uno genérico."""
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "PreToolUse":
+            return HookOutcome(denied=True, reason="")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        success, _ = await loop._execute_tool(
+            {"id": "c1", "name": "add", "arguments": {}}, ContextManager())
+
+    assert success is False
+    assert loop.last_hook_denial == "El hook bloqueó la herramienta 'add'."
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_yields_hook_denied(fake_llm, basic_registry):
+    """El stream entrega el aviso y no ejecuta la herramienta bloqueada."""
+    async def mock_stream(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "add",
+               "arguments": {"a": 1, "b": 2}}
+
+    tool = basic_registry.get("add")
+    tool._func = MagicMock(return_value=3)
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "PreToolUse":
+            return HookOutcome(denied=True, reason="No se pueden borrar archivos")
+        return HookOutcome()
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        loop = AgentLoop(llm=fake_llm, tools=basic_registry,
+                         permissions=gate, max_iterations=1)
+        with patch("app.core.harness.loop.emit_hook",
+                   side_effect=emit_side_effect):
+            events = [event async for event in loop.stream("Hola")]
+
+    denials = [event for event in events if event.type == "hook_denied"]
+    assert len(denials) == 1
+    assert denials[0].data == {
+        "tool": "add", "message": "No se pueden borrar archivos"}
+    assert tool._func.assert_not_called() is None
+    assert loop.last_hook_denial is None
+
+
+@pytest.mark.asyncio
+async def test_real_no_delete_hook_blocks_bash_rm(fake_llm, tmp_path):
+    """Integración real: el script del hook bloquea un `rm` antes de la tool."""
+    script = Path(__file__).resolve().parents[2] / ".harness" / "hooks" / "no_delete.py"
+    config_file = tmp_path / "hooks.json"
+    config_file.write_text(json.dumps({"hooks": {
+        "PreToolUse": [{"matcher": "bash", "hooks": [
+            {"command": f"{sys.executable} {script}"}]}]
+    }}), encoding="utf-8")
+    manager = HookManager(config_file=config_file)
+
+    async def delete_file(**kwargs):
+        return "borrado"
+
+    registry = ToolRegistry()
+    registry.register(FunctionTool(
+        name="bash", description="Exec", parameters_schema={}, func=delete_file))
+    func_spy = MagicMock(wraps=delete_file)
+    registry._tools["bash"]._func = func_spy
+
+    async def mock_stream(*args, **kwargs):
+        yield {"type": "tool_call", "id": "c1", "name": "bash",
+               "arguments": {"command": "rm -f archivo.txt"}}
+
+    with patch.object(fake_llm, "stream_chat", side_effect=mock_stream):
+        with patch("app.core.harness.hooks.hook_manager", manager):
+            # Este test sí quiere hooks reales; anula el no-op del fixture global.
+            with patch("app.core.harness.loop.emit_hook",
+                       side_effect=hooks_module.emit_hook):
+                loop = AgentLoop(llm=fake_llm, tools=registry, max_iterations=1)
+                events = [event async for event in loop.stream("Borra el archivo")]
+
+    denials = [event for event in events if event.type == "hook_denied"]
+    assert len(denials) == 1
+    assert "eliminar" in denials[0].data["message"].lower()
+    func_spy.assert_not_called()
+
+
+def _feedback_messages(ctx):
+    return [msg["content"] for msg in ctx.messages
+            if "FEEDBACK DE HOOK" in str(msg.get("content", ""))]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason,expected", [
+    ("Revisa el tono", "Revisa el tono"),
+    ("", "El hook pidió revisar la respuesta."),
+])
+async def test_loop_run_stop_block_adds_feedback_and_continues(
+        fake_llm, basic_registry, reason, expected):
+    """Un `block` en Stop impide cerrar el turno y realimenta al agente."""
+    fake_llm._responses = [
+        LLMResponse(content="Primera"), LLMResponse(content="Corregida")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+    ctx = ContextManager()
+    stop_calls = 0
+
+    async def emit_side_effect(event):
+        nonlocal stop_calls
+        if event.hook_event_name == "Stop":
+            stop_calls += 1
+            if stop_calls == 1:
+                return HookOutcome(denied=True, reason=reason)
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        result = await loop.run("Hola", context=ctx)
+
+    assert stop_calls == 2
+    assert result.final_answer == "Corregida"
+    assert result.steps == 2
+    feedback = _feedback_messages(ctx)
+    assert len(feedback) == 1
+    assert expected in feedback[0]
+
+
+@pytest.mark.asyncio
+async def test_loop_run_stop_block_at_max_iterations(fake_llm, basic_registry):
+    """Si se agotan las iteraciones, el feedback se registra y se devuelve el resultado."""
+    fake_llm._responses = [LLMResponse(content="Primera")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, max_iterations=1)
+    ctx = ContextManager()
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "Stop":
+            return HookOutcome(denied=True, reason="No destruir el resultado")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        result = await loop.run("Hola", context=ctx)
+
+    assert result.final_answer == "[Max iterations reached without final answer]"
+    assert "No destruir el resultado" in _feedback_messages(ctx)[0]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_stop_block_adds_feedback_and_continues(
+        fake_llm, basic_registry):
+    fake_llm._responses = [
+        LLMResponse(content="Primera"), LLMResponse(content="Corregida")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+    ctx = ContextManager()
+    stop_calls = 0
+
+    async def emit_side_effect(event):
+        nonlocal stop_calls
+        if event.hook_event_name == "Stop":
+            stop_calls += 1
+            if stop_calls == 1:
+                return HookOutcome(denied=True, reason="Revisa la respuesta")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        events = [event async for event in loop.stream("Hola", context=ctx)]
+
+    texts = [event.data["text"] for event in events
+             if event.type == "text_chunk"]
+    assert any("Primera" in text for text in texts)
+    assert any("Corregida" in text for text in texts)
+    results = [event for event in events if event.type == "result"]
+    assert len(results) == 1
+    assert results[0].data["final_answer"] == "Corregida"
+    assert "Revisa la respuesta" in _feedback_messages(ctx)[0]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_stop_block_at_max_iterations(fake_llm, basic_registry):
+    fake_llm._responses = [LLMResponse(content="Primera")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, max_iterations=1)
+    ctx = ContextManager()
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "Stop":
+            return HookOutcome(denied=True, reason="Sin cierre")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        events = [event async for event in loop.stream("Hola", context=ctx)]
+
+    results = [event for event in events if event.type == "result"]
+    assert len(results) == 1
+    assert "Max iterations" in results[0].data["final_answer"]
+    assert "Sin cierre" in _feedback_messages(ctx)[0]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_stop_block_at_reflection_limit(
+        fake_llm, basic_registry):
+    critic = MagicMock()
+    critic.run = AsyncMock(return_value=ToolResult(
+        success=True, content="REJECTED: incompleto"))
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry,
+                     critic_tool=critic, max_iterations=4)
+    ctx = ContextManager()
+    stop_calls = 0
+
+    async def emit_side_effect(event):
+        nonlocal stop_calls
+        if event.hook_event_name == "Stop":
+            stop_calls += 1
+            if stop_calls == 1:
+                return HookOutcome(denied=True, reason="Aun no")
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        events = [event async for event in loop.stream("Hola", context=ctx)]
+
+    assert any("límite de reflexiones" in event.data.get("text", "")
+               for event in events if event.type == "text_chunk")
+    assert any(event.type == "result" for event in events)
+    assert "Aun no" in _feedback_messages(ctx)[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason,expected", [
+    ("Revisa el argumento", "Revisa el argumento"),
+    ("", "El hook pidió corregir el uso de la herramienta."),
+])
+async def test_loop_post_tool_block_adds_feedback(
+        fake_llm, basic_registry, reason, expected):
+    """Un `block` en PostToolUse realimenta al agente tras ejecutar la tool."""
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+    ctx = ContextManager()
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "PostToolUse":
+            return HookOutcome(denied=True, reason=reason)
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        success, result = await loop._execute_tool(
+            {"id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}, ctx)
+
+    assert success is True
+    assert result.content == "3"
+    assert expected in _feedback_messages(ctx)[0]
+
+
+def _hook_context_messages(ctx):
+    return [msg["content"] for msg in ctx.messages
+            if "CONTEXTO ADICIONAL DE HOOK" in str(msg.get("content", ""))]
+
+
+def _spy_chat(fake_llm, seen):
+    """Devuelve un patch que captura los mensajes enviados al LLM."""
+    original_chat = fake_llm.chat
+
+    async def spy_chat(*args, **kwargs):
+        messages = kwargs.get("messages") or (args[0] if args else [])
+        seen.append(list(messages))
+        return await original_chat(*args, **kwargs)
+
+    return patch.object(fake_llm, "chat", side_effect=spy_chat)
+
+
+@pytest.mark.asyncio
+async def test_loop_run_injects_hook_context_and_removes_it(
+        monkeypatch, fake_llm, basic_registry):
+    """El contexto de UserPromptSubmit se envía al LLM y no queda en el historial."""
+    monkeypatch.setattr(hook_manager, "pending_context", "usa python")
+    fake_llm._responses = [LLMResponse(content="Listo")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+    ctx = ContextManager()
+    seen = []
+
+    with _spy_chat(fake_llm, seen):
+        result = await loop.run("Hola", context=ctx)
+
+    assert result.final_answer == "Listo"
+    assert any("usa python" in str(msg["content"]) for msg in seen[0])
+    assert _hook_context_messages(ctx) == []
+    assert hook_manager.pending_context == ""
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_injects_hook_context_and_removes_it(
+        monkeypatch, fake_llm, basic_registry):
+    monkeypatch.setattr(hook_manager, "pending_context", "lee el contrato")
+    fake_llm._responses = [LLMResponse(content="Listo")]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+    ctx = ContextManager()
+    seen = []
+
+    with _spy_chat(fake_llm, seen):
+        events = [event async for event in loop.stream("Hola", context=ctx)]
+
+    assert events[-1].data["final_answer"] == "Listo"
+    assert any("lee el contrato" in str(msg["content"]) for msg in seen[0])
+    assert _hook_context_messages(ctx) == []
+    assert hook_manager.pending_context == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_name", ["PreToolUse", "PostToolUse"])
+async def test_loop_tool_context_reaches_next_llm_call(
+        monkeypatch, fake_llm, basic_registry, event_name):
+    monkeypatch.setattr(hook_manager, "pending_context", "")
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    fake_llm._responses = [
+        LLMResponse(tool_calls=[
+            {"id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}]),
+        LLMResponse(content="Listo"),
+    ]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+    ctx = ContextManager()
+    seen = []
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == event_name:
+            hook_manager.pending_context = "revisa el resultado"
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        with _spy_chat(fake_llm, seen):
+            result = await loop.run("Hola", context=ctx)
+
+    assert result.final_answer == "Listo"
+    assert len(seen) == 2
+    assert any("revisa el resultado" in str(msg["content"]) for msg in seen[1])
+    assert _hook_context_messages(ctx) == []
+    assert hook_manager.pending_context == ""
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_tool_context_reaches_next_llm_call(
+        monkeypatch, fake_llm, basic_registry):
+    monkeypatch.setattr(hook_manager, "pending_context", "")
+    gate = PermissionGate(policies={"add": Decision.ALLOW})
+    fake_llm._responses = [
+        LLMResponse(tool_calls=[
+            {"id": "c1", "name": "add", "arguments": {"a": 1, "b": 2}}]),
+        LLMResponse(content="Listo"),
+    ]
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry, permissions=gate)
+    ctx = ContextManager()
+    seen = []
+
+    async def emit_side_effect(event):
+        if event.hook_event_name == "PostToolUse":
+            hook_manager.pending_context = "revisa el resultado"
+        return HookOutcome()
+
+    with patch("app.core.harness.loop.emit_hook", side_effect=emit_side_effect):
+        with _spy_chat(fake_llm, seen):
+            events = [event async for event in loop.stream("Hola", context=ctx)]
+
+    assert events[-1].data["final_answer"] == "Listo"
+    assert any("revisa el resultado" in str(msg["content"]) for msg in seen[1])
+    assert _hook_context_messages(ctx) == []
+
+
+@pytest.mark.asyncio
+async def test_loop_nested_in_agent_hook_does_not_drain_context(
+        monkeypatch, fake_llm, basic_registry):
+    """El loop anidado de un hook `agent` no roba el contexto del turno padre."""
+    monkeypatch.setattr(hook_manager, "pending_context", "contexto del padre")
+    loop = AgentLoop(llm=fake_llm, tools=basic_registry)
+    ctx = ContextManager()
+    token = _hook_depth.set(1)
+    try:
+        loop._inject_hook_context(ctx)
+        loop._finish_hook_context(ctx)
+    finally:
+        _hook_depth.reset(token)
+
+    assert _hook_context_messages(ctx) == []
+    assert hook_manager.pending_context == "contexto del padre"

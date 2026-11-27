@@ -1,5 +1,46 @@
+import json
 import logging
+from datetime import date, datetime
+from pathlib import Path
+from unittest.mock import patch
+
+import app.core.logger as logger_module
+from app.core.config import settings
 from app.core.logger import DebugEventCollector
+
+
+def test_log_file_uses_todays_date():
+    """El archivo de log se llama aaaammdd_harness.log."""
+    expected = settings.logs_dir / f"{datetime.now():%Y_%m_%d}_harness.log"
+
+    assert settings.log_file == expected
+    assert Path(logger_module.file_handler.baseFilename).name == expected.name
+
+
+def test_daily_file_handler_rotates_at_midnight(tmp_path):
+    """El handler abre el archivo del día nuevo sin perder el anterior."""
+    with patch.object(logger_module, "datetime") as clock:
+        clock.now.return_value.date.return_value = date(2026, 11, 25)
+        handler = logger_module.DailyFileHandler(tmp_path)
+        first = Path(handler.baseFilename)
+
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="", lineno=0,
+            msg="primero", args=(), exc_info=None)
+        handler.emit(record)
+
+        clock.now.return_value.date.return_value = date(2026, 11, 26)
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="", lineno=0,
+            msg="segundo", args=(), exc_info=None)
+        handler.emit(record)
+        handler.close()
+
+    assert first.name == "2026_11_25_harness.log"
+    assert Path(handler.baseFilename).name == "2026_11_26_harness.log"
+    assert first.read_text(encoding="utf-8").endswith("primero\n")
+    assert Path(handler.baseFilename).read_text(encoding="utf-8").endswith(
+        "segundo\n")
 
 
 def test_debug_event_collector():
@@ -79,6 +120,97 @@ def test_debug_event_collector_simple_content():
                                pathname="", lineno=0, msg=msg, args=(), exc_info=None)
     collector.emit(record)
     assert "Hola mundo" in collector.events[0]["summary"]
+
+
+def test_debug_event_collector_formats_hook_handler_log():
+    """El resumen del panel identifica el evento, tipo, estado y matcher."""
+    collector = DebugEventCollector()
+    payload = {
+        "hook": "handler",
+        "event": "PreToolUse",
+        "type": "prompt",
+        "status": "denied",
+        "duration_ms": 12.34,
+        "matcher": "bash",
+        "input": {"tool_name": "bash"},
+        "output": {"denied": True},
+    }
+    record = logging.LogRecord(
+        name="test", level=logging.INFO, pathname="", lineno=0,
+        msg=json.dumps(payload), args=(), exc_info=None
+    )
+
+    collector.emit(record)
+
+    event = collector.events[0]
+    assert event["summary"] == (
+        "🪝 PreToolUse · prompt · denied · 12.34ms · [bash]")
+    assert '"tool_name": "bash"' in event["payload"]
+    assert '"denied": true' in event["payload"]
+
+
+def test_debug_event_collector_hook_handler_without_matcher():
+    """Sin matcher el resumen no añade el sufijo."""
+    collector = DebugEventCollector()
+    payload = {
+        "hook": "handler",
+        "event": "UserPromptSubmit",
+        "type": "agent",
+        "status": "ok",
+        "duration_ms": 10,
+    }
+    record = logging.LogRecord(
+        name="test", level=logging.INFO, pathname="", lineno=0,
+        msg=json.dumps(payload), args=(), exc_info=None
+    )
+
+    collector.emit(record)
+
+    assert collector.events[0]["summary"] == (
+        "🪝 UserPromptSubmit · agent · ok · 10ms")
+
+
+def test_debug_event_collector_formats_hook_emit_log():
+    """El evento global muestra paralelismo cuando se usó."""
+    collector = DebugEventCollector()
+    payload = {
+        "hook": "emit",
+        "event": "UserPromptSubmit",
+        "handlers": 3,
+        "duration_ms": 1500.0,
+        "parallel": True,
+        "output": {"denied": False},
+    }
+    record = logging.LogRecord(
+        name="test", level=logging.INFO, pathname="", lineno=0,
+        msg=json.dumps(payload), args=(), exc_info=None
+    )
+
+    collector.emit(record)
+
+    assert collector.events[0]["summary"] == (
+        "🪝 emit · UserPromptSubmit · 3 handlers · 1500.0ms · parallel")
+
+
+def test_debug_event_collector_formats_serial_hook_emit_without_matcher():
+    """Sin matcher ni paralelismo el resumen queda más corto."""
+    collector = DebugEventCollector()
+    payload = {
+        "hook": "emit",
+        "event": "Stop",
+        "handlers": 1,
+        "duration_ms": 0.5,
+        "parallel": False,
+    }
+    record = logging.LogRecord(
+        name="test", level=logging.INFO, pathname="", lineno=0,
+        msg=json.dumps(payload), args=(), exc_info=None
+    )
+
+    collector.emit(record)
+
+    assert collector.events[0]["summary"] == (
+        "🪝 emit · Stop · 1 handlers · 0.5ms")
 
 
 def test_log_agent_flow():

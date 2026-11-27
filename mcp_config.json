@@ -2,7 +2,7 @@
   "mcpServers": {
     "git": {
       "command": "uvx",
-      "args": ["mcp-server-git", "--repository", "."]
+      "args": ["mcp-server-git==2026.11.27", "--repository", "."]
     },
     "filesystem": {
       "command": "bash",
@@ -10,11 +10,12 @@
     },
     "fetch": {
       "command": "uvx",
-      "args": ["mcp-server-fetch"]
+      "args": ["mcp-server-fetch==2026.11.27"]
     },
     "local_dev": {
       "command": "uv",
-      "args": ["run", "python", "scripts/local_mcp_server.py"]
+      "args": ["run", "python", "scripts/local_mcp_server.py"],
+      "allowed_env": ["HARNESS_E2E"]
     }
   }
 }

@@ -38,9 +38,9 @@ class DelegateTool(BaseTool):
     async def run(self, task: str) -> ToolResult:
         ctx = ContextManager(system_prompt=self.system_prompt)
 
-        # Comparte las aprobaciones del padre; solo añade sus propias excepciones
-        gate = (self.permissions or PermissionGate()).child(
-            allow=self.tools.names())
+        # Comparte aprobaciones y políticas del padre, pero no auto-aprueba
+        # ninguna tool: bash/write_file siguen pasando por PermissionGate.
+        gate = (self.permissions or PermissionGate()).child()
 
         loop = AgentLoop(llm=self.llm, tools=self.tools,
                          permissions=gate, max_iterations=5)

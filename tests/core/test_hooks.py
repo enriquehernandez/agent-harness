@@ -1109,6 +1109,29 @@ def _agent_manager(tmp_path, handler=None, llm=None):
 
 
 @pytest.mark.asyncio
+async def test_agent_hook_does_not_auto_allow_configured_tools(
+        tmp_path, monkeypatch):
+    """`tools` del hook no puede convertir bash/write_file en ALLOW implícito."""
+    from app.core.harness.permissions import Decision
+
+    monkeypatch.chdir(tmp_path)
+    manager = _agent_manager(tmp_path, handler={
+        "type": "agent", "prompt": "revisa",
+        "tools": ["bash", "write_file"],
+    })
+    delegate = MagicMock()
+    delegate.run = AsyncMock(return_value=ToolResult(success=True, content="{}"))
+
+    with patch("app.core.harness.subagents.DelegateTool",
+               return_value=delegate) as Delegate:
+        await manager.emit(HookEvent("PostToolUse"))
+
+    gate = Delegate.call_args.kwargs["permissions"]
+    assert await gate.check("bash", {"command": "ls"}) == Decision.DENY
+    assert await gate.check("write_file", {"path": "app.py"}) == Decision.DENY
+
+
+@pytest.mark.asyncio
 async def test_agent_hook_parses_subagent_json(tmp_path):
     manager = _agent_manager(tmp_path)
     delegate = MagicMock()

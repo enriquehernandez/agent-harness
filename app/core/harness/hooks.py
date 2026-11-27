@@ -557,8 +557,9 @@ class HookManager:
 
             llm = self._llm_for(entry)
             tools = self.tools or ToolRegistry()
-            gate = (self.permissions or PermissionGate()).child(
-                allow=entry.get("tools") or [])
+            # `tools` de la config no concede permisos: el subagente hereda
+            # aprobaciones y policies, y las tools sensibles siguen pidiendo.
+            gate = (self.permissions or PermissionGate()).child()
             delegate = DelegateTool(
                 name="hook_agent",
                 description="Subagente invocado por un hook",

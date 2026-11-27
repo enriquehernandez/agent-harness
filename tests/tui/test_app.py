@@ -1493,3 +1493,50 @@ async def test_app_on_input_submitted_with_images_and_mode():
     assert app.pending_mode is None
     assert len(app.ctx.messages) == 2
     assert mode_message("/nofluff") not in [m["content"] for m in app.ctx.messages]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_subagent_asks_for_bash_in_tui():
+    """P0.1: el reviewer pide permiso en la TUI antes de usar bash."""
+    from app.tui.modals.permission import PermissionModal
+
+    class LoopWithGate:
+        def __init__(self, **kwargs):
+            self.permissions = kwargs["permissions"]
+
+        async def run(self, task, context=None):
+            decision = await self.permissions.check(
+                "bash", {"command": "ls"})
+            return MagicMock(final_answer=decision.value)
+
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient"), patch("app.tui.app.register_core_tools") as mock_register:
+        def side_effect(registry, **kwargs):
+            from app.core.harness.tool import FunctionTool
+            registry.register(FunctionTool(
+                name="bash", description="", parameters_schema={},
+                func=lambda **kwargs: "",
+            ))
+        mock_register.side_effect = side_effect
+
+        with patch("app.core.harness.subagents.AgentLoop", LoopWithGate):
+            async with app.run_test() as pilot:
+                await app.initialize_agent()
+                reviewer = app.registry.get("delegate_to_reviewer")
+                holder = {}
+
+                async def ask():
+                    holder["result"] = await reviewer.run(task="list files")
+
+                worker = app.run_worker(ask())
+                await pilot.pause()
+
+                assert any(isinstance(screen, PermissionModal)
+                           for screen in app.screen_stack)
+                await pilot.press("y")
+                await pilot.pause()
+                await worker.wait()
+                result = holder["result"]
+
+    assert result.success is True
+    assert "allow" in result.content

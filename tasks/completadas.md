@@ -167,3 +167,12 @@
 - **Objetivo:** sustituir `harness_debug.log` por un archivo identificable por día (`yyyy_MM_dd_harness.log`).
 - **Estado:** Completada. `Settings.log_file` calcula la ruta diaria y `app/core/logger.py` la usa para el `FileHandler`. `DailyFileHandler` rota automáticamente al cambiar de día, incluso con la TUI abierta. Cubierto por test en `tests/core/test_logger.py`; documentado en `README.md` y `docs/herramientas.md`, y actualizado el mensaje de `scripts/verify_memory_backends.py`.
 - **Prueba en TUI:** Enviar un prompt y comprobar `.harness/logs/yyyy_MM_dd_harness.log` con la fecha de hoy → contiene los eventos; F1 sigue mostrando los mismos eventos.
+
+## P0.1 Cerrar el bypass de permisos en subagentes
+
+- **Objetivo:** ningún subagente puede heredar `ALLOW` para `bash` ni `write_file` sin una decisión explícita del usuario.
+- **Diseño elegido:** `DelegateTool.run()` y el hook `agent` derivan el gate con `child()` sin `allow`: comparten `session_allowed`, `ask_user` y `persist_file` con el padre, copian las `policies` y dejan las tools sensibles en `ASK`. El campo `tools` del hook `agent` ya no concede permisos. P0.9 queda pendiente para el modelo de petición pendiente por sesión en background/paralelo real.
+- **Estado:** Completada. Cambios en `app/core/harness/subagents.py` y `app/core/harness/hooks.py`; blueprint actualizado (`02_permission_gate.md`, `05_subagents.md`, `08_a2a.md`, `03_SECURITY_AND_AUDIT/02_a2a_security.md` y `11_hooks.md`).
+- **Tests:** `tests/core/test_subagents.py` (herencia sin auto-allow y `DENY` sin `ask_user`), `tests/core/test_hooks.py` (el hook `agent` no auto-aprueba `tools`) y `tests/tui/test_app.py::test_reviewer_subagent_asks_for_bash_in_tui`. `uv run tom test` → 565 passed, 100 % de cobertura.
+- **Prueba en TUI:** ejecutada con el piloto de Textual: arrancar `AgentHarnessApp`, inicializar agente con `bash` registrado, lanzar `delegate_to_reviewer` con una tarea que pide `bash` → aparece `PermissionModal`; pulsar «y» → el subagente recibe `allow`. Esperado y observado: sin modal no se ejecuta la tool. Para repetirlo en la TUI interactiva: `/subagents` → reviewer; pedir una tarea con `bash` → modal de permisos; F1 → sin `ALLOW` implícito en el gate hijo.
+- **DoD:** ✅ tests/cobertura · ✅ TUI (piloto Textual) · ✅ seguridad (sin secretos, `logger`, permisos diff-first) · ✅ docs · ✅ listo para commit (pendiente de aprobación explícita).

@@ -115,7 +115,7 @@ A diferencia del feedback, este contexto **no se conserva**: es de un solo uso p
 | `command` | `command` | Shell con el evento por stdin; `settings.TOOL_TIMEOUT` |
 | `http` | `url`, `timeout` opcional | `POST` JSON con `httpx.AsyncClient`; la ruta no tiene semántica, solo el JSON de respuesta (ver abajo); un `>= 400` se registra como error y se ignora |
 | `prompt` | `prompt`, `provider`/`model` opcionales | Una llamada LLM con el evento; JSON con `ok: false` bloquea y la respuesta en texto pasa a `additionalContext` |
-| `agent` | `prompt`, `tools`, `timeout` opcionales | `DelegateTool` con permisos hijos y timeout de 60 s por defecto; su respuesta se parsea igual que `prompt` |
+| `agent` | `prompt`, `tools`, `timeout` opcionales | `DelegateTool` con permisos hijos y timeout de 60 s por defecto; `tools` **no concede permisos** (no se pasa como `allow` al gate) y la respuesta se parsea igual que `prompt` |
 
 Los tipos `prompt` y `agent` reutilizan el LLM inyectado en `HookManager` (tests) o construyen uno desde `provider`/`model` y `settings.LLM_PROVIDER`. El contexto variable `_hook_depth` impide que los eventos del subagente vuelvan a disparar hooks ni a drenar el `additionalContext` del turno padre.
 

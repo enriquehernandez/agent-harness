@@ -6,12 +6,6 @@
 
 ## P0 — Bloqueantes (seguridad e integridad de datos)
 
-### P0.1 Cerrar el bypass de permisos en subagentes
-- **Problema:** `PermissionGate.child(allow=self.tools.names())` auto-aprueba todas las tools del subagente, incluido `bash`. Afecta a `app/core/harness/subagents.py:41-46`, a los hooks `agent` (`app/core/harness/hooks.py:560-561`) y al reviewer de la TUI (`app/tui/app.py:189-202`).
-- **Criterio:** ningún subagente puede heredar `ALLOW` para `bash` ni `write_file` sin una decisión explícita del usuario. Test de regresión: con `ask_user=None`, `gate.check("bash", …)` del hijo devuelve `DENY`.
-- **Prueba en TUI prevista:** `/subagents` con el reviewer y una tarea que requiera `bash` → debe aparecer el modal de permisos (hoy se ejecuta sin preguntar); F1 → sin `ALLOW` implícito en el gate hijo.
-- **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
-
 ### P0.2 Aprobar exactamente el comando que se ejecuta
 - **Problema:** `BashTool.run()` reescribe `command` *después* de la aprobación (`app/tools/shell.py:40-59`) e invoca `export_observations` sin permiso. La firma aprobada no coincide con lo ejecutado.
 - **Criterio:** la tool no muta el comando aprobado; cualquier escritura derivada pasa por `PermissionGate`. Actualizar `tests/core/test_tools.py:238-260`, que hoy consagra el comportamiento.
@@ -54,6 +48,13 @@
 - **Prueba en TUI prevista:** N/A en TUI (proceso): `uv run tom test` con las exclusiones reducidas → cobertura real sin `RuntimeWarning`; arrancar la TUI y `/doctor` sin errores.
 - **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
 
+### P0.9 Desacoplar la aprobación del modal: petición pendiente por sesión
+- **Problema:** `PermissionGate.check()` hace `await self.ask_user(...)` en el mismo proceso (`permissions.py:161-165`). En background (`ask_user=None`) deniega sin poder preguntar y en A2A `parallel` (`parallel.py:63-64`) se apilan modales. OpenCode resuelve el `ask` como una `PermissionRequest(sessionID, requestID, resources, save)` y espera un `reply` externo `once|always|reject`.
+- **Criterio:** las decisiones `ALLOW`/`DENY` se resuelven localmente sin modal; un `ASK` encola una petición con `sessionID` del subagente, `requestID`, firma/recursos y patrones propuestos, y el tool call espera la respuesta. La TUI puede listar y responder peticiones del hijo aunque el padre siga trabajando: `once` vale solo para esa petición, `always` guarda patrones literales (depende de P0.3) y nunca vence a un `deny` configurado, `reject` cierra esa y todas las pendientes de la misma sesión. Sin cliente (background/headless) la petición queda pendiente o se rechaza según política, nunca se auto-aprueba.
+- **Dependencias:** P0.1 y P0.3; deja P1.7 como parche temporal del modal y es el paso previo para igualar el modelo de permisos de OpenCode.
+- **Prueba en TUI prevista:** lanzar el reviewer/A2A `parallel` con una tool sin aprobar → el prompt aparece asociado al subagente (F1 muestra su `sessionID`); responder «y» → ejecuta solo esa llamada y la siguiente vuelve a preguntar; responder «a» → persiste y no pregunta tras reiniciar; responder «n» → se bloquean las peticiones pendientes de esa sesión y el subagente devuelve error; con background sin cliente → la tool queda pendiente o denegada, nunca ejecutada.
+- **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
+
 ## P1 — Funcionales y estabilidad
 
 ### P1.1 Cerrar generadores de stream
@@ -75,7 +76,7 @@
 - `critic.py:39-44` acepta cualquier texto que contenga `APPROVED`, y un error del LLM cuenta como aprobación. Exigir respuesta exacta y tratar el error como "no aprobado" sin coste extra involuntario.
 
 ### P1.7 Modal de permisos: timeout y markup
-- `app.py:354-361` usa `wait_for` sobre `push_screen_wait` con `shield`: el modal queda huérfano. Interpolar argumentos sin escapar en `app.py:339-346` / `modals/permission.py:49-58` permite `MarkupError` y falsear el texto. Escapar markup y cerrar la pantalla al caducar.
+- `app.py:354-361` usa `wait_for` sobre `push_screen_wait` con `shield`: el modal queda huérfano. Interpolar argumentos sin escapar en `app.py:339-346` / `modals/permission.py:49-58` permite `MarkupError` y falsear el texto. Escapar markup, cerrar la pantalla al caducar y serializar los modales con un `lock`. Es un parche temporal: la solución de fondo para background/paralelo es **P0.9**.
 
 ### P1.8 Consistencia de comandos TUI
 - `/provider` no actualiza pricing ni LLMs del crítico/A2A (`commands.py:485-514`, `app.py:194-245`); `/compact` no restaura la estrategia con `try/finally` (`commands.py:552-572`); `/session load` no limpia el chat y `/session delete` resucita la sesión (`commands.py:755-792`); F1 y `/debug` desincronizados (`app.py:373-382`).

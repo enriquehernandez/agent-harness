@@ -83,3 +83,6 @@ chroma_db/
 # # Memoria a largo plazo
 # # ==========================================
 # .harness_memory/
+
+# Server para pruebas
+server/

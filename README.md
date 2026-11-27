@@ -274,13 +274,13 @@ El Harness puede conectarse a cualquier servidor MCP. El archivo `mcp_config.jso
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/ruta/al/proyecto"]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem@2.4.1", "/ruta/al/proyecto"]
     }
   }
 }
 ```
 
-Al arrancar la TUI, el agente descubrirá e integrará automáticamente las herramientas expuestas por el servidor, con nombres `mcp_<servidor>_<tool>`. Cada llamada remota usa `TOOL_TIMEOUT` (30 s por defecto) y, si el servidor cae, se reconecta con backoff exponencial.
+Al arrancar la TUI, el agente descubrirá e integrará automáticamente las herramientas expuestas por el servidor, con nombres `mcp_<servidor>_<tool>`. Cada llamada remota usa `TOOL_TIMEOUT` (30 s por defecto) y, si el servidor cae, se reconecta con backoff exponencial. Los servidores externos se fijan a una versión concreta y solo reciben un entorno mínimo de ejecución: las credenciales del Harness nunca se heredan. Si un servidor necesita una variable del proceso, declárala en `"allowed_env": ["NOMBRE"]` dentro de su configuración.
 
 ## 🧪 Testing y Calidad
 

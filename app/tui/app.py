@@ -176,7 +176,11 @@ class AgentHarnessApp(App):
             for name, server_conf in config.get("mcpServers", {}).items():
                 try:
                     client = MCPClient(
-                        command=server_conf["command"], args=server_conf["args"], env=server_conf.get("env"))
+                        command=server_conf["command"],
+                        args=server_conf["args"],
+                        env=server_conf.get("env"),
+                        allowed_env=server_conf.get("allowed_env"),
+                    )
                     await client.connect()
                     await client.register_tools(self.registry, server_name=name)
                     self.mcp_clients.append(client)

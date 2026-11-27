@@ -7,12 +7,6 @@
 
 ## P0 — Bloqueantes (seguridad e integridad de datos)
 
-### P0.5 No filtrar secretos a servidores MCP y fijar versiones
-- **Problema:** `app/mcp/client.py` copia `os.environ` completo (API keys, Langfuse) en cada servidor; `mcp_config.json` usa `uvx`/`npx` sin versión fija.
-- **Criterio:** allowlist explícita de variables por servidor, sin secretos por defecto; versiones pinnadas; test que compruebe que las claves no aparecen en `client.env`.
-- **Prueba en TUI prevista:** Con MCP activo, `/tools` → las tools siguen funcionando; inspeccionar el proceso del servidor → sin API keys en su entorno; `/doctor` sin errores.
-- **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
-
 ### P0.6 Restringir hooks `command`/`http` y aplicar sus denegaciones en la TUI
 - **Problema:** `app/core/harness/hooks.py` ejecuta shell y URLs arbitrarias de `.harness/hooks.json`; `app/tui/app.py` descarta el `denied` de `UserPromptSubmit`.
 - **Criterio:** validación/allowlist de URLs (mínimo: solo loopback) y comandos; un `denied` en `UserPromptSubmit` bloquea el prompt realmente. Usar `server/test_hook_types.py` como prueba manual (los cuatro tipos: `command`, `http`, `prompt`, `agent`).

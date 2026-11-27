@@ -12,7 +12,7 @@ MCP es un protocolo abierto que estandariza cómo un modelo de IA (o un Harness)
     "mcpServers": {
     "filesystem": {
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/ruta"]
+        "args": ["-y", "@modelcontextprotocol/server-filesystem@2.4.1", "/ruta"]
     }
     }
 }
@@ -22,6 +22,7 @@ MCP es un protocolo abierto que estandariza cómo un modelo de IA (o un Harness)
 3. **Descubrimiento**: El Harness llama a `session.list_tools()`. El servidor MCP responde con un JSON describiendo sus herramientas.
 4. **Adaptación (Proxy Pattern)**: El Harness no expone las herramientas MCP directamente al LLM. Las envuelve en `MCPToolProxy`, que implementa la interfaz local `BaseTool`, y las registra con el prefijo `mcp_<servidor>_` (`mcp_{server_name}_{mcp_tool.name}`) para evitar colisiones con herramientas locales.
 5. **Ejecución**: Cuando el LLM pide usar una herramienta, `MCPToolProxy.run()` -> `_call()` invoca `session.call_tool(self.original_name, arguments=kwargs)` con `asyncio.wait_for(..., timeout=settings.TOOL_TIMEOUT)` (**30 s** por defecto). Si no hay sesión o la llamada falla, intenta `reconnect()` y una segunda llamada antes de devolver `ToolResult(success=False, ...)`.
+6. **Entorno y versiones**: `MCPClient` no copia `os.environ` al servidor. Entrega solo variables de ejecución no sensibles (`PATH`, `HOME`, `LANG`, temporales y equivalentes de sistema) y las que el servidor declare explícitamente en `allowed_env`; `env` fija valores literales y prevalece sobre lo heredado. Así, las credenciales del Harness no llegan a los procesos externos. Los paquetes lanzados con `uvx`/`npx` se fijan a versiones concretas para que el arranque no cambie de comportamiento sin revisión.
 
 ## Ventajas
 

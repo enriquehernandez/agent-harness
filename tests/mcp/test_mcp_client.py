@@ -1,7 +1,58 @@
+import json
+import re
+from pathlib import Path
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from app.mcp.client import MCPClient, MCPToolProxy
 from app.core.harness.tool import ToolRegistry
+
+
+def test_mcp_client_does_not_inherit_secrets(monkeypatch):
+    """El entorno del hijo no incluye claves ni tokens del proceso padre."""
+    monkeypatch.setenv("PATH", "/bin:/usr/bin")
+    monkeypatch.setenv("OPENAI_API_KEY", "VALOR_DE_PRUEBA_NO_FILTRAR")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "VALOR_DE_PRUEBA_NO_FILTRAR")
+    monkeypatch.setenv("MY_TOKEN", "VALOR_DE_PRUEBA_NO_FILTRAR")
+
+    client = MCPClient("test", [], env={"CUSTOM_ENV": "value"})
+
+    assert client.env["PATH"] == "/bin:/usr/bin"
+    assert client.env["CUSTOM_ENV"] == "value"
+    for secret_name in ("OPENAI_API_KEY", "LANGFUSE_SECRET_KEY", "MY_TOKEN"):
+        assert secret_name not in client.env
+    assert client.server_params.env == client.env
+
+
+def test_mcp_client_forwards_only_allowed_env(monkeypatch):
+    """Solo las variables permitidas explícitamente se copian del padre."""
+    monkeypatch.setenv("HARNESS_E2E", "1")
+    monkeypatch.setenv("OTRO_SECRETO", "no-debe-filtrarse")
+
+    client = MCPClient("test", [], allowed_env=["HARNESS_E2E"])
+
+    assert client.env.get("HARNESS_E2E") == "1"
+    assert "OTRO_SECRETO" not in client.env
+
+
+def test_mcp_config_pins_external_tool_versions():
+    """Los servidores externos usan versiones fijas, no `latest` implícito."""
+    config = json.loads(Path("mcp_config.json").read_text(encoding="utf-8"))
+    uvx_packages = [
+        conf["args"][0]
+        for conf in config["mcpServers"].values()
+        if conf["command"] == "uvx"
+    ]
+
+    assert uvx_packages
+    assert all(re.fullmatch(r"[A-Za-z0-9._-]+==[A-Za-z0-9._-]+", package)
+               for package in uvx_packages)
+
+    wrapper = Path("scripts/filesystem_mcp_wrapper.sh").read_text(
+        encoding="utf-8")
+    assert re.search(
+        r"@modelcontextprotocol/server-filesystem@[0-9]+\.[0-9]+\.[0-9]+",
+        wrapper)
 
 
 @pytest.mark.asyncio

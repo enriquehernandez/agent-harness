@@ -240,6 +240,27 @@ async def test_app_initialize_agent_real():
 
 
 @pytest.mark.asyncio
+async def test_app_initialize_agent_passes_allowed_mcp_env():
+    """La TUI entrega a cada servidor solo su allowlist declarada."""
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient") as mock_mcp_class, \
+            patch("app.tui.app.register_core_tools"):
+        mock_client = AsyncMock()
+        mock_mcp_class.return_value = mock_client
+        async with app.run_test() as pilot:
+            await app.initialize_agent()
+            await pilot.pause()
+
+    local_calls = [
+        call for call in mock_mcp_class.call_args_list
+        if any("local_mcp_server.py" in arg
+               for arg in call[1].get("args", []))
+    ]
+    assert local_calls, mock_mcp_class.call_args_list
+    assert "HARNESS_E2E" in local_calls[0][1].get("allowed_env", [])
+
+
+@pytest.mark.asyncio
 async def test_app_initialize_agent_error():
     """Cubre el except de MCP."""
     app = AgentHarnessApp()

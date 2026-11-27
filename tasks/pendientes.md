@@ -11,6 +11,13 @@ Sin tareas pendientes.
 
 ## P1 — Funcionales y estabilidad
 
+### P1.10 Responder permisos con una barra interactiva en la TUI
+- **Problema:** responder cada `ASK` con `/permissions reply <requestID> ...` obliga a copiar y pegar el `requestID`; en terminales como Warp eso no se puede y hay que reescribirlo para cada petición.
+- **Criterio:** al encolarse un `ASK`, una barra de la TUI muestra la petición activa con su `sessionID`, herramienta, firma y diff. Con `↑`/`↓` se navega entre las peticiones pendientes y con `y`/`a`/`n` se responde `once`/`always`/`reject` sin escribir el ID; `Ctrl+P` enfoca la barra. La respuesta debe pasar por `PermissionBroker.reply()`, sin modal ni `await` que cancele al agente padre: `always` sigue guardando la firma literal y `reject` cierra solo las pendientes de esa sesión. Debe funcionar solo con teclado, sin copiar/pegar.
+- **Dependencias:** la cola por sesión ya está implementada y commiteada; esta tarea es solo la superficie interactiva en Textual. El modal legacy no se reintroduce.
+- **Prueba en TUI prevista:** arrancar con `LLM_PROVIDER=fake`, generar dos peticiones A2A en paralelo y comprobar que la barra muestra ambas; `↑`/`↓` cambia la selección; `y` resuelve solo la seleccionada y pasa a la siguiente; `a` persiste la firma y sigue aprobada tras reiniciar; `n` cierra las peticiones de esa sesión con `deny`. En todo momento F1 sigue listando la cola y el padre sigue respondiendo (p. ej. `/tools`).
+- **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
+
 ### P1.1 Cerrar generadores de stream
 - `app/tui/app.py` hace `break` sin `await stream_gen.aclose()`; el `finally` de `app/core/harness/loop.py` (Langfuse + contexto de hooks) no se ejecuta. Añadir `aclose()` en todas las rutas de salida/error.
 

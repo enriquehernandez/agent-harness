@@ -1,17 +1,165 @@
+import asyncio
 import difflib
+import inspect
 import json
+import uuid
 from pathlib import Path
 from app.core.config import settings
 from app.core.logger import logger
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Awaitable, Iterable
+from typing import Callable, Awaitable, Iterable, Literal
 
 
 class Decision(str, Enum):
     ALLOW = "allow"
     ASK = "ask"
     DENY = "deny"
+
+
+class PermissionReply(str, Enum):
+    """Respuestas permitidas a una petición de permiso encolada."""
+
+    ONCE = "once"
+    ALWAYS = "always"
+    REJECT = "reject"
+
+
+_REPLY_ALIASES = {
+    "y": PermissionReply.ONCE,
+    "yes": PermissionReply.ONCE,
+    "s": PermissionReply.ONCE,
+    "si": PermissionReply.ONCE,
+    "sí": PermissionReply.ONCE,
+    "once": PermissionReply.ONCE,
+    "a": PermissionReply.ALWAYS,
+    "always": PermissionReply.ALWAYS,
+    "siempre": PermissionReply.ALWAYS,
+    "n": PermissionReply.REJECT,
+    "no": PermissionReply.REJECT,
+    "reject": PermissionReply.REJECT,
+}
+
+
+def normalize_reply(value: str | PermissionReply) -> PermissionReply:
+    """Acepta las respuestas de la TUI y del CLI; las desconocidas son errores."""
+    if isinstance(value, PermissionReply):
+        return value
+    try:
+        return _REPLY_ALIASES[value.strip().lower()]
+    except (AttributeError, KeyError) as exc:
+        raise ValueError(
+            f"Respuesta no válida: {value!r}. Usa once|always|reject."
+        ) from exc
+
+
+@dataclass
+class PermissionRequest:
+    """Una petición `ask` esperando una respuesta externa.
+
+    `sessionID` identifica al agente que pide permiso (padre o subagente) y
+    `requestID` identifica la llamada concreta. `resources` y `patterns` viajan
+    con la petición para que la TUI pueda mostrarlos sin reconstruir los args.
+    """
+
+    request_id: str
+    session_id: str
+    tool_name: str
+    signature: str
+    resources: tuple[str, ...]
+    patterns: tuple[str, ...]
+    args: dict
+    diff_text: str | None
+    reply: PermissionReply | None = None
+    event: asyncio.Event = field(
+        default_factory=asyncio.Event, repr=False, compare=False)
+
+
+class PermissionBroker:
+    """Cola compartida de peticiones de permiso, una por tool call en espera.
+
+    La TUI se suscribe con `add_listener` para mostrar las peticiones, pero el
+    tool call no depende de un modal: espera en `event` hasta que alguien llama
+    a `reply`. Sin suscriptores, `unattended` decide entre denegar o dejar la
+    petición pendiente; nunca se aprueba automáticamente.
+    """
+
+    def __init__(self, *, unattended: Literal["deny", "pending"] = "deny"):
+        if unattended not in ("deny", "pending"):
+            raise ValueError("unattended debe ser 'deny' o 'pending'")
+        self.unattended = unattended
+        self.pending: dict[str, PermissionRequest] = {}
+        self._listeners: list[Callable[[PermissionRequest],
+                                       Awaitable[None] | None]] = []
+        self._rejected_sessions: set[str] = set()
+
+    def add_listener(self, listener: Callable[[PermissionRequest],
+                                              Awaitable[None] | None]) -> None:
+        self._listeners.append(listener)
+
+    def is_rejected(self, session_id: str) -> bool:
+        return session_id in self._rejected_sessions
+
+    def list_pending(self, session_id: str | None = None) -> list[PermissionRequest]:
+        return [
+            request for request in self.pending.values()
+            if session_id is None or request.session_id == session_id
+        ]
+
+    async def request(
+        self,
+        *,
+        session_id: str,
+        tool_name: str,
+        signature: str,
+        args: dict,
+        diff_text: str | None = None,
+        patterns: Iterable[str] | None = None,
+    ) -> PermissionReply:
+        if session_id in self._rejected_sessions:
+            return PermissionReply.REJECT
+
+        request = PermissionRequest(
+            request_id=f"req-{uuid.uuid4().hex[:8]}",
+            session_id=session_id,
+            tool_name=tool_name,
+            signature=signature,
+            resources=(signature,),
+            patterns=tuple(patterns or (signature,)),
+            args=args,
+            diff_text=diff_text,
+        )
+        self.pending[request.request_id] = request
+        try:
+            for listener in tuple(self._listeners):
+                result = listener(request)
+                if inspect.isawaitable(result):
+                    await result
+
+            if not self._listeners and self.unattended == "deny":
+                self.reply(request.request_id, PermissionReply.REJECT)
+
+            await request.event.wait()
+            return request.reply or PermissionReply.REJECT
+        finally:
+            self.pending.pop(request.request_id, None)
+
+    def reply(self, request_id: str, answer: str | PermissionReply) -> bool:
+        reply = normalize_reply(answer)
+        request = self.pending.get(request_id)
+        if request is None:
+            return False
+
+        if reply == PermissionReply.REJECT:
+            self._rejected_sessions.add(request.session_id)
+            for pending in tuple(self.pending.values()):
+                if pending.session_id == request.session_id:
+                    pending.reply = reply
+                    pending.event.set()
+        else:
+            request.reply = reply
+            request.event.set()
+        return True
 
 
 @dataclass
@@ -24,6 +172,8 @@ class PermissionGate:
                        Awaitable[str]] | None = None
     persist_file: Path = field(
         default_factory=lambda: settings.permissions_file)
+    broker: PermissionBroker | None = None
+    session_id: str = "main"
 
     def __post_init__(self):
         if not self.policies:
@@ -53,19 +203,24 @@ class PermissionGate:
         self.session_allowed.clear()
         self._load_persisted_permissions()
 
-    def child(self, allow: Iterable[str] = ()) -> "PermissionGate":
-        """Crea un gate de subagente que comparte aprobaciones y persistencia.
+    def child(self, allow: Iterable[str] = (), *,
+              session_id: str | None = None) -> "PermissionGate":
+        """Crea un gate de subagente que comparte aprobaciones, broker y persistencia.
 
         Las `policies` se copian para que el hijo pueda añadir excepciones propias
         (p. ej. las tools del reviewer) sin alterar la política del padre.
         `session_allowed` se comparte por referencia: una aprobación con `a` en
-        cualquier subagente vale también para el padre y para sus hermanos.
+        cualquier subagente vale también para el padre y para sus hermanos. Cada
+        hijo tiene su propio `session_id` para que `reject` solo cierre sus
+        peticiones, aunque comparta la cola con el padre.
         """
         child = PermissionGate(
             policies=self.policies.copy(),
             session_allowed=self.session_allowed,
             ask_user=self.ask_user,
             persist_file=self.persist_file,
+            broker=self.broker,
+            session_id=session_id or self.session_id,
         )
         for tool in allow:
             child.policies[tool] = Decision.ALLOW
@@ -148,18 +303,43 @@ class PermissionGate:
 
         return None
 
+    async def _ask_broker(
+        self, tool_name: str, signature: str, arguments: dict
+    ) -> PermissionReply:
+        """Encola el `ask` y espera a que la TUI/CLI responda por su `requestID`."""
+        return await self.broker.request(
+            session_id=self.session_id,
+            tool_name=tool_name,
+            signature=signature,
+            patterns=(signature,),
+            args=arguments,
+            diff_text=self._generate_diff(arguments),
+        )
+
     async def check(self, tool_name: str, arguments: dict) -> Decision:
         signature = self._get_signature(tool_name, arguments)
-
-        if self._is_allowed(signature):
-            return Decision.ALLOW
-
         policy = self.policies.get(tool_name, Decision.ASK)
-        if policy == Decision.ALLOW:
-            return Decision.ALLOW
+
+        # Un `deny` configurado gana siempre, incluso a una firma guardada con
+        # `always` en una sesión anterior.
         if policy == Decision.DENY:
             return Decision.DENY
+        if policy == Decision.ALLOW or self._is_allowed(signature):
+            return Decision.ALLOW
 
+        if self.broker is not None:
+            reply = await self._ask_broker(tool_name, signature, arguments)
+            if reply == PermissionReply.ALWAYS:
+                if self.policies.get(tool_name, Decision.ASK) == Decision.DENY:
+                    return Decision.DENY
+                self.session_allowed.add(signature)
+                self._save_persisted_permissions()
+            if reply in (PermissionReply.ONCE, PermissionReply.ALWAYS):
+                return Decision.ALLOW
+            return Decision.DENY
+
+        # Compatibilidad con llamadores que todavía pasan `ask_user` directo.
+        # La TUI ya no usa esta vía: sus peticiones pasan por el broker.
         if not self.ask_user:
             return Decision.DENY
 

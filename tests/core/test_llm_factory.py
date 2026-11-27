@@ -31,6 +31,12 @@ def test_get_fake_llm():
     assert llm.max_context_window == 4096
 
 
+def test_get_fake_llm_accepts_model_from_critic_configuration():
+    """La TUI pasa `model=None` al crear el crítico; el fake debe aceptarlo."""
+    assert get_llm("fake", model=None).model_name == "fake-model"
+    assert get_llm("fake", model="modelo-critico").model_name == "modelo-critico"
+
+
 def test_get_unknown_provider():
     with pytest.raises(ValueError, match="Provider 'made-up' not registered"):
         get_llm("made-up")

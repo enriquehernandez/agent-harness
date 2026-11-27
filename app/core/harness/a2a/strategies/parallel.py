@@ -18,8 +18,9 @@ class ParallelStrategy(A2AStrategy):
         """Ejecuta un agente y devuelve (nombre, resultado)."""
         agent_ctx = self._fork_context(agent, context)
 
-        # Gate del subagente: comparte aprobaciones con el padre
-        sub_gate = self._child_gate()
+        # Gate del subagente: comparte cola y aprobaciones con el padre, pero
+        # sus peticiones llevan el sessionID del agente que las hace.
+        sub_gate = self._child_gate(session_id=f"a2a:{agent.name}")
 
         # Resolvemos el LLM (específico del agente o el del padre)
         if agent.model:

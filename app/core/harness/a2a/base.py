@@ -65,14 +65,18 @@ class A2AStrategy(ABC):
                 )
         return agent_ctx
 
-    def _child_gate(self, allow: Iterable[str] = ()) -> PermissionGate:
-        """Construye el gate del subagente compartiendo estado con el padre.
+    def _child_gate(self, allow: Iterable[str] = (), *,
+                    session_id: str | None = None) -> PermissionGate:
+        """Construye el gate del subagente compartiendo cola y aprobaciones.
 
+        Cada agente lleva su propio `session_id`: así `reject` cierra solo las
+        peticiones de ese subagente, aunque todos compartan el broker del padre.
         Las aprobaciones persistidas se cargan también aquí para que cualquier
         estrategia (incluida `parallel`) las respete al ejecutarse.
         """
-        gate = (self.permissions.child(allow=allow) if self.permissions
-                else PermissionGate())
+        gate = (self.permissions.child(allow=allow, session_id=session_id)
+                if self.permissions
+                else PermissionGate(session_id=session_id or "a2a"))
         for pattern in self._load_persisted_permissions():
             gate.session_allowed.add(pattern)
         return gate

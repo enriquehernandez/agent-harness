@@ -609,7 +609,8 @@ class HookManager:
             tools = self.tools or ToolRegistry()
             # `tools` de la config no concede permisos: el subagente hereda
             # aprobaciones y policies, y las tools sensibles siguen pidiendo.
-            gate = (self.permissions or PermissionGate()).child()
+            gate = (self.permissions or PermissionGate()).child(
+                session_id="hook:agent")
             delegate = DelegateTool(
                 name="hook_agent",
                 description="Subagente invocado por un hook",
@@ -617,6 +618,7 @@ class HookManager:
                 tools=tools,
                 system_prompt=entry["prompt"],
                 permissions=gate,
+                session_id="hook:agent",
             )
             task = (
                 f"{entry['prompt']}\n\nEvento: "

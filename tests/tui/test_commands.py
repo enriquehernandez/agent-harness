@@ -1093,3 +1093,112 @@ async def test_cmd_doctor_reports_broken_mcp_config(tmp_path, monkeypatch,
     output = mock_app.write_to_chat.call_args[0][0]
     assert "Error parseando `mcp_config.json`" in output
     assert "problema(s) crítico(s)" in output
+
+
+@pytest.mark.asyncio
+async def test_cmd_permissions_pending_lists_requests(mock_app, ctx):
+    request = MagicMock(
+        request_id="req-abc123",
+        session_id="a2a:reviewer",
+        tool_name="bash",
+        signature="bash:ls",
+    )
+    mock_app.permission_broker = MagicMock()
+    mock_app.permission_broker.list_pending.return_value = [request]
+
+    assert await handle_command("/permissions pending", ctx, {}, None, mock_app) is True
+
+    text = mock_app.write_to_chat.call_args[0][0]
+    assert "req-abc123" in text
+    assert "a2a:reviewer" in text
+    assert "bash:ls" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_permissions_pending_without_requests(mock_app, ctx):
+    mock_app.permission_broker = MagicMock()
+    mock_app.permission_broker.list_pending.return_value = []
+
+    await handle_command("/permissions pending", ctx, {}, None, mock_app)
+
+    assert "No hay peticiones pendientes" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_permissions_pending_without_broker(mock_app, ctx):
+    mock_app.permission_broker = None
+
+    await handle_command("/permissions pending", ctx, {}, None, mock_app)
+
+    text = mock_app.write_to_chat.call_args[0][0]
+    assert "No hay cola de permisos activa" in text
+    assert mock_app.write_to_chat.call_args.kwargs["type"] == "system"
+
+
+@pytest.mark.asyncio
+async def test_cmd_permissions_reply_without_broker(mock_app, ctx):
+    mock_app.permission_broker = None
+
+    await handle_command("/permissions reply req-abc123 once", ctx, {}, None, mock_app)
+
+    assert "No hay cola de permisos activa" in mock_app.write_to_chat.call_args[0][0]
+    assert mock_app.write_to_chat.call_args.kwargs["type"] == "system"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "answer,expected",
+    [("y", "y"), ("always", "always"), ("n", "n")],
+)
+async def test_cmd_permissions_reply_forwards_answer(mock_app, ctx, answer, expected):
+    broker = MagicMock()
+    broker.reply.return_value = True
+    mock_app.permission_broker = broker
+
+    assert await handle_command(
+        f"/permissions reply req-abc123 {answer}", ctx, {}, None, mock_app) is True
+
+    broker.reply.assert_called_once_with("req-abc123", expected)
+    assert "req-abc123" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/permissions reply",
+        "/permissions reply req-abc123",
+        "/permissions reply req-abc123 once extra",
+    ],
+)
+async def test_cmd_permissions_reply_requires_arguments(mock_app, ctx, command):
+    broker = MagicMock()
+    mock_app.permission_broker = broker
+
+    await handle_command(command, ctx, {}, None, mock_app)
+
+    broker.reply.assert_not_called()
+    assert "Uso:" in mock_app.write_to_chat.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_permissions_reply_invalid_answer(mock_app, ctx):
+    broker = MagicMock()
+    broker.reply.side_effect = ValueError("Respuesta no válida: quizá")
+    mock_app.permission_broker = broker
+
+    await handle_command("/permissions reply req-abc123 quizá", ctx, {}, None, mock_app)
+
+    assert "Respuesta no válida" in mock_app.write_to_chat.call_args[0][0]
+    assert mock_app.write_to_chat.call_args.kwargs["type"] == "system"
+
+
+@pytest.mark.asyncio
+async def test_cmd_permissions_reply_unknown_request(mock_app, ctx):
+    broker = MagicMock()
+    broker.reply.return_value = False
+    mock_app.permission_broker = broker
+
+    await handle_command("/permissions reply req-inexistente once", ctx, {}, None, mock_app)
+
+    assert "No hay petición pendiente" in mock_app.write_to_chat.call_args[0][0]

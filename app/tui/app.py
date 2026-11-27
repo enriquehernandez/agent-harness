@@ -18,7 +18,7 @@ from rich.syntax import Syntax
 
 from app.core.llm import get_llm
 from app.core.harness import AgentLoop, ToolRegistry, ContextManager
-from app.core.harness.permissions import Decision, PermissionGate
+from app.core.harness.permissions import PermissionBroker, PermissionGate
 from app.core.harness.hooks import HookEvent, emit_hook
 from app.core.harness.subagents import DelegateTool
 from app.core.harness.memory.factory import create_memory_store
@@ -61,6 +61,8 @@ class AgentHarnessApp(App):
     #debug-header { height: 3; content-align: center middle; text-style: bold; color: #58a6ff; border-bottom: solid #30363d; margin-bottom: 1; }
     #debug-list { height: 1fr; background: transparent; }
     #agent-flow-tree { height: 30%; background: transparent; border-top: solid #30363d; padding: 1; }
+    #permission-header { height: 1; color: #c9d1c9; text-style: bold; border-top: solid #30363d; padding-top: 1; }
+    #permission-list { height: 30%; background: transparent; }
     .debug-item { padding: 0 1; }
     .debug-item:hover { background: #21262d; }
     #input-container { dock: bottom; height: 6; padding: 0 2; background: #0d1117; border-top: solid #30363d; align: center middle; }
@@ -75,11 +77,13 @@ class AgentHarnessApp(App):
         self.ctx = None
         self.registry = None
         self.gate = None
+        self.permission_broker = None
         self.mcp_clients = []
         self.agent_loop = None
         self.attached_files = []
         self.attached_images = []
         self.debug_mode = False
+        self._debug_refresh_lock = asyncio.Lock()
         self.verbose_mode = False
         self.pending_mode = None
         self.pending_question = None
@@ -98,6 +102,8 @@ class AgentHarnessApp(App):
                 yield Label("🪲 Panel de Debug", id="debug-header")
                 yield ListView(id="debug-list")
                 yield Tree("🤖 Flujo de Agentes", id="agent-flow-tree")
+                yield Label("🔐 Peticiones pendientes", id="permission-header")
+                yield ListView(id="permission-list")
         with Vertical(id="input-container"):
             yield Static("", id="attachments-bar")
             yield FileAwareInput(placeholder="Escribe tu mensaje... (Ctrl+U para limpiar)", id="input-box")
@@ -187,8 +193,12 @@ class AgentHarnessApp(App):
                 except Exception as e:
                     await self.write_to_chat(f"❌ Error conectando MCP {name}: {e}", type="system")
 
-        # 4. Permisos
-        self.gate = PermissionGate(ask_user=self.request_permission)
+        # 4. Permisos: la TUI observa la cola, pero no bloquea al agente con un
+        # modal. Cada subagente hereda el broker con su propio sessionID.
+        self.permission_broker = PermissionBroker()
+        self.permission_broker.add_listener(self._on_permission_request)
+        self.gate = PermissionGate(
+            broker=self.permission_broker, session_id="main")
 
         # 5. Subagente Reviewer (Legacy)
         reviewer_tools = ToolRegistry()
@@ -341,6 +351,10 @@ class AgentHarnessApp(App):
         return f"{clean_input}\n\n{skills_context}"
 
     async def request_permission(self, tool_name: str, signature: str, args: dict, diff_text: str | None = None) -> str:
+        """Modal directo, conservado para llamadores antiguos.
+
+        El gate de la TUI ya no lo usa: sus `ask` pasan por `permission_broker`.
+        """
         args_str = ""
         for k, v in args.items():
             if k in ("content", "edits") and diff_text:
@@ -375,6 +389,28 @@ class AgentHarnessApp(App):
         self.query_one("#input-box", FileAwareInput).focus()
         return result
 
+    async def _on_permission_request(self, request) -> None:
+        """Avisa sin modal: la petición queda lista para responder por su ID."""
+        await self.write_to_chat(
+            f"🔐 **Permiso pendiente** `{request.request_id}` · "
+            f"sesión `{request.session_id}` · `{request.tool_name}` → "
+            f"`{request.signature}`. Responde con "
+            f"`/permissions reply {request.request_id} once|always|reject`.",
+            type="system",
+        )
+        if self.debug_mode:
+            await self._refresh_debug_list()
+
+    @work(group="permissions", exclusive=False)
+    async def process_permission_command(self, command: str) -> None:
+        """Atiende `/permissions ...` sin cancelar el worker de conversación."""
+        await self.write_to_chat(f"⚙️ Ejecutando comando: {command}", type="system")
+        try:
+            await handle_command(command, self.ctx, self.state,
+                                 get_llm(self.state["provider"]), self)
+        except Exception as e:
+            await self.write_to_chat(f"❌ Error en comando: {e}", type="system")
+
     async def action_toggle_debug(self) -> None:
         self.debug_mode = not self.debug_mode
         panel = self.query_one("#debug-panel")
@@ -402,6 +438,11 @@ class AgentHarnessApp(App):
             asyncio.create_task(self._refresh_debug_list())
 
     async def _refresh_debug_list(self):
+        """Serializa los refrescos: varias peticiones pueden llegar a la vez."""
+        async with self._debug_refresh_lock:
+            await self._refresh_debug_list_unlocked()
+
+    async def _refresh_debug_list_unlocked(self):
         list_view = self.query_one("#debug-list", ListView)
         await list_view.clear()
         events = get_debug_events()
@@ -418,26 +459,39 @@ class AgentHarnessApp(App):
         flow = get_agent_flow()
         if not flow:
             tree.root.add("No hay actividad de agentes aún.")
-            return
-        root = tree.root
-        agent_nodes = {}
-        for entry in flow:
-            agent = entry["agent"]
-            action = entry["action"]
-            timestamp = entry["timestamp"]
-            if agent not in agent_nodes:
-                agent_nodes[agent] = root.add(f"🤖 {agent}")
-            if action == "start":
-                agent_nodes[agent].add(f"▶️ start ({timestamp})")
-            elif action == "end":
-                agent_nodes[agent].add(f"✅ end ({timestamp})")
-            elif action == "handoff":
-                agent_nodes[agent].add(f"🔄 handoff ({timestamp})")
-            else:
-                agent_nodes[agent].add(f"❓ {action} ({timestamp})")
-        tree.root.expand()
-        for node in agent_nodes.values():
-            node.expand()
+        else:
+            root = tree.root
+            agent_nodes = {}
+            for entry in flow:
+                agent = entry["agent"]
+                action = entry["action"]
+                timestamp = entry["timestamp"]
+                if agent not in agent_nodes:
+                    agent_nodes[agent] = root.add(f"🤖 {agent}")
+                if action == "start":
+                    agent_nodes[agent].add(f"▶️ start ({timestamp})")
+                elif action == "end":
+                    agent_nodes[agent].add(f"✅ end ({timestamp})")
+                elif action == "handoff":
+                    agent_nodes[agent].add(f"🔄 handoff ({timestamp})")
+                else:
+                    agent_nodes[agent].add(f"❓ {action} ({timestamp})")
+            tree.root.expand()
+            for node in agent_nodes.values():
+                node.expand()
+
+        permission_list = self.query_one("#permission-list", ListView)
+        await permission_list.clear()
+        broker = self.permission_broker
+        pending = broker.list_pending() if broker else []
+        if not pending:
+            permission_list.append(ListItem(Label("Sin peticiones pendientes.")))
+        else:
+            for request in pending:
+                permission_list.append(ListItem(Label(
+                    f"`{request.request_id}` · {request.session_id} · "
+                    f"{request.tool_name}: {request.signature}"
+                )))
 
     async def on_list_view_selected(self, event: ListView.Selected) -> None:
         if not event.item.id or not event.item.id.startswith("log-"):
@@ -478,7 +532,7 @@ class AgentHarnessApp(App):
         loading.display = False
         self.query_one("#input-box", FileAwareInput).focus()
 
-    @work(exclusive=True)
+    @work(exclusive=True, group="conversation")
     async def process_input(self, user_input: str):
         loading = self.query_one("#loading-indicator", LoadingIndicator)
         if user_input.startswith("/"):
@@ -625,6 +679,12 @@ class AgentHarnessApp(App):
             return
 
         event.input.value = ""
+
+        parts = user_text.split(maxsplit=2)
+        if len(parts) >= 2 and parts[0] == "/permissions" and parts[1] in ("pending", "reply"):
+            self.process_permission_command(user_text)
+            return
+
         user_text = await self._expand_skills(user_text)
 
         if self.attached_images:

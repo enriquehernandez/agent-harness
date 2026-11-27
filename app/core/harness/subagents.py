@@ -17,6 +17,7 @@ class DelegateTool(BaseTool):
         tools: ToolRegistry,
         system_prompt: str,
         permissions: PermissionGate | None = None,
+        session_id: str | None = None,
     ):
         self.name = name
         self.description = description
@@ -34,13 +35,15 @@ class DelegateTool(BaseTool):
         self.tools = tools
         self.system_prompt = system_prompt
         self.permissions = permissions
+        self.session_id = session_id or f"delegate:{name}"
 
     async def run(self, task: str) -> ToolResult:
         ctx = ContextManager(system_prompt=self.system_prompt)
 
         # Comparte aprobaciones y políticas del padre, pero no auto-aprueba
         # ninguna tool: bash/write_file siguen pasando por PermissionGate.
-        gate = (self.permissions or PermissionGate()).child()
+        gate = (self.permissions or PermissionGate()).child(
+            session_id=self.session_id)
 
         loop = AgentLoop(llm=self.llm, tools=self.tools,
                          permissions=gate, max_iterations=5)

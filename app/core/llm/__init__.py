@@ -36,8 +36,16 @@ register_provider(
     ),
 )
 
-# Registrar FakeLLM para tests
-register_provider("fake", lambda **kw: FakeLLM(**kw))
+# Registrar FakeLLM para tests. La TUI pasa `model` al crear el crítico; el
+# provider fake lo traduce a `model_name` en lugar de rechazarlo.
+def _fake_provider(**kwargs):
+    model = kwargs.pop("model", None)
+    if model:
+        kwargs.setdefault("model_name", model)
+    return FakeLLM(**kwargs)
+
+
+register_provider("fake", _fake_provider)
 
 __all__ = ["BaseLLM", "LLMResponse", "get_llm",
            "list_providers", "register_provider"]

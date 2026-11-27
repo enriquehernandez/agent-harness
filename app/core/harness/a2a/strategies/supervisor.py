@@ -47,8 +47,8 @@ class SupervisorStrategy(A2AStrategy):
         # Preparamos el contexto según el modo del agente
         agent_ctx = self._fork_context(chosen_agent, context)
 
-        # 4. Gate del subagente: comparte aprobaciones con el padre
-        sub_gate = self._child_gate()
+        # 4. Gate del subagente: comparte cola y aprobaciones, con sesión propia
+        sub_gate = self._child_gate(session_id=f"a2a:{chosen_agent.name}")
 
         # 5. Resolvemos el LLM (específico del agente o el del padre)
         if chosen_agent.model:

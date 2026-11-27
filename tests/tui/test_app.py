@@ -1572,7 +1572,7 @@ async def test_app_on_input_submitted_with_images_and_mode():
 
 @pytest.mark.asyncio
 async def test_reviewer_subagent_asks_for_bash_in_tui():
-    """P0.1: el reviewer pide permiso en la TUI antes de usar bash."""
+    """P0.1 + P0.9: el reviewer encola su petición antes de usar bash."""
     from app.tui.modals.permission import PermissionModal
 
     class LoopWithGate:
@@ -1606,9 +1606,13 @@ async def test_reviewer_subagent_asks_for_bash_in_tui():
                 worker = app.run_worker(ask())
                 await pilot.pause()
 
-                assert any(isinstance(screen, PermissionModal)
-                           for screen in app.screen_stack)
-                await pilot.press("y")
+                assert not any(isinstance(screen, PermissionModal)
+                               for screen in app.screen_stack)
+                pending = app.permission_broker.list_pending()
+                assert len(pending) == 1
+                assert pending[0].session_id == "delegate:delegate_to_reviewer"
+                app.process_permission_command(
+                    f"/permissions reply {pending[0].request_id} y")
                 await pilot.pause()
                 await worker.wait()
                 result = holder["result"]
@@ -1879,3 +1883,236 @@ async def test_app_unmount_tolerates_mcp_disconnect_error():
         async with app.run_test() as pilot:
             await pilot.pause()
     broken_client.disconnect.assert_awaited_once()
+
+
+def _chat_texts(app):
+    return [str(getattr(child, "renderable", getattr(child, "content", "")))
+            for child in app.query_one("#chat-scroll").children]
+
+
+@pytest.mark.asyncio
+async def test_tui_permission_request_is_queued_and_replied_once(tmp_path, monkeypatch):
+    """Un ASK encola la petición: no hay modal y `once` solo sirve para esa llamada."""
+    from app.core.harness.permissions import Decision
+    from app.tui.modals.permission import PermissionModal
+
+    monkeypatch.chdir(tmp_path)
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient"), patch("app.tui.app.register_core_tools"):
+        async with app.run_test() as pilot:
+            await app.initialize_agent()
+            holder = {}
+
+            async def ask():
+                holder["decision"] = await app.gate.check(
+                    "bash", {"command": "ls"})
+
+            worker = app.run_worker(ask())
+            await pilot.pause()
+
+            assert not any(isinstance(screen, PermissionModal)
+                           for screen in app.screen_stack)
+            requests = app.permission_broker.list_pending()
+            assert len(requests) == 1
+            request = requests[0]
+            assert request.session_id == "main"
+            texts = _chat_texts(app)
+            assert any(request.request_id in text and request.session_id in text
+                       for text in texts)
+
+            app.process_permission_command(
+                f"/permissions reply {request.request_id} once")
+            await pilot.pause()
+            await worker.wait()
+
+    assert holder["decision"] == Decision.ALLOW
+    assert app.gate.session_allowed == set()
+    assert app.permission_broker.list_pending() == []
+
+
+@pytest.mark.asyncio
+async def test_tui_permission_reply_always_persists_literal_signature(tmp_path, monkeypatch):
+    """`always` guarda la firma exacta y no vuelve a preguntar tras reiniciar."""
+    from app.core.harness.permissions import Decision, PermissionGate
+
+    monkeypatch.chdir(tmp_path)
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient"), patch("app.tui.app.register_core_tools"):
+        async with app.run_test() as pilot:
+            await app.initialize_agent()
+            holder = {}
+
+            async def ask():
+                holder["decision"] = await app.gate.check(
+                    "bash", {"command": "grep *.log"})
+
+            worker = app.run_worker(ask())
+            await pilot.pause()
+            request = app.permission_broker.list_pending()[0]
+
+            app.process_permission_command(
+                f"/permissions reply {request.request_id} always")
+            await pilot.pause()
+            await worker.wait()
+            texts = _chat_texts(app)
+
+    assert holder["decision"] == Decision.ALLOW
+    assert any("concedido" in text or "Respuesta" in text for text in texts)
+    persisted = json.loads(
+        (tmp_path / ".harness" / "permissions.json").read_text(encoding="utf-8"))
+    assert persisted["session_allowed"] == ["bash:grep *.log"]
+
+    restarted = PermissionGate(
+        persist_file=tmp_path / ".harness" / "permissions.json")
+    assert await restarted.check("bash", {"command": "grep *.log"}) == Decision.ALLOW
+    assert await restarted.check("bash", {"command": "grep secreto.log"}) == Decision.DENY
+
+
+@pytest.mark.asyncio
+async def test_tui_reject_closes_all_pending_requests_of_subagent(tmp_path, monkeypatch):
+    """`reject` cierra las peticiones de esa sesión y el subagente devuelve DENY."""
+    from app.core.harness.permissions import Decision
+    from app.tui.modals.permission import PermissionModal
+
+    monkeypatch.chdir(tmp_path)
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient"), patch("app.tui.app.register_core_tools"):
+        async with app.run_test() as pilot:
+            await app.initialize_agent()
+            reviewer_a = app.gate.child(session_id="a2a:reviewer")
+            reviewer_b = app.gate.child(session_id="a2a:reviewer")
+            holder = {}
+
+            async def ask(gate, command):
+                holder[command] = await gate.check("bash", {"command": command})
+
+            first = app.run_worker(ask(reviewer_a, "pwd"))
+            second = app.run_worker(ask(reviewer_b, "ls"))
+            await pilot.pause()
+
+            assert not any(isinstance(screen, PermissionModal)
+                           for screen in app.screen_stack)
+            requests = app.permission_broker.list_pending()
+            assert {request.signature for request in requests} == {
+                "bash:pwd", "bash:ls"}
+            target = next(request for request in requests
+                          if request.signature == "bash:pwd")
+
+            app.process_permission_command(
+                f"/permissions reply {target.request_id} reject")
+            await pilot.pause()
+            await first.wait()
+            await second.wait()
+
+    assert holder["pwd"] == Decision.DENY
+    assert holder["ls"] == Decision.DENY
+    assert app.permission_broker.list_pending() == []
+
+
+@pytest.mark.asyncio
+async def test_tui_debug_panel_lists_pending_requests_by_session(tmp_path, monkeypatch):
+    """F1 muestra cada petición pendiente con su requestID y sessionID."""
+    from textual.widgets import Label
+
+    monkeypatch.chdir(tmp_path)
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient"), patch("app.tui.app.register_core_tools"):
+        async with app.run_test() as pilot:
+            await app.initialize_agent()
+            await app.action_toggle_debug()
+            reviewer = app.gate.child(session_id="a2a:writer")
+
+            async def ask():
+                await reviewer.check("bash", {"command": "pwd"})
+
+            worker = app.run_worker(ask())
+            await pilot.pause()
+            await app._refresh_debug_list()
+            await pilot.pause()
+            await pilot.pause()
+
+            item_labels = [
+                str(child.query_one(Label).content)
+                for child in app.query_one("#permission-list", ListView).children
+                if child.query(Label)
+            ]
+            assert any("a2a:writer" in label and "req-" in label
+                       for label in item_labels), (
+                f"pendientes={app.permission_broker.list_pending()} labels={item_labels}"
+            )
+
+            request = app.permission_broker.list_pending()[0]
+            app.permission_broker.reply(request.request_id, "reject")
+            await worker.wait()
+
+
+@pytest.mark.asyncio
+async def test_tui_concurrent_permission_requests_do_not_break_debug_panel(tmp_path, monkeypatch):
+    """Dos peticiones a la vez con F1 abierto no duplican IDs en el panel."""
+    from textual.widgets import Label
+
+    monkeypatch.chdir(tmp_path)
+    app = AgentHarnessApp()
+    with patch("app.tui.app.MCPClient"), patch("app.tui.app.register_core_tools"):
+        async with app.run_test() as pilot:
+            await app.initialize_agent()
+            await app.action_toggle_debug()
+            gates = [
+                app.gate.child(session_id="a2a:analyst"),
+                app.gate.child(session_id="a2a:reviewer"),
+            ]
+            workers = [
+                app.run_worker(gate.check("bash", {"command": f"ls-{index}"}))
+                for index, gate in enumerate(gates)
+            ]
+            await pilot.pause()
+
+            requests = app.permission_broker.list_pending()
+            assert len(requests) == 2
+            for request in requests:
+                assert app.permission_broker.reply(request.request_id, "y") is True
+            for worker in workers:
+                await worker.wait()
+
+            await app._refresh_debug_list()
+            await pilot.pause()
+            labels = [
+                str(child.query_one(Label).content)
+                for child in app.query_one("#permission-list", ListView).children
+                if child.query(Label)
+            ]
+            assert labels == ["Sin peticiones pendientes."]
+
+
+@pytest.mark.asyncio
+async def test_tui_permission_command_runs_in_separate_worker():
+    """Responder una petición no cancela el worker de conversación."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            event = MagicMock()
+            event.value = "/permissions pending"
+            event.input.value = "valor previo"
+            with patch.object(app, "process_input") as mock_process, \
+                    patch.object(app, "process_permission_command") as mock_reply:
+                await app.on_input_submitted(event)
+                await pilot.pause()
+
+    mock_reply.assert_called_once_with("/permissions pending")
+    mock_process.assert_not_called()
+    assert event.input.value == ""
+
+
+@pytest.mark.asyncio
+async def test_tui_permission_command_error_is_visible():
+    """Un fallo al responder se informa en el chat sin romper la TUI."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            with patch("app.tui.app.handle_command", new_callable=AsyncMock,
+                       side_effect=Exception("Fallo de permiso")):
+                app.process_permission_command("/permissions pending")
+                await pilot.pause()
+            texts = _chat_texts(app)
+
+    assert any("Error en comando: Fallo de permiso" in text for text in texts)

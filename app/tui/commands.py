@@ -97,6 +97,7 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             "| `/clear` | Limpia el historial de conversación |\n"
             "| `/debug [on/off/clear]` | Controla el panel de debug |\n"
             "| `/permissions` | Gestiona permisos guardados |\n"
+            "| `/permissions [pending|reply <requestID> <once|always|reject>]` | Lista o responde peticiones pendientes |\n"
             "| `/export [formato]` | Exporta la conversación (markdown/json) |\n"
             "| `/memory [clear/migrate]` | Gestiona la memoria persistente |\n"
             "| `/session [list/load/delete/save/new]` | Gestiona las sesiones guardadas |\n"
@@ -621,6 +622,58 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
         return True
 
     elif cmd == "/permissions":
+        subcmd = parts[1].lower() if len(parts) > 1 else None
+
+        if subcmd == "pending":
+            broker = getattr(app, "permission_broker", None)
+            if broker is None:
+                await app.write_to_chat("No hay cola de permisos activa.", type="system")
+                return True
+
+            pending = broker.list_pending()
+            if not pending:
+                await app.write_to_chat("No hay peticiones pendientes.", type="system")
+                return True
+
+            txt = "### ⏳ Peticiones de permiso pendientes\n\n"
+            for request in pending:
+                txt += (
+                    f"- `{request.request_id}` · sesión `{request.session_id}` · "
+                    f"`{request.tool_name}` → `{request.signature}`\n"
+                )
+            txt += "\nResponde con `/permissions reply <requestID> once|always|reject`."
+            await app.write_to_chat(txt, type="agent")
+            return True
+
+        if subcmd == "reply":
+            if len(parts) != 4:
+                await app.write_to_chat(
+                    "Uso: `/permissions reply <requestID> <once|always|reject>`.",
+                    type="system",
+                )
+                return True
+
+            broker = getattr(app, "permission_broker", None)
+            if broker is None:
+                await app.write_to_chat("No hay cola de permisos activa.", type="system")
+                return True
+
+            request_id, answer = parts[2], parts[3]
+            try:
+                applied = broker.reply(request_id, answer)
+            except ValueError as e:
+                await app.write_to_chat(f"❌ {e}", type="system")
+                return True
+            if not applied:
+                await app.write_to_chat(
+                    f"No hay petición pendiente `{request_id}`.", type="system")
+                return True
+            await app.write_to_chat(
+                f"✅ Respuesta `{answer}` registrada para `{request_id}`.",
+                type="system",
+            )
+            return True
+
         perm_file = settings.permissions_file
         if not perm_file.exists():
             await app.write_to_chat(

@@ -1,6 +1,6 @@
 # Tarea Actual
 
-No hay tareas en curso.
+No hay tarea activa. La última tarea cerrada está en `tasks/completadas.md`.
 
 El inventario priorizado está en `tasks/pendientes.md` y las tareas cerradas, en `tasks/completadas.md`.
 

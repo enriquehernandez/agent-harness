@@ -34,8 +34,8 @@ class SequentialStrategy(A2AStrategy):
             # Preparamos el contexto
             agent_ctx = self._fork_context(agent, context)
 
-            # Gate del subagente: comparte aprobaciones con el padre
-            sub_gate = self._child_gate()
+            # Gate del subagente: comparte cola y aprobaciones, con sesión propia
+            sub_gate = self._child_gate(session_id=f"a2a:{agent.name}")
 
             # Resolvemos el LLM (específico del agente o el del padre)
             if agent.model:

@@ -22,7 +22,7 @@ Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible 
 - **💾 Memoria Persistente:** Por defecto usa SQLite con FTS5 en `.harness/memory.db`. `summary.md` solo se genera en los backends `files` y `fanout`.
 - **🚀 Streaming en Tiempo Real:** `AgentLoop.stream` emite eventos `AgentEvent` (`text_chunk`, `tool_start`, `tool_end`, `result`, `error`) y la TUI renderiza el texto token por token.
 - **🖼️ Multimodalidad:** Soporte para arrastrar y pegar imágenes (codificadas en Base64) que el LLM puede analizar.
-- **💻 TUI con Textual:** Una interfaz moderna con temas oscuros, autocompletado, *modales* interactivos, panel de debug (F1) y barra de adjuntos.
+- **💻 TUI con Textual:** Una interfaz moderna con temas oscuros, autocompletado, peticiones de permiso por chat, panel de debug (F1) y barra de adjuntos.
 - **🧪 100% de Cobertura:** Suite de tests robusta con `pytest` y `textual.pilot`.
 - **💰 Telemetría de Costes:** Calcula el coste real en USD de cada llamada usando la API del proveedor (OpenRouter) o un JSON manual (OpenAI/Groq). Caché configurable por `.env`.
 - **🔍 Búsqueda Semántica:** Backend de memoria vectorial (`sqlite-vec` + `fastembed`). Encuentra recuerdos por significado, no por palabra exacta.
@@ -192,7 +192,8 @@ Comandos disponibles:
   /verbose [on/off]      Muestra/oculta los detalles de la compactación
   /clear                 Limpia el historial de conversación
   /debug [on/off/clear]  Controla el panel de debug
-  /permissions           Gestiona permisos guardados
+  /permissions [pending|reply <requestID> <once|always|reject>]
+                         Gestiona permisos guardados y peticiones pendientes
   /export [formato]      Exporta la conversación (markdown/json)
   /memory [clear/migrate [backend]]      Gestiona la memoria persistente
   /session [list/load/delete/save/new]   Gestiona las sesiones guardadas
@@ -245,25 +246,19 @@ Los hooks `command` reciben el evento como JSON por stdin con timeout de `TOOL_T
 
 ## 🛡️ El Guardián de Seguridad (Permission Gate)
 
-Si el agente intenta ejecutar una herramienta sensible, el Harness pausará la ejecución y te mostrará un panel interactivo con los argumentos y, si aplica, un **diff de los cambios**:
+Si el agente intenta ejecutar una herramienta sensible, la llamada se detiene y se encola una petición con un `requestID` y el `sessionID` de quien la pide (`main`, `a2a:<agente>`, `delegate:<nombre>` o `hook:agent`). El chat avisa del `requestID`, la firma y los argumentos (con el **diff** cuando aplica), y el panel de debug (F1) lista las peticiones pendientes. El trabajo del subagente queda esperando, pero el resto de la TUI sigue usable y puedes responder sin cancelar al padre:
 
 ```text
-🛠️  El agente quiere usar: write_file
-╭───────────────────────────────────────────────╮
-│ path: app/core/config.py                      │
-│                                               │
-│ Propuesta de cambios:                         │
-│ --- a/app/core/config.py                      │
-│ +++ b/app/core/config.py                      │
-│ -  LOG_LEVEL: str = "INFO"                    │
-│ +  LOG_LEVEL: str = "DEBUG"                   │
-╰───────────────────────────────────────────────╯
-¿Permitir ejecución? [y/n/a] (n): 
+🔐 Permiso pendiente `req-8af2b66a` · sesión `a2a:analyst` · `bash` → `bash:ls`.
+   Responde con `/permissions reply req-8af2b66a once|always|reject`.
 ```
 
-- y: Permitir una vez.
-- a: Permitir siempre: guarda la firma de la tool en `.harness/permissions.json` (o `DATA_DIR/permissions.json`) y **persiste entre sesiones**, no solo durante la sesión actual.
-- n: Denegar (el agente recibirá un mensaje de error y buscará otra forma).
+- `/permissions pending` muestra las peticiones en cola con su sesión y su firma.
+- `/permissions reply <requestID> once` (o `y`) permite solo esa llamada; no guarda nada.
+- `/permissions reply <requestID> always` (o `a`) guarda la firma **literal** en `.harness/permissions.json` (o `DATA_DIR/permissions.json`) y persiste entre sesiones: aprobar `bash:grep *.log` no autoriza `bash:grep secrets.log`.
+- `/permissions reply <requestID> reject` (o `n`) deniega esa petición y cierra todas las pendientes de la misma sesión; el subagente recibe un `deny` y no vuelve a preguntar en esa sesión.
+
+Un `deny` configurado gana siempre, incluso a una firma guardada con `always`. En background o headless no hay cliente que responda: la petición queda pendiente o se rechaza según la política, pero nunca se aprueba automáticamente.
 
 ## 🔌 Integración con MCP (Model Context Protocol)
 

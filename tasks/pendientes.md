@@ -7,12 +7,7 @@
 
 ## P0 — Bloqueantes (seguridad e integridad de datos)
 
-### P0.9 Desacoplar la aprobación del modal: petición pendiente por sesión
-- **Problema:** `PermissionGate.check()` hace `await self.ask_user(...)` en el mismo proceso (`app/core/harness/permissions.py`). En background (`ask_user=None`) deniega sin poder preguntar y en A2A `parallel` (`app/core/harness/a2a/strategies/parallel.py`) se apilan modales. OpenCode resuelve el `ask` como una `PermissionRequest(sessionID, requestID, resources, save)` y espera un `reply` externo `once|always|reject`.
-- **Criterio:** las decisiones `ALLOW`/`DENY` se resuelven localmente sin modal; un `ASK` encola una petición con `sessionID` del subagente, `requestID`, firma/recursos y patrones propuestos, y el tool call espera la respuesta. La TUI puede listar y responder peticiones del hijo aunque el padre siga trabajando: `once` vale solo para esa petición, `always` guarda patrones literales (depende de P0.3) y nunca vence a un `deny` configurado, `reject` cierra esa y todas las pendientes de la misma sesión. Sin cliente (background/headless) la petición queda pendiente o se rechaza según política, nunca se auto-aprueba.
-- **Dependencias:** P0.1 y P0.3; deja P1.7 como parche temporal del modal y es el paso previo para igualar el modelo de permisos de OpenCode.
-- **Prueba en TUI prevista:** lanzar el reviewer/A2A `parallel` con una tool sin aprobar → el prompt aparece asociado al subagente (F1 muestra su `sessionID`); responder «y» → ejecuta solo esa llamada y la siguiente vuelve a preguntar; responder «a» → persiste y no pregunta tras reiniciar; responder «n» → se bloquean las peticiones pendientes de esa sesión y el subagente devuelve error; con background sin cliente → la tool queda pendiente o denegada, nunca ejecutada.
-- **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
+Sin tareas pendientes.
 
 ## P1 — Funcionales y estabilidad
 

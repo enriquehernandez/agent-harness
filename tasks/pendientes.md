@@ -7,12 +7,6 @@
 
 ## P0 — Bloqueantes (seguridad e integridad de datos)
 
-### P0.6 Restringir hooks `command`/`http` y aplicar sus denegaciones en la TUI
-- **Problema:** `app/core/harness/hooks.py` ejecuta shell y URLs arbitrarias de `.harness/hooks.json`; `app/tui/app.py` descarta el `denied` de `UserPromptSubmit`.
-- **Criterio:** validación/allowlist de URLs (mínimo: solo loopback) y comandos; un `denied` en `UserPromptSubmit` bloquea el prompt realmente. Usar `server/test_hook_types.py` como prueba manual (los cuatro tipos: `command`, `http`, `prompt`, `agent`).
-- **Prueba en TUI prevista:** Ejecutar `uv run python server/test_hook_types.py`, `/hooks` → los cuatro tipos listados; el hook `http /deny` bloquea `bash:ls`; un `UserPromptSubmit` con deny impide enviar el prompt; F1 muestra el ciclo.
-- **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
-
 ### P0.7 Evitar que los scripts destructivos toquen datos reales
 - **Problema:** `scripts/verify_memory_backends.py` borra `.harness` y siempre termina con éxito; `scripts/check_pricing.py` elimina la caché si falla la descarga; `checks/tests.md` obliga a ejecutarlo.
 - **Criterio:** los scripts usan directorios temporales, restauran backups en `finally` y devuelven código de salida no cero si fallan; quitar la instrucción obligatoria del checklist.

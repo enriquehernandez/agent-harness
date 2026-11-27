@@ -1423,6 +1423,51 @@ async def test_app_emits_user_prompt_submit_hook_for_images():
 
 
 @pytest.mark.asyncio
+async def test_app_blocks_prompt_when_user_prompt_hook_denies():
+    """Un deny en `UserPromptSubmit` impide llamar al agente."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+        stream = MagicMock()
+        app.agent_loop = MagicMock(stream=stream)
+        async with app.run_test() as pilot:
+            with patch("app.tui.app.emit_hook", new_callable=AsyncMock) as emit:
+                emit.return_value = HookOutcome(
+                    denied=True, reason="Prompt prohibido por política")
+                app.process_input("Hola")
+                await pilot.pause()
+                texts = [str(getattr(child, "renderable", getattr(child, "content", "")))
+                         for child in app.query_one("#chat-scroll").children]
+                loading_hidden = app.query_one("#loading-indicator").display is False
+
+    assert any("Prompt prohibido por política" in text for text in texts)
+    stream.assert_not_called()
+    assert loading_hidden
+
+
+@pytest.mark.asyncio
+async def test_app_blocks_image_prompt_when_hook_denies():
+    """La rama multimodal tampoco entrega el prompt ni la imagen al modelo."""
+    app = AgentHarnessApp()
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        app.ctx = ContextManager(system_prompt="System")
+        app.attached_images = ["data:image/png;base64,fake_base64"]
+        stream = MagicMock()
+        app.agent_loop = MagicMock(stream=stream)
+        mock_event = MagicMock(value="¿Qué ves?", input=MagicMock())
+        async with app.run_test() as pilot:
+            with patch("app.tui.app.emit_hook", new_callable=AsyncMock) as emit:
+                emit.return_value = HookOutcome(
+                    denied=True, reason="Imagen bloqueada")
+                await app.on_input_submitted(mock_event)
+                await pilot.pause()
+
+    assert all(message["role"] != "user" for message in app.ctx.get_messages())
+    assert app.attached_images == []
+    stream.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_app_process_input_one_shot_mode_is_consumed():
     """El código solo afecta a la primera pregunta y no queda en el historial."""
     from app.tui.commands import mode_message

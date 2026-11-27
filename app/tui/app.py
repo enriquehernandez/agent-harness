@@ -468,6 +468,16 @@ class AgentHarnessApp(App):
                 del self.ctx.messages[index]
                 break
 
+    async def _reject_prompt(self, reason: str,
+                             loading: LoadingIndicator) -> None:
+        """Un hook denegó el prompt: se informa y no se llama al agente."""
+        self.update_dashboard("Bloqueado")
+        detail = (reason or "El hook bloqueó el prompt.").strip()
+        await self.write_to_chat(
+            f"🚫 **Prompt bloqueado por un hook:** {detail}", type="system")
+        loading.display = False
+        self.query_one("#input-box", FileAwareInput).focus()
+
     @work(exclusive=True)
     async def process_input(self, user_input: str):
         loading = self.query_one("#loading-indicator", LoadingIndicator)
@@ -493,10 +503,13 @@ class AgentHarnessApp(App):
             user_input) < 300 else user_input[:300] + "..."
         await self.write_to_chat(display_text, type="user")
         loading.display = True
-        await emit_hook(HookEvent(
+        outcome = await emit_hook(HookEvent(
             hook_event_name="UserPromptSubmit", prompt=user_input,
             session_id=str(getattr(self.session_manager, "session_id", "") or ""),
         ), parallel=True)
+        if outcome.denied:
+            await self._reject_prompt(outcome.reason, loading)
+            return
         temp_msg = self._begin_pending_mode()
 
         try:
@@ -617,17 +630,22 @@ class AgentHarnessApp(App):
         if self.attached_images:
             display_text = user_text if user_text else "[Imagen adjunta]"
             await self.write_to_chat(display_text, type="user")
+            self.update_dashboard("Pensando...")
+            loading = self.query_one("#loading-indicator", LoadingIndicator)
+            loading.display = True
+            outcome = await emit_hook(HookEvent(
+                hook_event_name="UserPromptSubmit", prompt=user_text,
+                session_id=str(getattr(self.session_manager, "session_id", "") or ""),
+            ), parallel=True)
+            if outcome.denied:
+                self.attached_images = []
+                self.update_attachments_bar()
+                await self._reject_prompt(outcome.reason, loading)
+                return
             temp_msg = self._begin_pending_mode()
             self.ctx.add_user_with_image(user_text, self.attached_images)
             self.attached_images = []
             self.update_attachments_bar()
-            self.update_dashboard("Pensando...")
-            loading = self.query_one("#loading-indicator", LoadingIndicator)
-            loading.display = True
-            await emit_hook(HookEvent(
-                hook_event_name="UserPromptSubmit", prompt=user_text,
-                session_id=str(getattr(self.session_manager, "session_id", "") or ""),
-            ), parallel=True)
             try:
                 stream_gen = self.agent_loop.stream("", context=self.ctx, verbose=getattr(
                     self, 'verbose_mode', False), timeout_seconds=settings.LLM_STREAM_TIMEOUT)

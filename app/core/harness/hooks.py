@@ -16,6 +16,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -35,7 +36,32 @@ SUPPORTED_EVENTS = frozenset({
 TOOL_EVENTS = frozenset({"PreToolUse", "PostToolUse"})
 CONTEXT_EVENTS = frozenset({"UserPromptSubmit", "PreToolUse", "PostToolUse"})
 HOOK_TYPES = frozenset({"command", "http", "prompt", "agent"})
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+SAFE_COMMAND_CHARS = re.compile(r"^[A-Za-z0-9_./:=@, -]+$")
+URL_REJECTION = "URL no permitida: solo HTTP(S) en loopback"
+COMMAND_REJECTION = "comando con caracteres de shell no permitido"
 AGENT_HOOK_TIMEOUT = 60.0
+
+
+def _is_loopback_url(value: object) -> bool:
+    """Acepta solo HTTP(S) de loopback, sin usuario/contraseña en la URL."""
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme in {"http", "https"}
+        and parsed.hostname in LOOPBACK_HOSTS
+        and not parsed.username
+        and not parsed.password
+    )
+
+
+def _is_safe_command(value: object) -> bool:
+    """Sin operadores de shell: ni encadenamiento, expansión ni sustitución."""
+    return isinstance(value, str) and bool(SAFE_COMMAND_CHARS.fullmatch(value))
 PROMPT_HOOK_SYSTEM = (
     "Decide si la acción del agente debe continuar. Responde solo un JSON con "
     '{"ok": true|false, "reason": "...", "additionalContext": "..."}. '
@@ -171,13 +197,19 @@ class HookRegistry:
 
     def __init__(self, config: dict | None = None):
         self.handlers: dict[str, list[dict[str, Any]]] = {}
+        self.rejected: dict[str, str] = {}
         self.disabled_all = False
         if config is not None:
             self.load(config)
 
+    @staticmethod
+    def _rejection_key(event_name: str, kind: str, target: Any) -> str:
+        return f"{event_name}|{kind}|{target}"
+
     def load(self, config: dict) -> None:
         self.disabled_all = bool(config.get("disableAllHooks", False))
         self.handlers = {}
+        self.rejected = {}
         events = config.get("hooks", {})
         if not isinstance(events, dict):
             return
@@ -200,6 +232,14 @@ class HookRegistry:
                         kind, "prompt")
                     value = handler.get(main_key, "")
                     if not value:
+                        continue
+                    if kind == "http" and not _is_loopback_url(value):
+                        self.rejected[self._rejection_key(
+                            event_name, kind, value)] = URL_REJECTION
+                        continue
+                    if kind == "command" and not _is_safe_command(value):
+                        self.rejected[self._rejection_key(
+                            event_name, kind, value)] = COMMAND_REJECTION
                         continue
                     entry: dict[str, Any] = {"matcher": matcher}
                     if kind != "command":
@@ -351,6 +391,7 @@ class HookManager:
             self.registry.load({})
             return
         self.registry.load(config if isinstance(config, dict) else {})
+        self.errors.update(self.registry.rejected)
 
     def reload_if_changed(self) -> bool:
         """Hot-reload: vuelve a leer el archivo si cambió su mtime."""
@@ -465,6 +506,11 @@ class HookManager:
 
     async def _launch(self, entry: dict, event: HookEvent) -> HookOutcome:
         command = entry["command"]
+        if not _is_safe_command(command):
+            logger.warning(f"Hook '{command}' rechazado: {COMMAND_REJECTION}")
+            self._record_error(
+                event.hook_event_name, entry, COMMAND_REJECTION)
+            return HookOutcome()
         payload = json.dumps(event.to_dict(), ensure_ascii=False).encode("utf-8")
         process = None
         stdout_output, stderr_output = b"", b""
@@ -500,6 +546,10 @@ class HookManager:
 
     async def _launch_http(self, entry: dict, event: HookEvent) -> HookOutcome:
         url = entry["url"]
+        if not _is_loopback_url(url):
+            logger.warning(f"Hook http '{url}' rechazado: {URL_REJECTION}")
+            self._record_error(event.hook_event_name, entry, URL_REJECTION)
+            return HookOutcome()
         timeout = entry.get("timeout", self.timeout)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -596,10 +646,12 @@ class HookManager:
         return context
 
     def describe(self) -> str:
-        """Resumen legible de la configuración activa y sus errores."""
-        if not self.registry.handlers:
+        """Resumen legible de los hooks activos, los descartados y sus errores."""
+        if not self.registry.handlers and not self.registry.rejected:
             return "No hay hooks configurados. Revisa `.harness/hooks.json`."
-        lines = ["### 🪝 Hooks activos", ""]
+        lines = []
+        if self.registry.handlers:
+            lines += ["### 🪝 Hooks activos", ""]
         for event_name, entries in self.registry.handlers.items():
             lines.append(f"**{event_name}**")
             for entry in entries:
@@ -619,6 +671,11 @@ class HookManager:
                 if error:
                     line += f" ⚠️ {error}"
                 lines.append(line)
+            lines.append("")
+        if self.registry.rejected:
+            lines += ["### 🚫 Hooks descartados", ""]
+            for key, reason in self.registry.rejected.items():
+                lines.append(f"- `{key}` · {reason}")
             lines.append("")
         lines.append(f"Config: `{self.config_file}`")
         return "\n".join(lines)

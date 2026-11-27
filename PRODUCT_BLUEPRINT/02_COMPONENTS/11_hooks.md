@@ -41,7 +41,7 @@ La configuración vive en `.harness/hooks.json` (`settings.hooks_file`) y se car
 - `HookEvent`: payload con `hook_event_name`, `session_id`, `cwd`, `prompt`, `tool_name`, `tool_input`, `success`, `trigger`, `agent_name` y `agent_depth`. Los campos vacíos se omiten al serializar.
 - `HookOutcome`: resultado del evento (`denied`, `reason`, `additional_context`). `from_process()` parsea la salida del comando (incluido exit 2) y `from_text()` la de HTTP/prompt/agent; acepta `permissionDecision`, `decision: block`, `ok: false` y `additionalContext`.
 - `HookRegistry`: carga y filtra los handlers por evento, nombre de herramienta y firma `if`, siguiendo el Registry Pattern.
-- `HookManager`: lee el JSON, lanza cada handler y aplica la primera decisión de bloqueo. En `command` usa `asyncio.create_subprocess_shell()` y pasa el evento por **stdin** como JSON; el comando sale de la configuración (archivo de confianza) y los datos del evento nunca se interpolan en la cadena. Controla `settings.TOOL_TIMEOUT` (mata el proceso si expira), guarda el `additionalContext` pendiente hasta `drain_context()`, registra errores por handler para `/hooks` y recarga la config automáticamente si cambia su mtime (`reload_if_changed()`).
+- `HookManager`: lee el JSON, lanza cada handler y aplica la primera decisión de bloqueo. En `command` usa `asyncio.create_subprocess_shell()` y pasa el evento por **stdin** como JSON; el comando sale de la configuración y los datos del evento nunca se interpolan en la cadena. Antes de aceptar un handler se valida su destino: los comandos solo pueden contener caracteres simples, sin operadores de shell (`;`, `|`, `&`, `$`, comillas, paréntesis ni saltos de línea), y las URLs `http` deben ser HTTP(S) de loopback (`localhost`, `127.0.0.1` o `::1`) sin credenciales. La comprobación se repite en `_launch()` y `_launch_http()` por si un handler se construye fuera de la configuración; los destinos rechazados se guardan en `registry.rejected`, se publican en `errors` y `/hooks` los lista bajo «Hooks descartados». Controla `settings.TOOL_TIMEOUT` (mata el proceso si expira), guarda el `additionalContext` pendiente hasta `drain_context()`, registra errores por handler para `/hooks` y recarga la config automáticamente si cambia su mtime (`reload_if_changed()`).
 
 `emit_hook(event)` es la única fachada pública; el módulo mantiene un `hook_manager` compartido.
 
@@ -131,7 +131,7 @@ El harness envía el `HookEvent` completo como JSON en el cuerpo del `POST`. **L
 | Texto plano o JSON no parseable | Se ignora: `_launch_http()` llama a `from_text()` sin `plain_is_context=True`, a diferencia de `prompt`/`agent`. |
 | `status >= 400` | `logger.warning`, error registrado por handler y `HookOutcome()` vacío (fail-open): **no** es un deny. |
 
-El deny es decisivo en `PreToolUse`/`PostToolUse`: gana sobre los permisos y la tool no se ejecuta. En `UserPromptSubmit` la TUI ignora el `denied` del outcome; ahí solo tiene efecto el `additionalContext`. En `Stop`/`PostToolUse`, un deny se convierte en feedback para el modelo (ver más arriba).
+El deny es decisivo en `PreToolUse`/`PostToolUse`: gana sobre los permisos y la tool no se ejecuta. En `UserPromptSubmit` la TUI respeta el `denied` del outcome: `_reject_prompt()` muestra el motivo como mensaje de sistema, deja el indicador apagado y devuelve el control sin iniciar `agent_loop.stream()`. En la rama de imágenes el hook se dispara antes de `add_user_with_image()`, así que un deny impide que el texto y la imagen entren al contexto; los adjuntos se limpian y el foco vuelve al campo de entrada. El `additionalContext` sigue entregándose al modelo cuando no hay deny. En `Stop`/`PostToolUse`, un deny se convierte en feedback para el modelo (ver más arriba).
 
 ### Timeouts del tipo `agent`
 
@@ -139,7 +139,7 @@ El deny es decisivo en `PreToolUse`/`PostToolUse`: gana sobre los permisos y la 
 
 ### Interfaz y recarga
 
-`/hooks` muestra en el chat los eventos, tipos, comandos/URLs/prompts, matchers, filtros `if` y los errores registrados por handler. `/hooks reload` fuerza la lectura de `.harness/hooks.json` y vuelve a mostrar el estado. Además, `HookManager.emit()` comprueba el mtime del archivo antes de cada evento (`hot-reload`), así que basta con editar la configuración: no hace falta reiniciar la TUI. Los cambios de la TUI se limitaron a registrarlo en `AVAILABLE_COMMANDS` y en `/help`.
+`/hooks` muestra en el chat los eventos, tipos, comandos/URLs/prompts, matchers, filtros `if`, los errores registrados por handler y los handlers descartados por destino no permitido, con el motivo de cada rechazo. `/hooks reload` fuerza la lectura de `.harness/hooks.json` y vuelve a mostrar el estado. Además, `HookManager.emit()` comprueba el mtime del archivo antes de cada evento (`hot-reload`), así que basta con editar la configuración: no hace falta reiniciar la TUI. Los cambios de la TUI se limitaron a registrarlo en `AVAILABLE_COMMANDS` y en `/help`.
 
 ### Latencia percibida al enviar un prompt
 

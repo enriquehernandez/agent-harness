@@ -38,6 +38,7 @@ Toda entrada de `tasks/completadas.md` incluye un campo `**Prueba en TUI:**` con
 
 - [ ] `tasks/completadas.md` registra: objetivo, decisión de diseño si la hubo, estado, tests y `Prueba en TUI`.
 - [ ] Si se añade un componente, se actualiza `PRODUCT_BLUEPRINT` (y `README.md`/`docs/` cuando cambie el uso).
+- [ ] La documentación de producto (`README.md`, `docs/`, `PRODUCT_BLUEPRINT/`, skills y `checks/`) describe **comportamiento**: no menciona IDs de tareas (`P0.x`, …) ni números de línea de código. Esas referencias solo viven en `tasks/`, y allí se usan rutas y símbolos en lugar de líneas.
 - [ ] `tasks/actual.md` y `tasks/pendientes.md` están sincronizados (la tarea sale de "en curso" y entra en "completadas").
 
 ## 5. Puerta de commit

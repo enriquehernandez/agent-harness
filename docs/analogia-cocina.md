@@ -39,7 +39,6 @@ flowchart TD
     subgraph Seguridad [🛡️ Los Hooks - Seguridad y Automatización]
         PERM{"✋ PermissionGate\n(¿Dejar pasar?)"}:::hooks
         TIMER["⏱️ Hooks de Evento\n(Temporizadores - metáfora)"]:::hooks
-        INJ["💉 Hooks de Inyección\n(Preparar la mesa)"]:::hooks
     end
 
     %% Subagentes
@@ -106,7 +105,7 @@ En una cocina real, no basta con que el chef sepa usar los utensilios; necesitas
 
 *   **El Temporizador (Hooks de Evento — metáfora):** *"A los 20 minutos, haz sonar la campana para sacarlo"* es solo una forma de describir reacciones automáticas. No hay un registro de hooks: en el código solo hay enganches puntuales, como el colector de eventos del `logger` (`DebugEventCollector`, que alimenta el panel F1).
 *   **La Regla de Seguridad (Hook de Intercepción - PermissionGate):** Si el chef intenta meter la mano en el horno a 200°C, el supervisor lo detiene: *"¡Alto! Necesito autorización de la gerencia (el humano) para abrir el horno"* (`y/a/n`). No se limita a `bash` o `write_file`: también cubre lecturas y listados (`read_file`, `read_text_file`, `list_dir`, `list_directory`, `edit_file`); responder `a` guarda la firma y auto-aprueba esa acción en el futuro.
-*   **La Preparación Previa (Hook de Inyección):** Antes de que el chef empiece a cocinar, el supervisor le pone en la mesa los ingredientes exactos. En tu código, es el hook puntual de `BashTool` que intercepta el comando `capture_snapshot.py` y le inyecta automáticamente `--tools observations.json` para que la receta funcione bien desde el principio.
+*   **La Preparación Previa (sin atajos ocultos):** El chef pone en la mesa los ingredientes exactos y el horno recibe esa misma orden: `BashTool` ejecuta el comando aprobado sin inyectar `--tools observations.json`. Si hace falta el inventario, el modelo pide `export_observations` como tool independiente y esa escritura pasa por el `PermissionGate`.
 
 ## 💰 El Dueño del Restaurante (Los Costos / PricingProvider)
 

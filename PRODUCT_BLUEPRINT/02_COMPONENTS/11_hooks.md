@@ -30,7 +30,7 @@ La configuración vive en `.harness/hooks.json` (`settings.hooks_file`) y se car
 
 - `matcher` admite alternativas separadas por `|`, nombres exactos y regex estilo `mcp__.*`; solo filtra `PreToolUse`/`PostToolUse` por nombre de herramienta. Vacío significa «todas». En el resto de eventos se ignora.
 - Se aceptan cuatro tipos de handler: `command` (por defecto), `http`, `prompt` y `agent`.
-- Cada handler puede llevar `if`: una firma `herramienta:detalle` con comodines `fnmatch` (`bash:rm *`, `edit_file:src/*.py`). Solo se aplica en eventos de herramienta. Ojo: los **permisos** no usan comodines (P0.3): una aprobación guardada se compara como texto literal.
+- Cada handler puede llevar `if`: una firma `herramienta:detalle` con comodines `fnmatch` (`bash:rm *`, `edit_file:src/*.py`). Solo se aplica en eventos de herramienta. Ojo: los **permisos** no usan comodines: una aprobación guardada se compara como texto literal.
 - `disableAllHooks: true` desactiva todos los hooks sin borrar la configuración.
 - Los scripts de hooks van en `.harness/hooks/` y se versionan; el log que generan (`audit.log`) queda ignorado.
 

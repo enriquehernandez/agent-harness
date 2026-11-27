@@ -1577,3 +1577,62 @@ async def test_tui_persisted_approval_is_literal_after_restart(tmp_path, monkeyp
     assert await restarted.check("bash", {"command": "grep *.log"}) == Decision.ALLOW
     assert await restarted.check("bash", {"command": "grep secrets.log"}) == Decision.DENY
     assert await restarted.check("bash", {"command": "grep .env"}) == Decision.DENY
+
+
+@pytest.mark.asyncio
+async def test_tui_bash_approved_command_is_executed_verbatim(tmp_path, monkeypatch):
+    """P0.2: lo aprobado en el modal es exactamente lo que ejecuta BashTool."""
+    from app.core.harness.context import ContextManager
+    from app.core.harness.loop import AgentLoop
+    from app.core.harness.permissions import PermissionGate
+    from app.core.harness.tool import ToolRegistry, ToolResult
+    from app.core.llm.providers.fake import FakeLLM
+    from app.tools.shell import BashTool
+    from app.tui.modals.permission import PermissionModal
+
+    monkeypatch.chdir(tmp_path)
+    approved = "python scripts/capture_snapshot.py --out report.md"
+
+    export_tool = MagicMock()
+    export_tool.name = "export_observations"
+    export_tool.run = AsyncMock(return_value=ToolResult(success=True, content=""))
+    registry = ToolRegistry()
+    registry.register(BashTool())
+    registry.register(export_tool)
+
+    app = AgentHarnessApp()
+    gate = PermissionGate(
+        ask_user=app.request_permission,
+        persist_file=tmp_path / "permissions.json")
+    loop = AgentLoop(llm=FakeLLM(), tools=registry, permissions=gate)
+    ctx = ContextManager(system_prompt="test")
+
+    with patch("asyncio.create_subprocess_shell") as mock_shell:
+        process = AsyncMock()
+        process.communicate.return_value = (b"OK", b"")
+        process.returncode = 0
+        mock_shell.return_value = process
+
+        with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+            async with app.run_test() as pilot:
+                holder = {}
+
+                async def run_tool():
+                    holder["ok"], holder["result"] = await loop._execute_tool(
+                        {"id": "1", "name": "bash",
+                         "arguments": {"command": approved}}, ctx)
+
+                worker = app.run_worker(run_tool())
+                await pilot.pause()
+                modal = next(s for s in app.screen_stack
+                             if isinstance(s, PermissionModal))
+                assert approved in str(modal.args_str)
+                assert "--tools" not in str(modal.args_str)
+                await pilot.press("y")
+                await pilot.pause()
+                await worker.wait()
+
+    assert holder["ok"] is True
+    assert mock_shell.call_args[0][0] == approved
+    export_tool.run.assert_not_awaited()
+    assert not (tmp_path / "observations.json").exists()

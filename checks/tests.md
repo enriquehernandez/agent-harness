@@ -7,7 +7,7 @@ Antes de dar una tarea por terminada, el agente DEBE verificar:
 ## 1. Validación Automática
 - [ ] `uv run tom test` pasa sin errores. El script `test` de `pyproject.toml` incluye `--cov-fail-under=100`, así que el comando falla si la cobertura baja del 100%; CI lo ejecuta y además sube `coverage.xml` a Codecov.
 - [ ] `uv run tom test-integration` pasa (verifica que los servidores MCP respondan).
-- [ ] `uv run python scripts/check_pricing.py` valida la configuración de precios. ⚠️ Suspender mientras mueva/borra la caché real y la falla de red no restaure el backup. Verificar pricing con tests mientras tanto.
+- [ ] El pricing se verifica con los tests de `tests/core/test_pricing.py`. Los scripts de diagnóstico (`scripts/check_pricing.py`, `scripts/verify_memory_backends.py`) son opcionales: trabajan en directorios temporales y no forman parte del checklist obligatorio.
 
 ## 2. Validación Manual (si aplica cambios en la TUI)
 - [ ] La TUI arranca (`uv run tom dev`).

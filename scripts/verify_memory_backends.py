@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts._isolated_data import isolated_data_dir  # noqa: E402
+
 console = Console()
 
 # ==========================================
@@ -191,7 +193,8 @@ async def test_migration():
         f"  [bold green]✅ Migración files -> sqlite pasó.[/bold green]")
 
 
-async def main():
+async def main() -> int:
+    """Ejecuta las pruebas en un directorio aislado y devuelve un código de salida."""
     console.print(Panel.fit(
         "[bold]Test de Backends de Memoria[/bold]\n"
         "Ejercicio 3: Backend de memoria intercambiable",
@@ -203,24 +206,33 @@ async def main():
     table.add_column("Prueba", style="cyan")
     table.add_column("Estado", style="green")
 
-    # Ejecutamos las pruebas
-    for backend in ["files", "sqlite", "memory"]:
+    # Las rutas derivadas de DATA_DIR apuntan a un temporal, nunca a .harness
+    results = []
+    with isolated_data_dir():
+        for backend in ["files", "sqlite", "memory"]:
+            try:
+                await test_backend(backend)
+                results.append((f"Backend: {backend}", True, ""))
+            except Exception as e:
+                results.append((f"Backend: {backend}", False, str(e)))
+
         try:
-            await test_backend(backend)
-            table.add_row(f"Backend: {backend}", "✅ PASÓ")
+            await test_migration()
+            results.append(("Migración files -> sqlite", True, ""))
         except Exception as e:
-            table.add_row(f"Backend: {backend}", f"❌ FALLÓ: {e}")
+            results.append(("Migración files -> sqlite", False, str(e)))
 
-    try:
-        await test_migration()
-        table.add_row("Migración files -> sqlite", "✅ PASÓ")
-    except Exception as e:
-        table.add_row("Migración files -> sqlite", f"❌ FALLÓ: {e}")
-
+    for name, passed, error in results:
+        table.add_row(name, "✅ PASÓ" if passed else f"❌ FALLÓ: {error}")
     console.print(table)
-    console.print(
-        "\n[bold green]🏁 Todas las pruebas completadas.[/bold green]")
+
+    failed = [name for name, passed, _ in results if not passed]
+    if failed:
+        console.print(f"\n[bold red]❌ Fallaron: {', '.join(failed)}[/bold red]")
+        return 1
+    console.print("\n[bold green]🏁 Todas las pruebas completadas.[/bold green]")
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

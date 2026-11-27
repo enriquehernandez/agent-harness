@@ -7,12 +7,6 @@
 
 ## P0 — Bloqueantes (seguridad e integridad de datos)
 
-### P0.7 Evitar que los scripts destructivos toquen datos reales
-- **Problema:** `scripts/verify_memory_backends.py` borra `.harness` y siempre termina con éxito; `scripts/check_pricing.py` elimina la caché si falla la descarga; `checks/tests.md` obliga a ejecutarlo.
-- **Criterio:** los scripts usan directorios temporales, restauran backups en `finally` y devuelven código de salida no cero si fallan; quitar la instrucción obligatoria del checklist.
-- **Prueba en TUI prevista:** N/A en TUI (scripts de diagnóstico): ejecutarlos contra un repo temporal → la memoria y la caché reales siguen intactas; `/doctor` y `/cost` sin errores.
-- **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
-
 ### P0.8 Dejar de inflar la cobertura
 - **Problema:** `pyproject.toml` excluye `except`, `continue`, `return` y `on_*/watch_*/compose` y silencia `RuntimeWarning`; `tests/integration` se ignora en `addopts`.
 - **Criterio:** medir el manejo de errores y los handlers de TUI; aceptar que el porcentaje baje temporalmente y cubrirlo con tests de comportamiento; no silenciar `RuntimeWarning`.

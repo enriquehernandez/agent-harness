@@ -10,7 +10,7 @@
 - [ ] La cobertura es significativa: los tests nuevos comprueban comportamiento, no números de línea. Mientras siga activa la tarea **P0.8**, revisar además que no se hayan añadido exclusiones en `[tool.coverage.report]` ni `# pragma: no cover` sin justificación.
 - [ ] No hay tests duplicados, tests sin `assert` ni `filterwarnings` nuevos que oculten el problema.
 - [ ] Si la tarea toca MCP, A2A o HTTP: `uv run tom test-integration` también pasa.
-- [ ] Si toca pricing, se verifica con tests. **No** ejecutar scripts que borren cachés o memoria real del usuario (ver **P0.7** en `tasks/pendientes.md`).
+- [ ] Si toca pricing, se verifica con tests. Los scripts de diagnóstico son opcionales: trabajan en directorios temporales y no tocan cachés ni memoria reales del usuario.
 
 ## 2. Verificación en la TUI (obligatoria por tarea)
 

@@ -235,13 +235,14 @@ async def test_filesystem_read_missing_truncate_and_write_denied(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_bash_tool_capture_snapshot_hook():
-    """Cubre el hook que inyecta --tools observations.json."""
-    mock_export = AsyncMock()
-    mock_export.run.return_value = ToolResult(
-        success=True, content="Exportado")
-
-    tool = BashTool(export_observations=mock_export)
+@pytest.mark.parametrize("approved", [
+    "python scripts/capture_snapshot.py --out report.md",
+    "python scripts/capture_snapshot.py",
+])
+async def test_bash_tool_executes_approved_command_verbatim(approved):
+    """P0.2: BashTool no reescribe el comando aprobado ni exporta por su cuenta."""
+    tool = BashTool()
+    assert not hasattr(tool, "export_observations")
 
     with patch("asyncio.create_subprocess_shell") as mock_shell:
         mock_process = AsyncMock()
@@ -249,15 +250,10 @@ async def test_bash_tool_capture_snapshot_hook():
         mock_process.returncode = 0
         mock_shell.return_value = mock_process
 
-        # Ejecutamos un comando que simula el snapshot
-        await tool.run("python scripts/capture_snapshot.py --out report.md")
+        result = await tool.run(approved)
 
-        # Verificamos que se llamó al exportador
-        mock_export.run.assert_called_once_with("observations.json")
-        # Verificamos que el comando se modificó para incluir --tools
-        called_cmd = mock_shell.call_args[0][0]
-        assert "--tools observations.json" in called_cmd
-        assert called_cmd == "python scripts/capture_snapshot.py --tools observations.json --out report.md"
+        assert result.success is True
+        assert mock_shell.call_args[0][0] == approved
 
 
 @pytest.mark.asyncio
@@ -283,27 +279,6 @@ async def test_load_skill_tool_success(tmp_path):
     assert result.success is True
     assert "# Test Skill" in result.content
     assert "test_skill" in result.content
-
-
-@pytest.mark.asyncio
-async def test_bash_tool_capture_snapshot_no_out():
-    """Cubre shell.py línea 53: añadir --tools sin que haya --out."""
-    from app.tools.shell import BashTool
-    from unittest.mock import AsyncMock, patch
-
-    mock_export = AsyncMock()
-    tool = BashTool(export_observations=mock_export)
-
-    with patch("asyncio.create_subprocess_shell") as mock_shell:
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"OK", b"")
-        mock_process.returncode = 0
-        mock_shell.return_value = mock_process
-
-        await tool.run("python scripts/capture_snapshot.py")
-
-        called_cmd = mock_shell.call_args[0][0]
-        assert called_cmd == "python scripts/capture_snapshot.py --tools observations.json"
 
 
 @pytest.mark.asyncio

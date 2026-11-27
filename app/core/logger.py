@@ -1,16 +1,45 @@
 import logging
 import json
-from datetime import datetime
+from datetime import date, datetime
+from pathlib import Path
+
 from app.core.config import settings
+
+
+class DailyFileHandler(logging.FileHandler):
+    """FileHandler que cambia de archivo cuando cambia el día."""
+
+    def __init__(self, logs_dir: Path):
+        self.logs_dir = logs_dir
+        self.current_date = datetime.now().date()
+        super().__init__(self._path(self.current_date), encoding="utf-8")
+
+    @staticmethod
+    def _filename(day: date) -> str:
+        return f"{day:%Y_%m_%d}_harness.log"
+
+    def _path(self, day: date) -> str:
+        return str((self.logs_dir / self._filename(day)).resolve())
+
+    def emit(self, record):
+        today = datetime.now().date()
+        with self.lock:
+            if today != self.current_date:
+                self.close()
+                self.current_date = today
+                self.baseFilename = self._path(today)
+                self.stream = self._open()
+            super().emit(record)
+
 
 logger = logging.getLogger("agent_harness")
 logger.setLevel(settings.LOG_LEVEL)
 logger.propagate = False  # 🔥 Evita que se propague al root logger (y a stderr)
 
 # 1. File handler (always saves everything)
-log_file = settings.logs_dir / "harness_debug.log"  # 🔥 Ruta centralizada
+log_file = settings.log_file  # 🔥 Ruta diaria centralizada
 
-file_handler = logging.FileHandler(log_file, encoding="utf-8")
+file_handler = DailyFileHandler(settings.logs_dir)
 file_handler.setFormatter(logging.Formatter(
     '[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
 logger.addHandler(file_handler)
@@ -45,7 +74,24 @@ class DebugEventCollector(logging.Handler):
             try:
                 if msg.strip().startswith("{"):
                     parsed = json.loads(msg)
-                    if "model" in parsed and "messages" in parsed:
+                    if parsed.get("hook") == "handler":
+                        summary = (
+                            f"🪝 {parsed.get('event', '?')} · "
+                            f"{parsed.get('type', '?')} · "
+                            f"{parsed.get('status', '?')} · "
+                            f"{parsed.get('duration_ms', '?')}ms"
+                        )
+                        if parsed.get("matcher"):
+                            summary += f" · [{parsed['matcher']}]"
+                    elif parsed.get("hook") == "emit":
+                        summary = (
+                            f"🪝 emit · {parsed.get('event', '?')} · "
+                            f"{parsed.get('handlers', '?')} handlers · "
+                            f"{parsed.get('duration_ms', '?')}ms"
+                        )
+                        if parsed.get("parallel"):
+                            summary += " · parallel"
+                    elif "model" in parsed and "messages" in parsed:
                         # 🔥 Extraemos el último mensaje del usuario
                         user_msg = ""
                         for m in reversed(parsed["messages"]):

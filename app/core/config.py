@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -52,8 +53,17 @@ class Settings(BaseSettings):
         return self.DATA_DIR / "permissions.json"
 
     @property
+    def hooks_file(self) -> Path:
+        return self.DATA_DIR / "hooks.json"
+
+    @property
     def logs_dir(self) -> Path:
         return self.DATA_DIR / "logs"
+
+    @property
+    def log_file(self) -> Path:
+        """Archivo de log del día actual: `yyyy_MM_dd_harness.log`."""
+        return self.logs_dir / f"{datetime.now():%Y_%m_%d}_harness.log"
 
     @property
     def sessions_dir(self) -> Path:

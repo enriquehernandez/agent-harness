@@ -44,8 +44,9 @@ Use it when the user asks any of:
    file, run a benign command, and make one HTTPS request to pypi.org.
 2. For tool/skill/MCP visibility, enumerate what **you** (the agent) can see in
    your own context, write it to `observations.json` in the shape documented in
-   `scripts/inspect_tools.py`, and pass `--tools observations.json`. If you
-   cannot enumerate them, omit it — they'll be recorded as `not-visible`.
+   `scripts/inspect_tools.py` (the `export_observations` tool works too, but it
+   needs the same user approval as any write), and pass `--tools observations.json`.
+   If you cannot enumerate them, omit it — they'll be recorded as `not-visible`.
 3. Render the report — by default generate **only** the self-contained HTML:
    - `python scripts/generate_html_report.py snapshot.json --out report.html`
      (themed HTML combining the capability report and library inventory —

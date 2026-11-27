@@ -63,7 +63,16 @@ chroma_db/
 # ==========================================
 # Datos de usuario del Harness
 # ==========================================
-.harness/
+# Todo .harness/ queda fuera salvo la configuración y los scripts de hooks.
+.harness/*
+!.harness/hooks.json
+!.harness/hooks/
+.harness/hooks/*
+!.harness/hooks/**
+# Los logs y los bytecode generados por los hooks siguen siendo locales.
+.harness/hooks/**/*.log
+.harness/hooks/**/__pycache__/
+.harness/hooks/**/*.pyc
 
 # # ==========================================
 # # Permisos Locales del Harness
@@ -74,3 +83,6 @@ chroma_db/
 # # Memoria a largo plazo
 # # ==========================================
 # .harness_memory/
+
+# Server para pruebas
+server/

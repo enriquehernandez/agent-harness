@@ -33,7 +33,7 @@ Diseñado para ser **100% agnóstico al proveedor de IA**, altamente extensible 
 - **📄 Lectura de Documentos:** `read_document` extrae texto de `.pdf`, `.docx`, `.xlsx` y `.pptx`, y también de los formatos antiguos `.doc`, `.xls` y `.ppt` (estos últimos con `olefile`/`xlrd`, de forma best-effort), con un límite de `MAX_DOCUMENT_CHARS=15000`.
 - **🪞 Auto-Reflexión con Crítico:** La tool `critic_review` revisa la respuesta propuesta contra las reglas del proyecto y puede forzar hasta 2 reintentos, inyectando el feedback del crítico en el contexto. Usa `A2A_REVIEWER_MODEL` como modelo del crítico si está configurado.
 - **🔬 Observabilidad con Langfuse:** Si hay `LANGFUSE_PUBLIC_KEY` y `LANGFUSE_SECRET_KEY`, cada stream se registra como una generación con su entrada, uso de tokens y coste.
-- **📂 Rutas Centralizadas:** `DATA_DIR` (por defecto `.harness`) es la raíz de `memory.db`, `vector.db`, `permissions.json`, `logs/`, `sessions/` y `pricing_cache.json`.
+- **📂 Rutas Centralizadas:** `DATA_DIR` (por defecto `.harness`) es la raíz de `memory.db`, `vector.db`, `permissions.json`, `logs/` (con el log diario `yyyy_MM_dd_harness.log`), `sessions/` y `pricing_cache.json`.
 - **💡 Skill `token-budget-guard`:** Primera skill vendible del proyecto: analiza el consumo de tokens y costes por sesión/modelo, avisa al superar presupuestos y sugiere modelos más baratos o prompt caching.
 
 
@@ -218,6 +218,31 @@ Comandos disponibles:
 
 Los códigos de respuesta cambian solo el estilo de la siguiente pregunta y se consumen automáticamente: escribe `/devil` y luego tu pregunta, o `/devil ¿Qué fallos tiene este plan?` en una sola línea. No hay que desactivarlos; la pregunta siguiente vuelve al tono normal. No modifican las reglas de `AGENTS.md` ni los permisos.
 
+## 🪝 Hooks del ciclo de vida
+
+Puedes ejecutar tus propios comandos cuando ocurre un evento (envío de un prompt, antes y después de usar una herramienta, antes y después de compactar, fin del turno). Se configuran una vez en `.harness/hooks.json` y se disparan solos; no hay que escribir ningún comando en la TUI:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "bash",
+        "hooks": [{ "type": "command", "command": "python3 .harness/hooks/no_delete.py" }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [{ "type": "command", "command": "python3 .harness/hooks/audit.py" }]
+      }
+    ]
+  }
+}
+```
+
+Los hooks `command` reciben el evento como JSON por stdin con timeout de `TOOL_TIMEOUT`; también hay hooks `http`, `prompt` y `agent`. Los comandos no admiten operadores de shell (ni encadenamiento, expansión ni sustitución) y las URLs `http` solo pueden apuntar a loopback, sin credenciales incrustadas; los handlers rechazados se descartan y `/hooks` explica el motivo. `matcher` acepta nombres, alternativas y regex, y `if` filtra por firma `herramienta:detalle`. `/hooks` lista la configuración activa y sus errores; `/hooks reload` la recarga (también se recarga sola si cambia el archivo). Los hooks incluidos hacen dos cosas: `audit.py` centraliza el registro en `.harness/hooks/audit.log` (ediciones y bloqueos), y `no_delete.py` importa su función `log_event()` para dejar constancia del borrado intentado antes de devolver el `deny`. Cuando un hook devuelve `deny` (JSON con `hookSpecificOutput.permissionDecision`, o código 2 con el motivo en stderr), la herramienta **no se ejecuta** y el chat muestra `🚫 Bloqueado por un hook` con el motivo, aunque los permisos la hubieran permitido. Si el hook falla o devuelve una salida no válida, el agente sigue (fail-open). `decision: block` en `Stop` o `PostToolUse` añade un mensaje de feedback al contexto y, en `Stop`, hace que el agente siga iterando en lugar de cerrar el turno. Los hooks de `UserPromptSubmit` corren en paralelo después de mostrar tu mensaje, para que un hook lento no retrase la respuesta visual; si uno devuelve `deny`, el prompt no se envía al modelo y el chat muestra el motivo. Con F1 (panel de debug) puedes ver el ciclo de vida de cada hook: evento, tipo, matcher, entrada, salida, estado y duración; al pulsar una entrada se abre el detalle JSON. `additionalContext` se concatena entre hooks en `UserPromptSubmit`/`PreToolUse`/`PostToolUse`, se muestra al modelo como un mensaje temporal antes de cada llamada al LLM y se retira al terminar el turno (nunca se guarda en la sesión). `disableAllHooks: true` los apaga todos. Ver `PRODUCT_BLUEPRINT/02_COMPONENTS/11_hooks.md`.
+
 ## 🛡️ El Guardián de Seguridad (Permission Gate)
 
 Si el agente intenta ejecutar una herramienta sensible, el Harness pausará la ejecución y te mostrará un panel interactivo con los argumentos y, si aplica, un **diff de los cambios**:
@@ -249,13 +274,13 @@ El Harness puede conectarse a cualquier servidor MCP. El archivo `mcp_config.jso
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/ruta/al/proyecto"]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem@2.4.1", "/ruta/al/proyecto"]
     }
   }
 }
 ```
 
-Al arrancar la TUI, el agente descubrirá e integrará automáticamente las herramientas expuestas por el servidor, con nombres `mcp_<servidor>_<tool>`. Cada llamada remota usa `TOOL_TIMEOUT` (30 s por defecto) y, si el servidor cae, se reconecta con backoff exponencial.
+Al arrancar la TUI, el agente descubrirá e integrará automáticamente las herramientas expuestas por el servidor, con nombres `mcp_<servidor>_<tool>`. Cada llamada remota usa `TOOL_TIMEOUT` (30 s por defecto) y, si el servidor cae, se reconecta con backoff exponencial. Los servidores externos se fijan a una versión concreta y solo reciben un entorno mínimo de ejecución: las credenciales del Harness nunca se heredan. Si un servidor necesita una variable del proceso, declárala en `"allowed_env": ["NOMBRE"]` dentro de su configuración.
 
 ## 🧪 Testing y Calidad
 

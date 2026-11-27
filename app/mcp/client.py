@@ -9,14 +9,31 @@ from app.core.harness.tool import BaseTool, ToolRegistry, ToolResult
 from app.core.logger import logger
 from app.core.config import settings
 
+# Variables de ejecución necesarias para lanzar procesos; nunca credenciales.
+_SAFE_ENV_KEYS = frozenset({
+    "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
+    "USER", "LOGNAME", "SHELL", "TERM", "SYSTEMROOT", "COMSPEC",
+    "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
+})
+
+
+def _build_server_env(env: dict[str, str] | None,
+                      allowed_env: list[str] | None) -> dict[str, str]:
+    """Entrega al hijo solo variables seguras y las permitidas explícitamente."""
+    keys = _SAFE_ENV_KEYS | set(allowed_env or [])
+    server_env = {name: os.environ[name] for name in keys if name in os.environ}
+    if env:
+        server_env.update(env)
+    return server_env
+
 
 class MCPClient:
     """Client to connect to an MCP server with exponential backoff."""
 
-    def __init__(self, command: str, args: list[str], env: dict[str, str] | None = None):
-        server_env = os.environ.copy()
-        if env:
-            server_env.update(env)
+    def __init__(self, command: str, args: list[str],
+                 env: dict[str, str] | None = None,
+                 allowed_env: list[str] | None = None):
+        server_env = _build_server_env(env, allowed_env)
 
         self.command = command
         self.args = args

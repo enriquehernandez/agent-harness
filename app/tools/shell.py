@@ -1,14 +1,10 @@
 import asyncio
-import json
-import re
-from pathlib import Path
 from app.core.config import settings
-from app.core.logger import logger
 from app.core.harness.tool import BaseTool, ToolResult
 
 
 class BashTool(BaseTool):
-    def __init__(self, timeout_seconds: int = 30, export_observations=None):
+    def __init__(self, timeout_seconds: int = 30):
         self.name = "bash"
         self.description = (
             "Ejecuta un comando de shell (bash) en el sistema. "
@@ -25,40 +21,13 @@ class BashTool(BaseTool):
             "required": ["command"]
         }
         self.timeout_seconds = timeout_seconds
-        self.export_observations = export_observations
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else settings.TOOL_TIMEOUT
 
     async def run(self, command: str, **kwargs) -> ToolResult:
-        # Ignoramos 'timeout' y cualquier otro argumento extra que envíe el LLM con (**kwargs)
-
+        # El comando aprobado se ejecuta tal cual: BashTool no reescribe argumentos
+        # ni dispara escrituras derivadas. `export_observations` es una tool
+        # independiente y pasa por PermissionGate cuando el modelo la solicita.
         try:
-            # logger.info(
-            #     f"BashTool: ejecutando '{command}' en cwd='{Path.cwd()}'")
-
-            # 🔥 Hook: si el comando usa capture_snapshot.py, generar observations.json
-            # y añadir el flag --tools automáticamente.
-            if "capture_snapshot.py" in command:
-                logger.debug(f"Hook detectado: {command}")
-
-                # 1. Generar observations.json si no existe
-                if self.export_observations:
-                    logger.debug("Generando observations.json...")
-                    await self.export_observations.run("observations.json")
-
-                # 2. Añadir --tools observations.json al comando si no está ya
-                if "--tools" not in command:
-                    # Insertamos --tools antes del --out (o al final si no hay --out)
-                    if "--out" in command:
-                        command = re.sub(
-                            r'(capture_snapshot\.py)(\s+.*?)(--out)',
-                            r'\1\2--tools observations.json \3',
-                            command
-                        )
-                    else:
-                        command += " --tools observations.json"
-                    logger.debug(f"Comando modificado: {command}")
-
-            # 3. Ejecutar el comando (original o modificado)
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
@@ -81,7 +50,6 @@ class BashTool(BaseTool):
                 error_msg = err_str or out_str or f"Exit code {process.returncode}"
                 return ToolResult(success=False, content="", error=error_msg)
 
-            # logger.info(f"BashTool: output={out_str[:100]}...")
             return ToolResult(success=True, content=out_str or "Comando ejecutado sin salida.")
 
         except Exception as e:

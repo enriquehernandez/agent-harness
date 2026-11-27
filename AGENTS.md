@@ -14,6 +14,7 @@ Eres un ingeniero de software senior trabajando en el **Agent Harness** (Python 
 ## 🏃‍♂️ Estilo de Trabajo
 - **Antes de codificar:** Planifica el cambio. Escribe el test primero (TDD) si es una nueva feature.
 - **Al terminar:** Corre `uv run tom test`. Si la cobertura no es 100%, no has terminado.
+- **Definition of Done:** Una tarea solo se da por terminada cuando cumple `tasks/DEFINITION_OF_DONE.md`: tests/cobertura, pasos de TUI ejecutados y documentados en `tasks/completadas.md`, seguridad y documentación. Sin DoD completo no se propone commit.
 - **Commits:** Pequeños y atómicos, pero **solo cuando el usuario lo apruebe explícitamente**. Hasta entonces, deja los cambios sin commitear.
 - **Documentación:** Si agregas un componente nuevo, actualiza el `PRODUCT_BLUEPRINT`.
 
@@ -26,4 +27,5 @@ Eres un ingeniero de software senior trabajando en el **Agent Harness** (Python 
 - Para entender la arquitectura y el stack, lee `docs/arquitectura.md`.
 - Para saber cómo funcionan las tools y evitar errores, lee `docs/herramientas.md`.
 - Para saber cómo validar tu trabajo, lee `checks/tests.md`.
+- Para saber cuándo una tarea está terminada y puede proponerse para commit, lee `tasks/DEFINITION_OF_DONE.md`.
 - Para saber en qué estamos trabajando hoy, lee `tasks/actual.md`.

@@ -22,7 +22,7 @@ from app.core.harness.permissions import Decision, PermissionGate
 from app.core.harness.hooks import HookEvent, emit_hook
 from app.core.harness.subagents import DelegateTool
 from app.core.harness.memory.factory import create_memory_store
-from app.core.harness.session import SessionManager
+from app.core.harness.session import SessionManager, merge_session_history
 from app.tools import register_core_tools
 from app.tui.commands import AVAILABLE_COMMANDS, MODE_INSTRUCTIONS, handle_command, mode_message
 from app.mcp.client import MCPClient
@@ -111,7 +111,8 @@ class AgentHarnessApp(App):
             self.session_manager = SessionManager(last_session["id"])
             messages = self.session_manager.load()
             if messages:
-                self.ctx.messages = messages
+                self.ctx.messages = merge_session_history(
+                    self.ctx.messages, messages)
                 metadata = self.session_manager.load_metadata()
                 repair_counts = metadata.get("repair_counts", {})
                 if repair_counts and self.agent_loop:

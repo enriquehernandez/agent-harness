@@ -755,11 +755,20 @@ async def handle_command(command: str, ctx: ContextManager, state: dict, llm: Ba
             elif subcmd == "load":
                 if len(parts) > 2:
                     session_id = parts[2]
-                    from app.core.harness.session import SessionManager
-                    sm = SessionManager(session_id)
+                    from app.core.harness.session import (
+                        SessionManager, merge_session_history)
+                    try:
+                        sm = SessionManager(session_id)
+                    except ValueError:
+                        await app.write_to_chat(
+                            f"❌ ID de sesión `{session_id}` no válido.",
+                            type="system",
+                        )
+                        return True
                     messages = sm.load()
                     if messages:
-                        app.ctx.messages = messages
+                        app.ctx.messages = merge_session_history(
+                            app.ctx.messages, messages)
                         app.session_manager = sm
 
                         # 🔥 Recargar repair_counts desde los metadatos

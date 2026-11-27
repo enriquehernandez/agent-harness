@@ -15,3 +15,9 @@ En lugar de simplemente "borrar" los mensajes más antiguos (lo que hace que el 
 
 ## Patrón Strategy
 La clase `ContextManager` no sabe *cómo* se compacta. Delega la tarea a una interfaz `CompactionStrategy`. Las estrategias implementadas son `SummarizationStrategy` (por defecto), `SlidingWindowStrategy` y `NoneStrategy` (`compaction.py`); `set_strategy()` permite seleccionar `summarization`, `sliding` o `none` en caliente.
+
+## Persistencia de sesiones
+
+`SessionManager` guarda el historial en `.harness/sessions/<id>.json` y carga la última sesión al arrancar la TUI. Los IDs son nombres planos formados por letras, dígitos, `_` y `-`: las rutas relativas, absolutas y cualquier separador se rechazan en el constructor, en `list_sessions()` y en `delete_session()`, de modo que ninguna sesión puede apuntar a otro archivo. `load()` devuelve un historial vacío si el JSON no existe, no se puede leer o no es válido, y descarta los mensajes `system` del archivo.
+
+Al restaurar un historial, la TUI antepone los mensajes `system` presentes en el contexto actual (`merge_session_history()`): las instrucciones vigentes nunca se sustituyen por contenido del archivo, tanto al arrancar como con `/session load <id>`. Si el ID no es válido, `/session load` muestra el error y no intenta leer ningún archivo. `/session new` guarda la sesión anterior, crea una nueva, conserva el system prompt y reinicia los contadores de reparación.

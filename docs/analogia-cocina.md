@@ -88,7 +88,7 @@ flowchart TD
 *   **La Cocina (El Harness):** La infraestructura física. Los fogones (el motor del LLM), la despensa (la base de datos) y el espacio de trabajo.
 *   **Los Utensilios (Las Tools):** Cuchillos, licuadoras, hornos. Son las herramientas (`bash`, `write_file`, `read_file`). El chef las usa para manipular los ingredientes. No puede cocinar sin ellas.
 *   **La Vitrina (Vista previa de imágenes):** Al pegar una imagen, la TUI la muestra con `HalfcellImage` si `TERM_PROGRAM=WarpTerminal` y con `TerminalImage` en los demás terminales; el archivo se envía al modelo en Base64 (`image/png` para PNG, `image/jpeg` para el resto).
-*   **Las Comandas Guardadas (Las Sesiones / `SessionManager`):** Cada vez que el restaurante cierra, se guardan las comandas en un libro (archivos JSON en `.harness/sessions/`). Al día siguiente, el chef lee la última comanda y sabe exactamente en qué mesa se quedó trabajando.
+*   **Las Comandas Guardadas (Las Sesiones / `SessionManager`):** Cada vez que el restaurante cierra, se guardan las comandas en un libro (archivos JSON en `.harness/sessions/`). Al día siguiente, el chef lee la última comanda y sabe exactamente en qué mesa se quedó trabajando. El libro solo acepta nombres de comanda simples, sin rutas; una comanda ilegible cuenta como vacía y las notas de sistema escritas en el libro nunca sustituyen las reglas que el chef ya trae en la mesa.
 
 ## 📖 Las Instrucciones (La Información)
 

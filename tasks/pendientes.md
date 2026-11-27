@@ -7,12 +7,6 @@
 
 ## P0 — Bloqueantes (seguridad e integridad de datos)
 
-### P0.4 Sanear IDs de sesión y validar el historial cargado
-- **Problema:** `app/core/harness/session.py` construye rutas con el ID del usuario sin validar; `app/tui/app.py` inyecta como `system` mensajes de un JSON manipulado.
-- **Criterio:** IDs rechazados si contienen `/`, `..` o son absolutos; `load()` filtra/desarma mensajes `system`; JSON corrupto no revienta `on_mount`. Tests para `/session load ../../mcp_config` y para un session file con `role: system`.
-- **Prueba en TUI prevista:** `/session load ../../mcp_config` → rechazado sin tocar otros JSON; meter un mensaje `role: system` en una sesión, reiniciar la TUI → el system prompt no se sustituye.
-- **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
-
 ### P0.5 No filtrar secretos a servidores MCP y fijar versiones
 - **Problema:** `app/mcp/client.py` copia `os.environ` completo (API keys, Langfuse) en cada servidor; `mcp_config.json` usa `uvx`/`npx` sin versión fija.
 - **Criterio:** allowlist explícita de variables por servidor, sin secretos por defecto; versiones pinnadas; test que compruebe que las claves no aparecen en `client.env`.

@@ -1,5 +1,5 @@
 import json
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import AsyncMock, MagicMock, patch, mock_open
 
 import pytest
 from app.core.harness.permissions import PermissionGate, Decision
@@ -97,6 +97,46 @@ async def test_permission_gate_ask_user_always():
     decision2 = await gate.check("danger_tool", {})
     assert decision2 == Decision.ALLOW
     assert "danger_tool" in gate.session_allowed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("approved,approved_args,other,other_args", [
+    ("bash:grep *.log", {"command": "grep *.log"},
+     "bash:grep secrets.log", {"command": "grep secrets.log"}),
+    ("bash:grep ?.log", {"command": "grep ?.log"},
+     "bash:grep 1.log", {"command": "grep 1.log"}),
+    ("bash:cat [ab].txt", {"command": "cat [ab].txt"},
+     "bash:cat a.txt", {"command": "cat a.txt"}),
+    ("bash:grep *.log", {"command": "grep *.log"},
+     "bash:grep .env", {"command": "grep .env"}),
+])
+async def test_permission_gate_approved_signature_is_literal(
+        approved, approved_args, other, other_args):
+    """P0.3: los metacaracteres de una firma aprobada no son comodines."""
+    ask_user = AsyncMock(return_value="n")
+    gate = PermissionGate(ask_user=ask_user)
+    gate.session_allowed.add(approved)
+
+    assert await gate.check("bash", approved_args) == Decision.ALLOW
+    assert await gate.check("bash", other_args) == Decision.DENY
+    ask_user.assert_awaited_once()
+    assert ask_user.await_args.args[1] == other
+    assert gate.session_allowed == {approved}
+
+
+@pytest.mark.asyncio
+async def test_permission_gate_persisted_approval_is_literal(tmp_path):
+    """P0.3: tras reiniciar y recargar permissions.json la firma sigue siendo literal."""
+    persist_file = tmp_path / "permissions.json"
+    persist_file.write_text(
+        json.dumps({"session_allowed": ["bash:grep *.log"]}), encoding="utf-8")
+    ask_user = AsyncMock(return_value="n")
+    gate = PermissionGate(ask_user=ask_user, persist_file=persist_file)
+
+    assert await gate.check("bash", {"command": "grep *.log"}) == Decision.ALLOW
+    assert await gate.check("bash", {"command": "grep secrets.log"}) == Decision.DENY
+    assert await gate.check("bash", {"command": "grep .env"}) == Decision.DENY
+    assert ask_user.await_count == 2
 
 
 @pytest.mark.asyncio

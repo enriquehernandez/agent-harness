@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from app.tui.app import AgentHarnessApp, FileAwareInput, run_tui
@@ -1540,3 +1541,39 @@ async def test_reviewer_subagent_asks_for_bash_in_tui():
 
     assert result.success is True
     assert "allow" in result.content
+
+
+@pytest.mark.asyncio
+async def test_tui_persisted_approval_is_literal_after_restart(tmp_path, monkeypatch):
+    """P0.3: aprobar con «a» en la TUI no convierte la firma en un glob."""
+    from app.core.harness.permissions import Decision, PermissionGate
+    from app.tui.modals.permission import PermissionModal
+
+    monkeypatch.chdir(tmp_path)
+    persist_file = tmp_path / ".harness" / "permissions.json"
+    app = AgentHarnessApp()
+
+    async def approve():
+        gate = PermissionGate(
+            ask_user=app.request_permission, persist_file=persist_file)
+        return await gate.check("bash", {"command": "grep *.log"})
+
+    with patch.object(app, "initialize_agent", new_callable=AsyncMock):
+        async with app.run_test() as pilot:
+            worker = app.run_worker(approve())
+            await pilot.pause()
+            assert any(isinstance(screen, PermissionModal)
+                       for screen in app.screen_stack)
+            await pilot.press("a")
+            await pilot.pause()
+            assert await worker.wait() == Decision.ALLOW
+
+    persisted = json.loads(persist_file.read_text(encoding="utf-8"))
+    assert persisted["session_allowed"] == ["bash:grep *.log"]
+
+    # Reinicio de la TUI: un gate nuevo lee el JSON y solo acepta la firma exacta.
+    restarted = PermissionGate(
+        ask_user=AsyncMock(return_value="n"), persist_file=persist_file)
+    assert await restarted.check("bash", {"command": "grep *.log"}) == Decision.ALLOW
+    assert await restarted.check("bash", {"command": "grep secrets.log"}) == Decision.DENY
+    assert await restarted.check("bash", {"command": "grep .env"}) == Decision.DENY

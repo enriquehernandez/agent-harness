@@ -1,6 +1,5 @@
 import difflib
 import json
-import fnmatch
 from pathlib import Path
 from app.core.config import settings
 from app.core.logger import logger
@@ -89,10 +88,13 @@ class PermissionGate:
         return tool_name
 
     def _is_allowed(self, signature: str) -> bool:
-        for allowed in self.session_allowed:
-            if fnmatch.fnmatch(signature, allowed):
-                return True
-        return False
+        """Una aprobación autoriza exactamente la firma guardada, nunca un glob.
+
+        `y` aprueba una sola llamada; `a` persiste esa firma textual. Si el usuario
+        aprueba `bash:grep *.log`, solo `grep *.log` queda autorizado: `*`, `?` y
+        `[...]` se comparan como caracteres literales, no como patrones.
+        """
+        return signature in self.session_allowed
 
     def _generate_diff(self, args: dict) -> str | None:
         if "path" in args and "content" in args:

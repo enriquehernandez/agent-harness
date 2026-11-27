@@ -12,12 +12,6 @@
 - **Prueba en TUI prevista:** Pedir un comando con `capture_snapshot.py`, aprobarlo con «y» → el comando mostrado en F1 debe ser exactamente el aprobado; sin escritura de `observations.json` sin permiso.
 - **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
 
-### P0.3 Tratar las aprobaciones persistentes como texto literal
-- **Problema:** `fnmatch(signature, allowed)` (`app/core/harness/permissions.py:84-95`) convierte comandos aprobados con `*`, `?` o `[...]` en patrones glob que autorizan otros comandos.
-- **Criterio:** comparación exacta (o escape del patrón con `re.escape`). Test: aprobar `bash:grep *.log` no autoriza `bash:grep .env`.
-- **Prueba en TUI prevista:** Aprobar `bash:grep *.log` con «a», reiniciar la TUI y pedir `grep .env` → debe volver a preguntar (hoy queda autorizado por el glob).
-- **DoD:** ⛔ pendiente — se completa al pasar a `tasks/actual.md` y cerrar en `tasks/completadas.md`.
-
 ### P0.4 Sanear IDs de sesión y validar el historial cargado
 - **Problema:** `session.py:11-13,92-97` construye rutas con el ID del usuario sin validar; `app/tui/app.py:108-119` inyecta como `system` mensajes de un JSON manipulado.
 - **Criterio:** IDs rechazados si contienen `/`, `..` o son absolutos; `load()` filtra/desarma mensajes `system`; JSON corrupto no revienta `on_mount`. Tests para `/session load ../../mcp_config` y para un session file con `role: system`.
